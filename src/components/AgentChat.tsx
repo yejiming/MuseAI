@@ -215,10 +215,31 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose }) => {
     }
 
     const isFirstUserMessage = !messages.some((message) => message.role === 'user');
-    const nextTitle = isFirstUserMessage ? summarizeSessionTitle(trimmed) : sessionTitle;
     if (isFirstUserMessage) {
-      sessionTitleRef.current = nextTitle;
-      setSessionTitle(nextTitle);
+      const fallbackTitle = summarizeSessionTitle(trimmed);
+      sessionTitleRef.current = fallbackTitle;
+      setSessionTitle(fallbackTitle);
+
+      // Background LLM title generation
+      invoke<string>('summarize_text', {
+        request: {
+          modelInterface: settings.modelInterface,
+          baseUrl: settings.llmBaseUrl,
+          apiKey: settings.llmApiKey,
+          model: settings.llmModel,
+          temperature: settings.temperature,
+          maxOutputTokens: 64,
+          text: trimmed,
+        },
+      }).then((generatedTitle) => {
+        const currentId = sessionIdRef.current;
+        sessionTitleRef.current = generatedTitle;
+        setSessionTitle(generatedTitle);
+        void invoke('update_agent_session_title', { id: currentId, title: generatedTitle });
+        void refreshSessions();
+      }).catch(() => {
+        // Keep fallback title on generation failure
+      });
     }
 
     const userMessage: Message = {

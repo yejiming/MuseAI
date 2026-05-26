@@ -92,6 +92,18 @@ pub struct ChatStreamRequest {
     selected_reference_library_ids: Option<Vec<String>>,
 }
 
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummarizeRequest {
+    model_interface: String,
+    base_url: String,
+    api_key: String,
+    model: String,
+    temperature: Option<f32>,
+    max_output_tokens: Option<u32>,
+    text: String,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatStreamEvent {
@@ -674,6 +686,125 @@ fn save_agent_session(
         id: session.id,
         title: session.title,
         saved_at: session.saved_at,
+    })
+}
+
+#[tauri::command]
+async fn summarize_text(request: SummarizeRequest) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let system_prompt = "请用不超过8个字的简短标题概括用户提供的文本，只返回标题本身，不要加引号、标点或其他格式。";
+    let max_tokens = request.max_output_tokens.unwrap_or(64).min(128);
+
+    match request.model_interface.as_str() {
+        "Anthropic-compatible" => {
+            let endpoint = build_anthropic_endpoint(&request.base_url);
+            let body = json!({
+                "model": request.model,
+                "messages": [{"role": "user", "content": request.text}],
+                "system": system_prompt,
+                "stream": false,
+                "temperature": request.temperature.unwrap_or(0.3),
+                "max_tokens": max_tokens,
+            });
+
+            let response = client
+                .post(&endpoint)
+                .header("x-api-key", &request.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body_text = response.text().await.unwrap_or_default();
+                return Err(format!("Anthropic 接口请求失败：{} {}", status, body_text));
+            }
+
+            let json: Value = response.json().await.map_err(|e| e.to_string())?;
+            let content = json
+                .get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.iter().find(|item| item.get("type") == Some(&json!("text"))))
+                .and_then(|text_block| text_block.get("text"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .trim()
+                .trim_matches(|c| c == '"' || c == '\'' || c == '「' || c == '」' || c == '『' || c == '』')
+                .to_string();
+
+            if content.is_empty() {
+                return Err(String::from("生成标题为空"));
+            }
+            Ok(content)
+        }
+        _ => {
+            let endpoint = build_openai_endpoint(&request.base_url);
+            let messages = vec![
+                json!({"role": "system", "content": system_prompt}),
+                json!({"role": "user", "content": request.text}),
+            ];
+            let body = json!({
+                "model": request.model,
+                "messages": messages,
+                "stream": false,
+                "temperature": request.temperature.unwrap_or(0.3),
+                "max_tokens": max_tokens,
+            });
+
+            let response = client
+                .post(&endpoint)
+                .bearer_auth(&request.api_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body_text = response.text().await.unwrap_or_default();
+                return Err(format!("OpenAI 兼容接口请求失败：{} {}", status, body_text));
+            }
+
+            let json: Value = response.json().await.map_err(|e| e.to_string())?;
+            let content = json
+                .get("choices")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|choice| choice.get("message"))
+                .and_then(|msg| msg.get("content"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .trim()
+                .trim_matches(|c| c == '"' || c == '\'' || c == '「' || c == '」' || c == '『' || c == '』')
+                .to_string();
+
+            if content.is_empty() {
+                return Err(String::from("生成标题为空"));
+            }
+            Ok(content)
+        }
+    }
+}
+
+#[tauri::command]
+fn update_agent_session_title(
+    app: AppHandle,
+    id: String,
+    title: String,
+) -> Result<AgentSessionSummary, String> {
+    let path = agent_session_path(&app, &id)?;
+    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut record: AgentSessionRecord = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    record.title = title;
+    record.saved_at = now_millis()?;
+    let updated_text = serde_json::to_string_pretty(&record).map_err(|e| e.to_string())?;
+    fs::write(path, updated_text).map_err(|e| e.to_string())?;
+    Ok(AgentSessionSummary {
+        id: record.id,
+        title: record.title,
+        saved_at: record.saved_at,
     })
 }
 
@@ -2458,6 +2589,8 @@ pub fn run() {
             list_agent_sessions,
             load_agent_session,
             save_agent_session,
+            summarize_text,
+            update_agent_session_title,
             start_chat_completion_stream,
             import_skill,
             delete_skill,

@@ -10,7 +10,7 @@ const MIN_FILE_TREE_WIDTH = 250;
 const MAX_FILE_TREE_WIDTH = 420;
 const EDITOR_MIN_WIDTH = 400;
 const MIN_AGENT_WIDTH = 380;
-const DEFAULT_AGENT_WIDTH = 560;
+const DEFAULT_AGENT_WIDTH = 420;
 const MAX_AGENT_WIDTH = 860;
 
 const Works: React.FC = () => {
