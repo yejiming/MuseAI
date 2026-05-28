@@ -122,7 +122,7 @@ const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = ({ title, dirType,
       const selected = await open({
         directory: isDirectory,
         multiple: false,
-        filters: isDirectory ? undefined : [{ name: '文档和图片', extensions: ['md', 'txt'] }],
+        filters: isDirectory ? undefined : [{ name: '文档和图片', extensions: ['md', 'txt', 'png', 'jpg', 'jpeg'] }],
       });
       
       if (!selected) return;
