@@ -443,7 +443,6 @@ const DeAi: React.FC = () => {
               checkable
               checkedKeys={selectedDetectorReferences}
               className="de-ai-reference-picker__tree"
-              defaultExpandAll
               onCheck={(checkedKeys) => {
                 const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
                 setSelectedDetectorReferences(keys.map(String).filter((key) => allReferenceFiles.includes(key)));

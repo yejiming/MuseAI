@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Tooltip, Dropdown, Tag, Mentions, Modal, Tree, Empty } from 'antd';
+import { Button, Tooltip, Dropdown, Tag, Input, Cascader, Form, Modal, Tree, Empty } from 'antd';
 import { BulbOutlined, CloseOutlined, HistoryOutlined, PlusCircleOutlined, RobotOutlined, StopOutlined, ToolOutlined, UnorderedListOutlined, SettingOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -66,7 +66,6 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
 
   const settings = useSettingsStore();
   const chatHistoryRef = useRef<HTMLDivElement>(null);
-  const [textareaScroll, setTextareaScroll] = useState(0);
 
   const currentThinkingIdRef = useRef<string | null>(null);
   const activeRunRef = useRef(activeRun);
@@ -76,7 +75,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
   const sessionTitleRef = useRef(sessionTitle);
   const todosRef = useRef(todos);
 
-  const [isReferenceSettingsOpen, setIsReferenceSettingsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [allReferenceFiles, setAllReferenceFiles] = useState<string[]>([]);
   const [referenceTree, setReferenceTree] = useState<any[]>([]);
   const [referenceFilesLoaded, setReferenceFilesLoaded] = useState(false);
@@ -90,15 +89,6 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     invoke<SkillDefinition[]>('get_skills').then(setSkills).catch(console.error);
     void refreshSessions();
   }, []);
-
-  React.useEffect(() => {
-    const textarea = document.querySelector('.agent-composer__textarea textarea');
-    if (textarea) {
-      const handleScroll = (e: any) => setTextareaScroll(e.target.scrollTop);
-      textarea.addEventListener('scroll', handleScroll);
-      return () => textarea.removeEventListener('scroll', handleScroll);
-    }
-  }, [input]);
 
   useEffect(() => {
     selectedReferenceFilesRef.current = selectedReferenceFiles;
@@ -236,7 +226,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     const fetchRef = async () => {
       try {
         setReferenceFilesLoaded(false);
-        const dir = await invoke<string>('get_de_ai_dir', { isReference: true });
+        const dir = await invoke<string>('get_workspace_dir', { dirType: 'references' });
         
         const fetchTree = async (path: string): Promise<any[]> => {
           const items = await invoke<any[]>('list_dir', { path });
@@ -270,10 +260,10 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
         setReferenceFilesLoaded(true);
       }
     };
-    if (isReferenceSettingsOpen && !referenceFilesLoaded) {
+    if (isSettingsOpen && !referenceFilesLoaded) {
       fetchRef();
     }
-  }, [isReferenceSettingsOpen, referenceFilesLoaded]);
+  }, [isSettingsOpen, referenceFilesLoaded]);
 
   useEffect(() => {
     if (!referenceFilesLoaded) return;
@@ -329,6 +319,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
       role: 'user',
       content: trimmed,
       tools: [],
+      articleType: settings.articleType?.join('-') || '默认',
     };
     const agentMessageId = `msg-${Date.now() + 1}`;
     const pendingAgentMessage: Message = {
@@ -344,7 +335,16 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     setIsStreaming(true);
     scrollToBottomOnce();
 
-    const mentionedSkills = skills.filter(s => trimmed.includes(`/${s.name}`));
+    const articleTypeStr = settings.articleType?.join('-') || '';
+    const mentionedSkillNames: string[] = [];
+    if (articleTypeStr === '男频-长篇-玄幻脑洞') {
+      mentionedSkillNames.push('fanqie-xuanhuan-writer');
+    } else if (articleTypeStr === '女频-短篇-虐心婚恋') {
+      mentionedSkillNames.push('fanqie-short-nuexin-writer');
+    } else if (articleTypeStr === '公众号') {
+      mentionedSkillNames.push('kitt-writer');
+    }
+    const mentionedSkills = skills.filter(s => mentionedSkillNames.includes(s.name));
 
     try {
       const runId = await invoke<string>('start_chat_completion_stream', {
@@ -513,33 +513,73 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
   return (
     <div className="agent-chat">
       <Modal
-        title="选择参考范文"
-        open={isReferenceSettingsOpen}
+        title="写文章 Agent 设置"
+        open={isSettingsOpen}
         okText="确定"
         cancelText="取消"
         width={640}
-        onCancel={() => setIsReferenceSettingsOpen(false)}
-        onOk={() => setIsReferenceSettingsOpen(false)}
+        onCancel={() => setIsSettingsOpen(false)}
+        onOk={() => setIsSettingsOpen(false)}
       >
-        <div className="de-ai-reference-picker">
-          {allReferenceFiles.length > 0 ? (
-            <Tree
-              blockNode
-              checkable
-              checkedKeys={selectedReferenceFiles}
-              className="de-ai-reference-picker__tree"
-              defaultExpandAll
-              onCheck={(checkedKeys) => {
-                const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
-                setSelectedReferenceFiles(keys.map(String).filter((key) => allReferenceFiles.includes(key)));
-              }}
-              selectable={false}
-              treeData={mapReferenceTreeData(referenceTree)}
+        <Form layout="vertical">
+          <Form.Item label="文章类型">
+            <Cascader
+              value={settings.articleType}
+              onChange={(val) => settings.setArticleType(val as string[])}
+              options={[
+                {
+                  value: '男频',
+                  label: '男频',
+                  children: [
+                    {
+                      value: '长篇',
+                      label: '长篇',
+                      children: [{ value: '玄幻脑洞', label: '玄幻脑洞' }],
+                    },
+                  ],
+                },
+                {
+                  value: '女频',
+                  label: '女频',
+                  children: [
+                    {
+                      value: '短篇',
+                      label: '短篇',
+                      children: [{ value: '虐心婚恋', label: '虐心婚恋' }],
+                    },
+                  ],
+                },
+                {
+                  value: '公众号',
+                  label: '公众号',
+                },
+              ]}
+              placeholder="请选择文章类型"
+              style={{ width: '100%' }}
             />
-          ) : (
-            <Empty description="范文目录暂无可选文件" />
-          )}
-        </div>
+          </Form.Item>
+          
+          <Form.Item label="选择参考范文" style={{ marginBottom: 0 }}>
+            <div className="de-ai-reference-picker">
+              {allReferenceFiles.length > 0 ? (
+                <Tree
+                  blockNode
+                  checkable
+                  checkedKeys={selectedReferenceFiles}
+                  className="de-ai-reference-picker__tree"
+                  onCheck={(checkedKeys) => {
+                    const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
+                    setSelectedReferenceFiles(keys.map(String).filter((key) => allReferenceFiles.includes(key)));
+                  }}
+                  selectable={false}
+                  treeData={mapReferenceTreeData(referenceTree)}
+                />
+              ) : (
+                <Empty description="范文目录暂无可选文件" />
+              )}
+            </div>
+          </Form.Item>
+        </Form>
       </Modal>
 
       <div className="agent-chat__header">
@@ -651,24 +691,17 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
                   }
                   
                   let displayPart = part;
-                  if (skills.length > 0) {
-                    const skillNamesPattern = skills.map(s => s.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-                    displayPart = displayPart.replace(new RegExp(`(/(${skillNamesPattern}))\\b`, 'g'), '[$1](#skill)');
-                  }
 
                   return part.trim() ? (
                     <div className="agent-markdown" key={`md-${i}`}>
-                      <ReactMarkdown 
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          a: ({node, ...props}) => {
-                            if (props.href === '#skill') {
-                              return <Tag color="purple" style={{ margin: '0 2px' }}>{props.children}</Tag>;
-                            }
-                            return <a {...props} />
-                          }
-                        }}
-                      >
+                      {i === 0 && msg.articleType && msg.articleType !== '默认' && (
+                        <div style={{ marginBottom: 8 }}>
+                          <Tag color="orange" style={{ border: 'none', background: 'rgba(217, 119, 87, 0.1)', color: '#d97757', fontWeight: 500 }}>
+                            {msg.articleType}
+                          </Tag>
+                        </div>
+                      )}
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {displayPart}
                       </ReactMarkdown>
                     </div>
@@ -724,102 +757,35 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
           </div>
         )}
         <div id="agent-composer-box" className="agent-composer__box" style={{ position: 'relative' }}>
-          <div 
-            className="agent-composer__highlights"
-            style={{
-              position: 'absolute',
-              top: 12, left: 12, right: 12, bottom: 50, // bottom padding space for actions
-              pointerEvents: 'none',
-              overflow: 'hidden',
-              whiteSpace: 'pre-wrap',
-              wordWrap: 'break-word',
-              color: 'transparent',
-              zIndex: 1,
-            }}
-          >
-            <div style={{ transform: `translateY(-${textareaScroll}px)` }}>
-              {(() => {
-                if (!skills.length || !input) return input;
-                const skillNamesPattern = skills.map(s => s.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-                const regex = new RegExp(`(/(${skillNamesPattern}))\\b`, 'g');
-                const parts = input.split(regex);
-                const result = [];
-                let i = 0;
-                while (i < parts.length) {
-                  result.push(parts[i]);
-                  if (i + 1 < parts.length) {
-                    result.push(
-                      <span key={i} style={{ backgroundColor: 'rgba(217, 119, 87, 0.2)', borderRadius: 4 }}>
-                        {parts[i + 1]}
-                      </span>
-                    );
-                  }
-                  i += 3;
-                }
-                return result;
-              })()}
-              {/* add trailing space to ensure empty lines measure correctly */}
-              {'\n'}
+          {settings.articleType && settings.articleType.length > 0 && settings.articleType.join('-') !== '默认' && (
+            <div style={{ padding: '12px 12px 0 12px' }}>
+              <Tag color="orange" style={{ border: 'none', background: 'rgba(217, 119, 87, 0.1)', color: '#d97757', fontWeight: 500 }}>
+                {settings.articleType.join('-')}
+              </Tag>
             </div>
-          </div>
-
-          <Mentions
-            prefix="/"
-            placement="top"
-            popupClassName="agent-chat-skill-popup"
-            getPopupContainer={() => document.getElementById('agent-composer-box') as HTMLElement}
+          )}
+          <Input.TextArea
             className="agent-composer__textarea"
             autoSize={{ minRows: 1, maxRows: 8 }}
-            onChange={setInput}
-            style={{ zIndex: 2, position: 'relative', background: 'transparent' }}
+            onChange={(e) => setInput(e.target.value)}
+            style={{ zIndex: 2, position: 'relative', background: 'transparent', boxShadow: 'none', border: 'none' }}
             onKeyDown={(event) => {
-              if (event.key === 'Tab') {
-                const target = event.target as HTMLTextAreaElement;
-                const cursorPosition = target.selectionStart;
-                const textBeforeCursor = input.slice(0, cursorPosition);
-                const match = textBeforeCursor.match(/\/([a-zA-Z0-9_-]*)$/);
-                if (match) {
-                  const query = match[1];
-                  const matchedSkill = skills.find(s => s.name.toLowerCase().startsWith(query.toLowerCase()));
-                  if (matchedSkill) {
-                    event.preventDefault();
-                    const newText = input.slice(0, cursorPosition - query.length) + matchedSkill.name + ' ' + input.slice(cursorPosition);
-                    setInput(newText);
-                    setTimeout(() => {
-                      const newPos = cursorPosition - query.length + matchedSkill.name.length + 1;
-                      target.setSelectionRange(newPos, newPos);
-                    }, 0);
-                    return;
-                  }
-                }
-              }
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
                 void handleSend();
               }
             }}
-            placeholder="与 Agent 对话，或使用 / 唤起技能..."
+            placeholder="与 Agent 对话，或按 Cmd/Ctrl + Enter 发送..."
             value={input}
-            options={skills.map(skill => ({
-              value: skill.name,
-              label: (
-                <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                  <strong style={{ flexShrink: 0 }}>{skill.name}</strong>
-                  <span style={{ flex: 1, fontSize: 12, color: '#888', marginLeft: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {skill.description}
-                  </span>
-                </div>
-              ),
-            }))}
           />
           <div className="agent-composer__actions">
             <Button
-              aria-label="选择范文"
+              aria-label="Agent 设置"
               className="de-ai-agent-settings-button"
               icon={<SettingOutlined />}
-              onClick={() => setIsReferenceSettingsOpen(true)}
+              onClick={() => setIsSettingsOpen(true)}
               shape="circle"
-              title="选择范文"
+              title="Agent 设置"
               type={selectedReferenceFiles.length > 0 ? 'primary' : 'default'}
             />
             <div className="agent-send-cluster">

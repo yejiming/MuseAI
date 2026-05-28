@@ -268,6 +268,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
           maxContextTokens: settings.agentConfigs?.[agentId]?.maxContextTokens ?? settings.maxContextTokens,
           thinkingDepth: settings.agentConfigs?.[agentId]?.thinkingDepth ?? settings.thinkingDepth,
           systemPrompt: systemPrompt,
+          workspacePath: settings.worksDirectory,
           messages: [...historyMessages, userMessage].map(m => ({ role: m.role, content: m.content })),
           allowedTools: allowedTools,
           allowedWritePaths: resolvedAllowedWritePaths,

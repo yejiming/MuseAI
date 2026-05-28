@@ -20,6 +20,7 @@ export interface Message {
   thinking?: string;
   thinkingBlocks?: ThinkingBlock[];
   tools?: AgentToolEntry[];
+  articleType?: string;
 }
 
 export interface AgentTodo {

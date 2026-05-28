@@ -1,8 +1,6 @@
 import React from 'react';
-import { Form, Input, Button, InputNumber, Divider, List, Typography, Popconfirm, Select, message, Anchor } from 'antd';
-import { DeleteOutlined, CodeOutlined } from '@ant-design/icons';
+import { Form, Input, Button, InputNumber, Divider, Typography, Select, message, Anchor } from 'antd';
 import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-dialog';
 import {
   useSettingsStore,
   defaultSystemPrompt,
@@ -10,11 +8,6 @@ import {
   defaultDeAiRemoverPrompt,
 } from '../stores/useSettingsStore';
 
-interface SkillDefinition {
-  name: string;
-  description: string;
-  path: string;
-}
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -54,10 +47,6 @@ const Settings: React.FC = () => {
   
   const [modelForm] = Form.useForm();
   const [promptForm] = Form.useForm();
-  const [skillForm] = Form.useForm();
-
-  const [skills, setSkills] = React.useState<SkillDefinition[]>([]);
-  const [importingSkill, setImportingSkill] = React.useState(false);
   const [selectedAgentId, setSelectedAgentId] = React.useState<string>('global');
 
   const agentOptions = [
@@ -67,9 +56,6 @@ const Settings: React.FC = () => {
     { value: 'remover', label: '去除AI味Agent' },
   ];
 
-  React.useEffect(() => {
-    invoke<SkillDefinition[]>('get_skills').then(setSkills).catch(console.error);
-  }, []);
 
   React.useEffect(() => {
     if (selectedAgentId === 'global') {
@@ -147,42 +133,7 @@ const Settings: React.FC = () => {
     message.success('已恢复默认提示词');
   };
 
-  const handleSelectSkillPath = async () => {
-    try {
-      const selected = await open({ directory: true, multiple: false });
-      if (selected && typeof selected === 'string') {
-        skillForm.setFieldsValue({ path: selected });
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
-  const handleImportSkill = async (values: { path: string }) => {
-    try {
-      setImportingSkill(true);
-      const newSkill = await invoke<SkillDefinition>('import_skill', { path: values.path });
-      setSkills(prev => [...prev.filter(s => s.name !== newSkill.name), newSkill]);
-      skillForm.resetFields();
-      message.success(`成功导入 Skill: ${newSkill.name}`);
-    } catch (err: any) {
-      console.error(err);
-      message.error(err.toString());
-    } finally {
-      setImportingSkill(false);
-    }
-  };
-
-  const handleDeleteSkill = async (name: string) => {
-    try {
-      await invoke('delete_skill', { name });
-      setSkills(prev => prev.filter(s => s.name !== name));
-      message.success('已删除 Skill');
-    } catch (err: any) {
-      console.error(err);
-      message.error(err.toString());
-    }
-  };
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: '#faf9f5' }}>
@@ -194,7 +145,6 @@ const Settings: React.FC = () => {
           items={[
             { key: 'model-config', href: '#model-config', title: '模型配置' },
             { key: 'system-prompt', href: '#system-prompt', title: '系统提示词' },
-            { key: 'skill-libraries', href: '#skill-libraries', title: '技能库' },
           ]}
         />
       </div>
@@ -380,72 +330,7 @@ const Settings: React.FC = () => {
           </Form>
         </section>
 
-        <Divider style={{ borderColor: '#eae6df', margin: '40px 0' }} />
 
-        {/* Skill库配置区域 */}
-        <section id="skill-libraries">
-          <Title level={4} style={{ color: '#d97757', marginBottom: 24 }}>技能库 (Skill Libraries)</Title>
-          <Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
-            导入本地包含 SKILL.md 的技能文件夹。导入后会复制到系统应用目录中，并允许 AI 工具调用。
-          </Text>
-
-          <Form
-            form={skillForm}
-            layout="inline"
-            onFinish={handleImportSkill}
-            style={{ marginBottom: 32 }}
-          >
-            <Form.Item 
-              name="path" 
-              rules={[{ required: true, message: '请输入本地技能文件夹路径' }]}
-              style={{ flex: '1 1 300px', marginBottom: 16 }}
-            >
-              <Input 
-                placeholder="点击选择技能文件夹..." 
-                prefix={<CodeOutlined style={{ color: '#bfbfbf' }} />} 
-                onClick={handleSelectSkillPath}
-                readOnly
-              />
-            </Form.Item>
-            <Form.Item style={{ marginBottom: 16 }}>
-              <Button type="primary" htmlType="submit" ghost loading={importingSkill}>
-                导入 Skill
-              </Button>
-            </Form.Item>
-          </Form>
-
-          <List
-            itemLayout="horizontal"
-            dataSource={skills}
-            locale={{ emptyText: '暂无技能，请在上方导入' }}
-            renderItem={(item) => (
-              <List.Item
-                actions={[
-                  <Popconfirm
-                    key="delete"
-                    title="确认删除此技能？"
-                    onConfirm={() => handleDeleteSkill(item.name)}
-                    okText="是"
-                    cancelText="否"
-                  >
-                    <Button type="text" danger icon={<DeleteOutlined />} />
-                  </Popconfirm>
-                ]}
-                style={{ borderBottom: '1px solid #eae6df', padding: '16px 0' }}
-              >
-                <List.Item.Meta
-                  title={<span style={{ fontWeight: 500 }}>{item.name}</span>}
-                  description={
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <Text type="secondary">{item.description}</Text>
-                      <Text type="secondary" copyable style={{ fontSize: 12 }}>{item.path}</Text>
-                    </div>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-        </section>
 
         </div>
       </div>

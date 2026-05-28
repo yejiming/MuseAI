@@ -28,6 +28,7 @@ export interface SettingsState {
 
   worksDirectory: string | null;
   agentConfigs: Record<string, AgentConfig>;
+  articleType: string[];
 
   setLlmConfig: (config: Partial<SettingsState>) => void;
   setAgentConfig: (agentId: string, config: Partial<AgentConfig>) => void;
@@ -39,6 +40,7 @@ export interface SettingsState {
   resetDeAiRemoverPrompt: () => void;
 
   setWorksDirectory: (dir: string | null) => void;
+  setArticleType: (type: string[]) => void;
 }
 
 export const defaultSystemPrompt = `你是一名有着20年网文写作经验的资深网文作者，专门在番茄小说上写各类长篇、短篇小说，以及在微信公众号写文章。
@@ -143,6 +145,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       worksDirectory: null,
       agentConfigs: {},
+      articleType: ['男频', '长篇', '玄幻脑洞'],
 
       setLlmConfig: (config) => set((state) => ({ ...state, ...config })),
 
@@ -171,13 +174,18 @@ export const useSettingsStore = create<SettingsState>()(
 
 
       setWorksDirectory: (dir) => set({ worksDirectory: dir }),
+      setArticleType: (type) => set({ articleType: type }),
     }),
     {
       name: 'museai-settings-storage',
-      version: 1,
-      migrate: (persistedState) => {
+      version: 2,
+      partialize: (state) => {
+        const { worksDirectory: _, ...rest } = state;
+        return rest as SettingsState;
+      },
+      migrate: (persistedState, version) => {
         const state = persistedState as Partial<SettingsState>;
-        return {
+        const base = {
           ...state,
           deAiDetectorPrompt: !state.deAiDetectorPrompt || state.deAiDetectorPrompt === legacyDeAiDetectorPrompt
             ? defaultDeAiDetectorPrompt
@@ -186,6 +194,10 @@ export const useSettingsStore = create<SettingsState>()(
             ? defaultDeAiRemoverPrompt
             : state.deAiRemoverPrompt,
         };
+        if (version < 2) {
+          return { ...base, worksDirectory: null };
+        }
+        return base;
       },
     }
   )

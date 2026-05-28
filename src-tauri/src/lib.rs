@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::sync::OnceLock;
@@ -2257,8 +2257,10 @@ async fn execute_agent_tool_inner(
 
     match tool_name {
         "read" => {
+            let file_path = required_string(input, "file_path")?;
+            ensure_read_path_allowed(app, request.workspace_path.as_deref(), &file_path)?;
             let result = tool_read(
-                required_string(input, "file_path")?,
+                file_path,
                 optional_usize(input, "offset"),
                 optional_usize(input, "limit"),
                 request.workspace_path.clone(),
@@ -2295,18 +2297,26 @@ async fn execute_agent_tool_inner(
             bash_result_to_agent_execution(result).map(|output| (output, None))
         }
         "grep" => {
+            let path = optional_string(input, "path");
+            if let Some(ref p) = path {
+                ensure_read_path_allowed(app, request.workspace_path.as_deref(), p)?;
+            }
             let result = tool_grep(
                 required_string(input, "pattern")?,
-                optional_string(input, "path"),
+                path,
                 optional_string(input, "include"),
                 request.workspace_path.clone(),
             );
             result_to_agent_execution(result).map(|output| (output, None))
         }
         "glob" => {
+            let path = optional_string(input, "path");
+            if let Some(ref p) = path {
+                ensure_read_path_allowed(app, request.workspace_path.as_deref(), p)?;
+            }
             let result = tool_glob(
                 required_string(input, "pattern")?,
-                optional_string(input, "path"),
+                path,
                 request.workspace_path.clone(),
             );
             result_to_agent_execution(result).map(|output| (output, None))
@@ -2634,8 +2644,9 @@ fn build_workspace_context(request: &ChatStreamRequest) -> String {
             lines.push(String::from("\n## 范文参考"));
             lines.push(String::from("用户为你提供了以下范文作为写作参考，请仔细研读并在写作中参考其风格和结构："));
             for file_path in files {
-                if let Ok(content) = std::fs::read_to_string(file_path) {
-                    lines.push(format!("\n### 范文：{}\n```\n{}\n```", file_path, content));
+                let resolved_path = expand_path(request.workspace_path.as_deref(), file_path);
+                if let Ok(content) = std::fs::read_to_string(&resolved_path) {
+                    lines.push(format!("\n### 范文：{}\n```\n{}\n```", resolved_path.display(), content));
                 }
             }
         }
@@ -2825,6 +2836,52 @@ fn ensure_write_path_allowed(request: &ChatStreamRequest, file_path: &str) -> Re
         Err(format!(
             "Error: this Agent run can only write the selected version file. Refused write to {}",
             requested_path
+        ))
+    }
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::Prefix(p) => result.push(p.as_os_str()),
+            std::path::Component::RootDir => result.push("/"),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                result.pop();
+            }
+            std::path::Component::Normal(name) => result.push(name),
+        }
+    }
+    result
+}
+
+fn ensure_read_path_allowed(
+    app: &AppHandle,
+    workspace: Option<&str>,
+    file_path: &str,
+) -> Result<(), String> {
+    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let museai_dir = doc_dir.join("MuseAI");
+
+    let resolved = expand_path(workspace, file_path);
+    let resolved_normalized = normalize_path(&resolved);
+    let museai_normalized = normalize_path(&museai_dir);
+
+    let resolved_str = resolved_normalized.to_string_lossy();
+    let museai_str = museai_normalized.to_string_lossy();
+
+    let is_allowed = resolved_str == museai_str
+        || resolved_str.starts_with(&format!("{}/", museai_str))
+        || resolved_str.starts_with(&format!("{}\\", museai_str));
+
+    if is_allowed {
+        Ok(())
+    } else {
+        Err(format!(
+            "Error: read access denied for {}. Agents can only read files under {}",
+            resolved.display(),
+            museai_dir.display()
         ))
     }
 }
@@ -3047,9 +3104,21 @@ fn discover_skills(app: Option<&AppHandle>) -> Vec<SkillDefinition> {
         }
     }
 
+    roots.push(std::path::PathBuf::from("/Users/yejiming/Documents/Obsidian Vault/.codex/skills/fanqie-short-nuexin-outline"));
+    roots.push(std::path::PathBuf::from("/Users/yejiming/Documents/Obsidian Vault/.codex/skills/fanqie-short-nuexin-writer"));
+    roots.push(std::path::PathBuf::from("/Users/yejiming/Documents/Obsidian Vault/.codex/skills/fanqie-xuanhuan-outline"));
+    roots.push(std::path::PathBuf::from("/Users/yejiming/Documents/Obsidian Vault/.codex/skills/fanqie-xuanhuan-writer"));
+    roots.push(std::path::PathBuf::from("/Users/yejiming/Documents/Obsidian Vault/.codex/skills/kitt-writer"));
+
     let mut skills = Vec::new();
     for root in roots {
-        collect_skills_from_root(&root, &mut skills);
+        if root.join("SKILL.md").is_file() {
+            if let Some(skill) = parse_skill_definition(&root) {
+                skills.push(skill);
+            }
+        } else {
+            collect_skills_from_root(&root, &mut skills);
+        }
     }
     skills
 }
@@ -3235,11 +3304,11 @@ fn import_workspace_item(
         return Err("Source path does not exist".to_string());
     }
 
-    let base_dir = app
+    let doc_dir = app
         .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join(&dir_type);
+        .document_dir()
+        .map_err(|e| e.to_string())?;
+    let base_dir = doc_dir.join("MuseAI").join(&dir_type);
 
     fs::create_dir_all(&base_dir).map_err(|e| e.to_string())?;
 
@@ -3275,14 +3344,14 @@ fn import_workspace_item(
 #[tauri::command]
 fn delete_workspace_item(app: AppHandle, item_path: String) -> Result<(), String> {
     let target = Path::new(&item_path);
-    let app_data_dir = app
+    let doc_dir = app
         .path()
-        .app_data_dir()
+        .document_dir()
         .map_err(|e| e.to_string())?;
-        
-    let refs_dir = app_data_dir.join("references");
-    let articles_dir = app_data_dir.join("articles");
-    let outline_dir = app_data_dir.join("outline");
+    let museai_dir = doc_dir.join("MuseAI");
+    let refs_dir = museai_dir.join("references");
+    let articles_dir = museai_dir.join("articles");
+    let outline_dir = museai_dir.join("outline");
 
     if !target.starts_with(&refs_dir) && !target.starts_with(&articles_dir) && !target.starts_with(&outline_dir) {
         return Err("Cannot delete files outside of target directories".to_string());
@@ -3453,26 +3522,41 @@ fn get_workspace_dir(app: AppHandle, dir_type: String) -> Result<String, String>
         .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?;
-        
+    let doc_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| e.to_string())?;
+    let museai_dir = doc_dir.join("MuseAI");
+
+    // Migrate from old app_data_dir locations to ~/Documents/MuseAI
+    for dir_name in ["articles", "references", "outline"] {
+        let old = app_data_dir.join(dir_name);
+        let new = museai_dir.join(dir_name);
+        if old.exists() && !new.exists() {
+            let _ = fs::create_dir_all(&museai_dir);
+            let _ = fs::rename(&old, &new);
+        }
+    }
+
+    // Also migrate from the very old de_ai directory
     let old_de_ai = app_data_dir.join("de_ai");
     if old_de_ai.exists() {
         let old_ref = old_de_ai.join("references");
         let old_works = old_de_ai.join("works");
-        
-        let new_ref = app_data_dir.join("references");
-        let new_articles = app_data_dir.join("articles");
-        
+        let new_ref = museai_dir.join("references");
+        let new_articles = museai_dir.join("articles");
         if old_ref.exists() && !new_ref.exists() {
+            let _ = fs::create_dir_all(&museai_dir);
             let _ = fs::rename(&old_ref, &new_ref);
         }
         if old_works.exists() && !new_articles.exists() {
+            let _ = fs::create_dir_all(&museai_dir);
             let _ = fs::rename(&old_works, &new_articles);
         }
-        
         let _ = fs::remove_dir_all(&old_de_ai);
     }
-    
-    let dir = app_data_dir.join(&dir_type);
+
+    let dir = museai_dir.join(&dir_type);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.to_string_lossy().into_owned())
 }
@@ -3484,13 +3568,14 @@ fn rename_item(path: String, new_name: String) -> Result<(), String> {
 
 #[tauri::command]
 fn move_item(app: AppHandle, source: String, target_dir: String) -> Result<(), String> {
-    let app_data_dir = app
+    let doc_dir = app
         .path()
-        .app_data_dir()
+        .document_dir()
         .map_err(|e| e.to_string())?;
-    let refs_dir = app_data_dir.join("references");
-    let articles_dir = app_data_dir.join("articles");
-    let outline_dir = app_data_dir.join("outline");
+    let museai_dir = doc_dir.join("MuseAI");
+    let refs_dir = museai_dir.join("references");
+    let articles_dir = museai_dir.join("articles");
+    let outline_dir = museai_dir.join("outline");
     let source_path = Path::new(&source);
     let target_path = Path::new(&target_dir);
     let source_canonical = source_path.canonicalize().map_err(|e| e.to_string())?;
