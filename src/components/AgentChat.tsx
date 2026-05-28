@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Tooltip, Select, Dropdown, Tag, Mentions } from 'antd';
-import { BulbOutlined, CloseOutlined, HistoryOutlined, PlusCircleOutlined, RobotOutlined, SendOutlined, StopOutlined, ToolOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { Button, Tooltip, Dropdown, Tag, Mentions, Modal, Tree, Empty } from 'antd';
+import { BulbOutlined, CloseOutlined, HistoryOutlined, PlusCircleOutlined, RobotOutlined, StopOutlined, ToolOutlined, UnorderedListOutlined, SettingOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import ReactMarkdown from 'react-markdown';
@@ -53,7 +53,6 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     input, setInput,
     isStreaming, setIsStreaming,
     expandedBlocks, setExpandedBlocks,
-    selectedLibraryIds, setSelectedLibraryIds,
     todos, setTodos,
     isTodoOpen, setIsTodoOpen,
     sessions, setSessions,
@@ -61,7 +60,8 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     sessionId, setSessionId,
     sessionTitle, setSessionTitle,
     activeRun, setActiveRun,
-    createNewSession
+    createNewSession,
+    selectedReferenceFiles, setSelectedReferenceFiles
   } = useAgentStore();
 
   const settings = useSettingsStore();
@@ -71,10 +71,15 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
   const currentThinkingIdRef = useRef<string | null>(null);
   const activeRunRef = useRef(activeRun);
   const messagesRef = useRef(messages);
-  const selectedLibraryIdsRef = useRef(selectedLibraryIds);
+  const selectedReferenceFilesRef = useRef(selectedReferenceFiles);
   const sessionIdRef = useRef(sessionId);
   const sessionTitleRef = useRef(sessionTitle);
   const todosRef = useRef(todos);
+
+  const [isReferenceSettingsOpen, setIsReferenceSettingsOpen] = useState(false);
+  const [allReferenceFiles, setAllReferenceFiles] = useState<string[]>([]);
+  const [referenceTree, setReferenceTree] = useState<any[]>([]);
+  const [referenceFilesLoaded, setReferenceFilesLoaded] = useState(false);
 
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
   useEffect(() => {
@@ -96,8 +101,8 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
   }, [input]);
 
   useEffect(() => {
-    selectedLibraryIdsRef.current = selectedLibraryIds;
-  }, [selectedLibraryIds]);
+    selectedReferenceFilesRef.current = selectedReferenceFiles;
+  }, [selectedReferenceFiles]);
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -227,6 +232,56 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     };
   }, []);
 
+  useEffect(() => {
+    const fetchRef = async () => {
+      try {
+        setReferenceFilesLoaded(false);
+        const dir = await invoke<string>('get_de_ai_dir', { isReference: true });
+        
+        const fetchTree = async (path: string): Promise<any[]> => {
+          const items = await invoke<any[]>('list_dir', { path });
+          return Promise.all(items
+            .filter((item) => item.name !== '.versions')
+            .map(async (item) => (
+              item.is_dir
+                ? { ...item, children: await fetchTree(item.path) }
+                : item
+            )));
+        };
+        
+        const collectFiles = (nodes: any[]): string[] => {
+          let res: string[] = [];
+          for (const item of nodes) {
+            if (item.is_dir) {
+              res = res.concat(collectFiles(item.children ?? []));
+            } else {
+              res.push(item.path);
+            }
+          }
+          return res;
+        };
+
+        const tree = await fetchTree(dir);
+        setReferenceTree(tree);
+        setAllReferenceFiles(collectFiles(tree));
+        setReferenceFilesLoaded(true);
+      } catch (e) {
+        console.error(e);
+        setReferenceFilesLoaded(true);
+      }
+    };
+    if (isReferenceSettingsOpen && !referenceFilesLoaded) {
+      fetchRef();
+    }
+  }, [isReferenceSettingsOpen, referenceFilesLoaded]);
+
+  useEffect(() => {
+    if (!referenceFilesLoaded) return;
+    setSelectedReferenceFiles(
+      selectedReferenceFiles.filter((file) => allReferenceFiles.includes(file))
+    );
+  }, [allReferenceFiles, referenceFilesLoaded]);
+
   const scrollToBottomOnce = () => {
     window.requestAnimationFrame(() => {
       if (chatHistoryRef.current) {
@@ -305,8 +360,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
           systemPrompt: settings.systemPrompt,
           workspacePath: settings.worksDirectory,
           messages: buildModelMessages(messages.concat(userMessage), userMessage.id, mentionedSkills),
-          referenceLibraries: settings.referenceLibraries,
-          selectedReferenceLibraryIds: selectedLibraryIds,
+          selectedReferenceFiles: selectedReferenceFiles,
         },
       });
       activeRunRef.current = { runId, messageId: agentMessageId };
@@ -360,7 +414,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
           title: sessionTitleRef.current,
           savedAt: 0,
           messages: messagesRef.current,
-          selectedReferenceLibraryIds: selectedLibraryIdsRef.current,
+          selectedReferenceFiles: selectedReferenceFilesRef.current,
           todos: todosRef.current,
         },
       });
@@ -378,7 +432,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
       setSessionId(session.id);
       setSessionTitle(session.title);
       setMessages(session.messages.length > 0 ? session.messages : [createWelcomeMessage()]);
-      setSelectedLibraryIds(session.selectedReferenceLibraryIds ?? []);
+      setSelectedReferenceFiles(session.selectedReferenceFiles ?? []);
       setTodos(session.todos ?? []);
       setIsTodoOpen(false);
       setIsStreaming(false);
@@ -389,12 +443,10 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     }
   };
 
-  const selectedLibraries = settings.referenceLibraries
-    .filter(lib => selectedLibraryIds.includes(lib.id));
   const contextStats = estimateContextUsage({
     systemPrompt: settings.systemPrompt,
     workspacePath: settings.worksDirectory,
-    selectedLibraries,
+    selectedReferenceFiles,
     skills,
     messages,
     draft: input,
@@ -404,9 +456,14 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     ? Math.min(100, Math.round((contextUsed / settings.maxContextTokens) * 100))
     : 0;
 
-  const selectedLibNames = selectedLibraries
-    .map(lib => lib.name)
-    .join(', ');
+  const selectedLibNames = selectedReferenceFiles.length > 0 ? `${selectedReferenceFiles.length} 篇` : '';
+
+  const mapReferenceTreeData = (nodes: any[]): any[] => nodes.map((node) => ({
+    title: <span title={node.path}>{node.name}</span>,
+    key: node.path,
+    selectable: false,
+    children: node.children ? mapReferenceTreeData(node.children) : undefined,
+  }));
 
   const contextTooltip = (
     <div className="agent-context-popover">
@@ -422,7 +479,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
         <span className="agent-context-popover__value" style={{ wordBreak: 'break-all' }}>{settings.worksDirectory || '未选择'}</span>
       </div>
       <div className="agent-context-popover__row">
-        <span className="agent-context-popover__label">范文库：</span>
+        <span className="agent-context-popover__label">范文：</span>
         <span className="agent-context-popover__value">{selectedLibNames || '未选择'}</span>
       </div>
       <div className="agent-context-popover__divider" />
@@ -455,6 +512,36 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
 
   return (
     <div className="agent-chat">
+      <Modal
+        title="选择参考范文"
+        open={isReferenceSettingsOpen}
+        okText="确定"
+        cancelText="取消"
+        width={640}
+        onCancel={() => setIsReferenceSettingsOpen(false)}
+        onOk={() => setIsReferenceSettingsOpen(false)}
+      >
+        <div className="de-ai-reference-picker">
+          {allReferenceFiles.length > 0 ? (
+            <Tree
+              blockNode
+              checkable
+              checkedKeys={selectedReferenceFiles}
+              className="de-ai-reference-picker__tree"
+              defaultExpandAll
+              onCheck={(checkedKeys) => {
+                const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
+                setSelectedReferenceFiles(keys.map(String).filter((key) => allReferenceFiles.includes(key)));
+              }}
+              selectable={false}
+              treeData={mapReferenceTreeData(referenceTree)}
+            />
+          ) : (
+            <Empty description="范文目录暂无可选文件" />
+          )}
+        </div>
+      </Modal>
+
       <div className="agent-chat__header">
         <div className="agent-chat__title">
           <RobotOutlined />
@@ -726,19 +813,14 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
             }))}
           />
           <div className="agent-composer__actions">
-            <Select
-              allowClear
-              className="agent-library-select"
-              maxTagCount="responsive"
-              mode="multiple"
-              onChange={setSelectedLibraryIds}
-              options={settings.referenceLibraries.map((library) => ({
-                label: library.name,
-                value: library.id,
-              }))}
-              placeholder="选择范文库"
-              size="small"
-              value={selectedLibraryIds}
+            <Button
+              aria-label="选择范文"
+              className="de-ai-agent-settings-button"
+              icon={<SettingOutlined />}
+              onClick={() => setIsReferenceSettingsOpen(true)}
+              shape="circle"
+              title="选择范文"
+              type={selectedReferenceFiles.length > 0 ? 'primary' : 'default'}
             />
             <div className="agent-send-cluster">
               <Tooltip color="#fff" placement="topRight" title={contextTooltip} overlayInnerStyle={{ width: 'max-content', maxWidth: 320, padding: '8px 12px' }}>
@@ -751,15 +833,17 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
                   <span>{contextPercent}%</span>
                 </button>
               </Tooltip>
-              <Button
-                className="agent-send-button"
-                disabled={!isStreaming && !input.trim()}
-                icon={isStreaming ? <StopOutlined /> : <SendOutlined />}
-                onClick={isStreaming ? handleStop : handleSend}
-                shape="circle"
-                type={isStreaming ? "default" : "primary"}
-                danger={isStreaming}
-              />
+              <Tooltip title={isStreaming ? '停止' : '开始'}>
+                <Button
+                  className="de-ai-agent-run-button"
+                  disabled={!isStreaming && !input.trim()}
+                  icon={isStreaming ? <StopOutlined /> : <PlayCircleOutlined />}
+                  onClick={isStreaming ? handleStop : handleSend}
+                  shape="circle"
+                  type={isStreaming ? "default" : "primary"}
+                  danger={isStreaming}
+                />
+              </Tooltip>
             </div>
           </div>
         </div>
@@ -911,20 +995,20 @@ function buildToolResultMessage(tool: AgentToolEntry): ModelMessage {
 function estimateContextUsage({
   systemPrompt,
   workspacePath,
-  selectedLibraries,
+  selectedReferenceFiles,
   skills,
   messages,
   draft,
 }: {
   systemPrompt: string;
   workspacePath: string | null;
-  selectedLibraries: Array<{ name: string; path: string }>;
+  selectedReferenceFiles: string[];
   skills: SkillDefinition[];
   messages: Message[];
   draft: string;
 }) {
   const stats = {
-    system: estimateTokens(buildEstimatedSystemPrompt(systemPrompt, workspacePath, selectedLibraries, skills)),
+    system: estimateTokens(buildEstimatedSystemPrompt(systemPrompt, workspacePath, selectedReferenceFiles, skills)),
     user: estimateTokens([draft, ...messages.filter((message) => message.role === 'user').map((message) => message.content)].join('')),
     assistant: estimateTokens(messages
       .filter((message) => message.role === 'agent')
@@ -949,7 +1033,7 @@ function estimateTokens(text: string) {
 function buildEstimatedSystemPrompt(
   systemPrompt: string,
   workspacePath: string | null,
-  selectedLibraries: Array<{ name: string; path: string }>,
+  selectedReferenceFiles: string[],
   skills: SkillDefinition[],
 ) {
   const lines = [systemPrompt.trim()];
@@ -960,15 +1044,13 @@ function buildEstimatedSystemPrompt(
       : '当前工作空间路径：未选择',
   ];
 
-  if (selectedLibraries.length === 0) {
-    workspaceLines.push('当前选中的范文库：无');
+  if (selectedReferenceFiles.length === 0) {
+    workspaceLines.push('当前选中的范文：无');
   } else {
-    workspaceLines.push('当前选中的范文库：');
-    selectedLibraries.forEach((library) => {
-      workspaceLines.push(`- ${library.name}：${library.path}`);
-    });
+    workspaceLines.push('当前选中的范文：');
+    workspaceLines.push(`- 共选中 ${selectedReferenceFiles.length} 篇范文`);
     workspaceLines.push('');
-    workspaceLines.push('【重要指令】用户已选择上述范文库。在首轮对话中，你必须首先使用工具（如 list_dir, read, glob 等）主动读取并吸收这些范文库中的文章内容，然后再正式回答用户的问题。');
+    workspaceLines.push('【重要指令】用户已选择上述范文作为写作参考，请仔细研读并在写作中参考其风格和结构。');
   }
 
   const systemLines = [

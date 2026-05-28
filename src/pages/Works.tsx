@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import FileExplorer from '../components/FileExplorer';
+import WorkspaceDirectory from '../components/WorkspaceDirectory';
 import MarkdownEditor from '../components/MarkdownEditor';
 import AgentChat from '../components/AgentChat';
-import { useSettingsStore } from '../stores/useSettingsStore';
 import { useWorksStore } from '../stores/useWorksStore';
 import { Button } from 'antd';
 import { RobotOutlined } from '@ant-design/icons';
@@ -18,21 +17,15 @@ const Works: React.FC = () => {
   const [isResizingAgent, setIsResizingAgent] = useState(false);
 
   const fileTreeRef = useRef<HTMLDivElement>(null);
-  const worksDirectory = useSettingsStore(state => state.worksDirectory);
-  const setWorksDirectory = useSettingsStore(state => state.setWorksDirectory);
   const {
     selectedFile,
     setSelectedFile,
-    selectedDirectory,
-    setSelectedDirectory,
     fileTreeWidth,
     setFileTreeWidth,
     agentWidth,
     setAgentWidth,
     isAgentVisible,
     setIsAgentVisible,
-    expandedKeys,
-    setExpandedKeys,
   } = useWorksStore();
 
   // Resize File Tree
@@ -89,14 +82,11 @@ const Works: React.FC = () => {
           borderRight: '1px solid rgba(0, 0, 0, 0.04)',
           background: 'rgba(255, 255, 255, 0.3)'
         }}>
-          <FileExplorer
+          <WorkspaceDirectory
+            title="作品目录"
+            dirType="articles"
+            selectedFile={selectedFile}
             onSelectFile={setSelectedFile}
-            selectedDirectory={selectedDirectory}
-            onSelectDirectory={setSelectedDirectory}
-            workspacePath={worksDirectory}
-            onChangeWorkspace={setWorksDirectory}
-            expandedKeys={expandedKeys}
-            onExpandedKeysChange={setExpandedKeys}
           />
           <div
             aria-label="调整文件树宽度"

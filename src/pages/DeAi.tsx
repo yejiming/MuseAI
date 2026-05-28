@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import DeAiDirectory from '../components/DeAiDirectory';
+import WorkspaceDirectory from '../components/WorkspaceDirectory';
 import MarkdownEditor from '../components/MarkdownEditor';
 import DeAiAgentChat from '../components/DeAiAgentChat';
 import { useDeAiStore } from '../stores/useDeAiStore';
@@ -33,6 +33,7 @@ const DeAi: React.FC = () => {
   const { 
     selectedWorkFile, 
     selectedReferenceFile,
+    setSelectedWorkFile,
     activePreviewFile,
     suggestion,
     aiScore,
@@ -107,7 +108,7 @@ const DeAi: React.FC = () => {
     const fetchRef = async () => {
       try {
         setReferenceFilesLoaded(false);
-        const dir = await invoke<string>('get_de_ai_dir', { isReference: true });
+        const dir = await invoke<string>('get_workspace_dir', { dirType: 'references' });
         
         const fetchTree = async (path: string): Promise<FileNode[]> => {
           const items = await invoke<FileNode[]>('list_dir', { path });
@@ -457,10 +458,14 @@ const DeAi: React.FC = () => {
       </Modal>
       <div ref={directoryRef} style={{ width: directoryWidth, minWidth: directoryWidth, borderRight: '1px solid rgba(0, 0, 0, 0.04)', display: 'flex', flexDirection: 'column', position: 'relative' }}>
         <div style={{ flex: 1, borderBottom: '1px solid #e8e8e8' }}>
-          <DeAiDirectory title="作品目录" isReference={false} />
+          <WorkspaceDirectory 
+            title="作品目录" 
+            dirType="articles"
+            selectedFile={selectedWorkFile}
+            onSelectFile={setSelectedWorkFile}
+          />
         </div>
         <div style={{ flex: 1 }}>
-          <DeAiDirectory title="范文目录" isReference={true} />
         </div>
         <div
           aria-label="调整目录宽度"

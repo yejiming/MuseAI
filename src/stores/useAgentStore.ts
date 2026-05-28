@@ -41,7 +41,7 @@ export interface AgentSessionSummary {
 
 export interface AgentSessionRecord extends AgentSessionSummary {
   messages: Message[];
-  selectedReferenceLibraryIds: string[];
+  selectedReferenceFiles: string[];
   todos: AgentTodo[];
 }
 
@@ -63,7 +63,7 @@ interface AgentStoreState {
   input: string;
   isStreaming: boolean;
   expandedBlocks: Record<string, boolean>;
-  selectedLibraryIds: string[];
+  selectedReferenceFiles: string[];
   todos: AgentTodo[];
   isTodoOpen: boolean;
   sessions: AgentSessionSummary[];
@@ -76,7 +76,7 @@ interface AgentStoreState {
   setInput: (input: string) => void;
   setIsStreaming: (isStreaming: boolean) => void;
   setExpandedBlocks: (blocks: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
-  setSelectedLibraryIds: (ids: string[]) => void;
+  setSelectedReferenceFiles: (files: string[]) => void;
   setTodos: (todos: AgentTodo[]) => void;
   setIsTodoOpen: (isOpen: boolean | ((prev: boolean) => boolean)) => void;
   setSessions: (sessions: AgentSessionSummary[]) => void;
@@ -93,7 +93,7 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   input: '',
   isStreaming: false,
   expandedBlocks: {},
-  selectedLibraryIds: [],
+  selectedReferenceFiles: [],
   todos: [],
   isTodoOpen: false,
   sessions: [],
@@ -110,7 +110,7 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   setExpandedBlocks: (updater) => set((state) => ({
     expandedBlocks: typeof updater === 'function' ? updater(state.expandedBlocks) : updater,
   })),
-  setSelectedLibraryIds: (selectedLibraryIds) => set({ selectedLibraryIds }),
+  setSelectedReferenceFiles: (selectedReferenceFiles) => set({ selectedReferenceFiles }),
   setTodos: (todos) => set({ todos }),
   setIsTodoOpen: (updater) => set((state) => ({
     isTodoOpen: typeof updater === 'function' ? updater(state.isTodoOpen) : updater,
@@ -128,7 +128,7 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
       input: '',
       isStreaming: false,
       expandedBlocks: {},
-      selectedLibraryIds: [],
+      selectedReferenceFiles: [],
       todos: [],
       isTodoOpen: false,
       sessionId: createSessionId(),

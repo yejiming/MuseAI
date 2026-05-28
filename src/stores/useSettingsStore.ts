@@ -1,11 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export interface ReferenceLibrary {
-  id: string;
-  name: string;
-  path: string;
-}
+
 
 export interface AgentConfig {
   temperature?: number;
@@ -29,7 +25,7 @@ export interface SettingsState {
   deAiDetectorPrompt: string;
   deAiRemoverPrompt: string;
 
-  referenceLibraries: ReferenceLibrary[];
+
   worksDirectory: string | null;
   agentConfigs: Record<string, AgentConfig>;
 
@@ -41,9 +37,7 @@ export interface SettingsState {
   resetDeAiDetectorPrompt: () => void;
   setDeAiRemoverPrompt: (prompt: string) => void;
   resetDeAiRemoverPrompt: () => void;
-  addReferenceLibrary: (library: Omit<ReferenceLibrary, 'id'>) => void;
-  removeReferenceLibrary: (id: string) => void;
-  updateReferenceLibrary: (id: string, library: Partial<ReferenceLibrary>) => void;
+
   setWorksDirectory: (dir: string | null) => void;
 }
 
@@ -146,7 +140,7 @@ export const useSettingsStore = create<SettingsState>()(
       deAiDetectorPrompt: defaultDeAiDetectorPrompt,
       deAiRemoverPrompt: defaultDeAiRemoverPrompt,
 
-      referenceLibraries: [],
+
       worksDirectory: null,
       agentConfigs: {},
 
@@ -174,22 +168,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       resetDeAiRemoverPrompt: () => set({ deAiRemoverPrompt: defaultDeAiRemoverPrompt }),
 
-      addReferenceLibrary: (library) => set((state) => ({
-        referenceLibraries: [
-          ...state.referenceLibraries,
-          { ...library, id: crypto.randomUUID() }
-        ]
-      })),
 
-      removeReferenceLibrary: (id) => set((state) => ({
-        referenceLibraries: state.referenceLibraries.filter((lib) => lib.id !== id)
-      })),
-
-      updateReferenceLibrary: (id, library) => set((state) => ({
-        referenceLibraries: state.referenceLibraries.map((lib) =>
-          lib.id === id ? { ...lib, ...library } : lib
-        )
-      })),
 
       setWorksDirectory: (dir) => set({ worksDirectory: dir }),
     }),

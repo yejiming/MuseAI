@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Tree, Dropdown, MenuProps, message, Modal, Form, Select, Input, Button } from 'antd';
 import { open } from '@tauri-apps/plugin-dialog';
 import { DownOutlined } from '@ant-design/icons';
-import { useDeAiStore } from '../stores/useDeAiStore';
+
 
 interface FileNode {
   name: string;
@@ -12,7 +12,14 @@ interface FileNode {
   children?: FileNode[];
 }
 
-const ExamplesDirectory: React.FC = () => {
+interface WorkspaceDirectoryProps {
+  title: string;
+  dirType: 'articles' | 'references' | 'outline';
+  selectedFile: string | null;
+  onSelectFile: (file: string | null) => void;
+}
+
+const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = ({ title, dirType, selectedFile, onSelectFile }) => {
   const [nodes, setNodes] = useState<FileNode[]>([]);
   const [rootDir, setRootDir] = useState<string>('');
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
@@ -24,10 +31,7 @@ const ExamplesDirectory: React.FC = () => {
   const [renamingKey, setRenamingKey] = useState<string | null>(null);
   const [form] = Form.useForm();
   
-  const { 
-    selectedReferenceFile, 
-    setSelectedReferenceFile 
-  } = useDeAiStore();
+  
 
   const parentPathOf = (path: string) => path.replace(/[\\/][^\\/]*$/, '');
 
@@ -49,7 +53,7 @@ const ExamplesDirectory: React.FC = () => {
 
   const loadFiles = async (keys: React.Key[] = expandedKeys) => {
     try {
-      const referenceRootDir: string = await invoke('get_de_ai_dir', { isReference: true });
+      const referenceRootDir: string = await invoke('get_workspace_dir', { dirType });
       setRootDir(referenceRootDir);
       const rootItems: FileNode[] = await invoke('list_dir', { path: referenceRootDir });
       
@@ -80,7 +84,7 @@ const ExamplesDirectory: React.FC = () => {
   }, [expandedKeys]);
 
   const getRootDir = async () => {
-    const referenceRootDir = await invoke<string>('get_de_ai_dir', { isReference: true });
+    const referenceRootDir = await invoke<string>('get_workspace_dir', { dirType });
     setRootDir(referenceRootDir);
     return referenceRootDir;
   };
@@ -129,8 +133,8 @@ const ExamplesDirectory: React.FC = () => {
       if (isDirectory) {
         await invoke('import_local_folder_shallow', { source: sourcePath, targetDir });
       } else {
-        await invoke('import_de_ai_item', { sourcePath, isReference: true });
-        const root = await invoke<string>('get_de_ai_dir', { isReference: true });
+        await invoke('import_workspace_item', { sourcePath, dirType });
+        const root = await invoke<string>('get_workspace_dir', { dirType });
         if (targetDir !== root) {
             const fileName = sourcePath.split(/[\\/]/).pop();
             if (fileName) {
@@ -153,9 +157,9 @@ const ExamplesDirectory: React.FC = () => {
       content: '确定要删除该文件/文件夹吗？',
       onOk: async () => {
         try {
-          await invoke('delete_de_ai_item', { itemPath: path });
-          if (selectedReferenceFile === path) {
-            setSelectedReferenceFile(null);
+          await invoke('delete_workspace_item', { itemPath: path });
+          if (selectedFile === path) {
+            onSelectFile(null);
           }
           message.success('删除成功');
           loadFiles();
@@ -171,10 +175,10 @@ const ExamplesDirectory: React.FC = () => {
     if (!newNameStr || newNameStr === oldName) return;
     try {
       await invoke('rename_item', { path, newName: newNameStr });
-      if (selectedReferenceFile === path) {
+      if (selectedFile === path) {
          const parts = path.split(/[\\/]/);
          parts.pop();
-         setSelectedReferenceFile(parts.join('/') + '/' + newNameStr);
+         onSelectFile(parts.join('/') + '/' + newNameStr);
       }
       message.success('重命名成功');
       loadFiles();
@@ -199,6 +203,18 @@ const ExamplesDirectory: React.FC = () => {
       }
       return node;
     });
+
+  
+  const copyText = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    message.success('已复制路径');
+  };
+
+  const relativeToWorkspace = (path: string) => {
+    if (!rootDir) return path;
+    if (path === rootDir) return '.';
+    return path.startsWith(`${rootDir}/`) ? path.slice(rootDir.length + 1) : path;
+  };
 
   const handleLoadData = async ({ key, children }: any) => {
     if (children && children.length > 0) {
@@ -225,8 +241,8 @@ const ExamplesDirectory: React.FC = () => {
       await invoke('move_item', { source: sourcePath, targetDir });
       const movedName = sourcePath.split(/[\\/]/).pop();
       const nextPath = movedName ? joinPath(targetDir, movedName) : sourcePath;
-      if (selectedReferenceFile && isInsidePath(selectedReferenceFile, sourcePath)) {
-        setSelectedReferenceFile(replacePathPrefix(selectedReferenceFile, sourcePath, nextPath));
+      if (selectedFile && isInsidePath(selectedFile, sourcePath)) {
+        onSelectFile(replacePathPrefix(selectedFile, sourcePath, nextPath));
       }
       setCutPath(null);
       const nextExpandedKeys = expandedKeys.includes(targetDir) ? expandedKeys : [...expandedKeys, targetDir];
@@ -274,7 +290,10 @@ const ExamplesDirectory: React.FC = () => {
                   ] : []),
                   { type: 'divider' as const },
                 ] : []),
+                
                 { key: 'cut', label: '剪切' },
+                { key: 'copy-absolute', label: '复制绝对路径', onClick: (e) => { e.domEvent.stopPropagation(); void copyText(file.path); } },
+                { key: 'copy-relative', label: '复制基于工作空间的相对路径', onClick: (e) => { e.domEvent.stopPropagation(); void copyText(relativeToWorkspace(file.path)); } },
                 { key: 'rename', label: '重命名', onClick: (e) => { e.domEvent.stopPropagation(); setRenamingKey(file.path); } },
                 { key: 'delete', label: '删除', danger: true, onClick: (e) => { e.domEvent.stopPropagation(); handleDelete(file.path); } }
               ],
@@ -341,7 +360,7 @@ const ExamplesDirectory: React.FC = () => {
       { type: 'divider' },
       { key: 'file', label: '导入本地文件', onClick: () => handleImport('file') },
       { key: 'folder', label: '导入本地文件夹', onClick: () => handleImport('folder') },
-      { key: 'crawl', label: '爬取互联网文章', onClick: handleCrawlClick }
+        ...(dirType === 'references' ? [{ key: 'crawl', label: '爬取互联网文章', onClick: handleCrawlClick }] : [])
     ],
   };
 
@@ -407,7 +426,7 @@ const ExamplesDirectory: React.FC = () => {
       </Modal>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <strong style={{ color: '#d97757', fontSize: 16 }}>范文目录</strong>
+        <strong style={{ color: '#d97757', fontSize: 16 }}>{title}</strong>
         <Dropdown menu={menuProps} trigger={['click']}>
           <a onClick={(e) => e.preventDefault()} style={{ cursor: 'pointer', color: '#d97757', fontWeight: 500 }}>
             添加 <DownOutlined style={{ fontSize: 12 }} />
@@ -422,13 +441,13 @@ const ExamplesDirectory: React.FC = () => {
             <Tree
               treeData={mapToTreeData(nodes)}
               loadData={handleLoadData}
-              selectedKeys={selectedReferenceFile ? [selectedReferenceFile] : []}
+              selectedKeys={selectedFile ? [selectedFile] : []}
               expandedKeys={expandedKeys}
               onExpand={(keys) => setExpandedKeys([...keys])}
               onSelect={(selectedKeys, info) => {
                 const key = info.node.key as string;
                 if (info.node.isLeaf && selectedKeys.length > 0) {
-                  setSelectedReferenceFile(key);
+                  onSelectFile(key);
                 } else {
                   setExpandedKeys((keys) =>
                     keys.includes(key) ? keys.filter((item) => item !== key) : [...keys, key]
@@ -449,4 +468,4 @@ const ExamplesDirectory: React.FC = () => {
   );
 };
 
-export default ExamplesDirectory;
+export default WorkspaceDirectory;

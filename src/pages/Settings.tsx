@@ -1,6 +1,6 @@
 import React from 'react';
 import { Form, Input, Button, InputNumber, Divider, List, Typography, Popconfirm, Select, message, Anchor } from 'antd';
-import { DeleteOutlined, FolderOpenOutlined, CodeOutlined } from '@ant-design/icons';
+import { DeleteOutlined, CodeOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
@@ -54,7 +54,6 @@ const Settings: React.FC = () => {
   
   const [modelForm] = Form.useForm();
   const [promptForm] = Form.useForm();
-  const [libraryForm] = Form.useForm();
   const [skillForm] = Form.useForm();
 
   const [skills, setSkills] = React.useState<SkillDefinition[]>([]);
@@ -148,17 +147,6 @@ const Settings: React.FC = () => {
     message.success('已恢复默认提示词');
   };
 
-  const handleSelectLibraryPath = async () => {
-    try {
-      const selected = await open({ directory: true, multiple: false });
-      if (selected && typeof selected === 'string') {
-        libraryForm.setFieldsValue({ path: selected });
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   const handleSelectSkillPath = async () => {
     try {
       const selected = await open({ directory: true, multiple: false });
@@ -168,13 +156,6 @@ const Settings: React.FC = () => {
     } catch (err) {
       console.error(err);
     }
-  };
-
-  // Handle Add Library
-  const handleAddLibrary = (values: { name: string; path: string }) => {
-    store.addReferenceLibrary(values);
-    libraryForm.resetFields();
-    message.success('已添加范文库');
   };
 
   const handleImportSkill = async (values: { path: string }) => {
@@ -213,7 +194,6 @@ const Settings: React.FC = () => {
           items={[
             { key: 'model-config', href: '#model-config', title: '模型配置' },
             { key: 'system-prompt', href: '#system-prompt', title: '系统提示词' },
-            { key: 'reference-libraries', href: '#reference-libraries', title: '参考资料库' },
             { key: 'skill-libraries', href: '#skill-libraries', title: '技能库' },
           ]}
         />
@@ -398,75 +378,6 @@ const Settings: React.FC = () => {
               </div>
             </div>
           </Form>
-        </section>
-
-        <Divider style={{ borderColor: '#eae6df', margin: '40px 0' }} />
-
-        {/* 范文库配置区域 */}
-        <section id="reference-libraries">
-          <Title level={4} style={{ color: '#d97757', marginBottom: 24 }}>参考资料库 (Reference Libraries)</Title>
-          <Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
-            添加本地文件夹路径，以便在对话中快速注入指定的文档资料作为上下文。
-          </Text>
-
-          <Form
-            form={libraryForm}
-            layout="inline"
-            onFinish={handleAddLibrary}
-            style={{ marginBottom: 32 }}
-          >
-            <Form.Item 
-              name="name" 
-              rules={[{ required: true, message: '请输入名称' }]}
-              style={{ flex: '1 1 200px', marginBottom: 16 }}
-            >
-              <Input placeholder="资料库名称 (例: 设定集)" />
-            </Form.Item>
-            <Form.Item 
-              name="path" 
-              rules={[{ required: true, message: '请输入本地路径' }]}
-              style={{ flex: '2 1 300px', marginBottom: 16 }}
-            >
-              <Input 
-                placeholder="点击选择本地文件夹..." 
-                prefix={<FolderOpenOutlined style={{ color: '#bfbfbf' }} />} 
-                onClick={handleSelectLibraryPath}
-                readOnly
-              />
-            </Form.Item>
-            <Form.Item style={{ marginBottom: 16 }}>
-              <Button type="primary" htmlType="submit" ghost>
-                添加
-              </Button>
-            </Form.Item>
-          </Form>
-
-          <List
-            itemLayout="horizontal"
-            dataSource={store.referenceLibraries}
-            locale={{ emptyText: '暂无资料库，请在上方添加' }}
-            renderItem={(item) => (
-              <List.Item
-                actions={[
-                  <Popconfirm
-                    key="delete"
-                    title="确认删除？"
-                    onConfirm={() => store.removeReferenceLibrary(item.id)}
-                    okText="是"
-                    cancelText="否"
-                  >
-                    <Button type="text" danger icon={<DeleteOutlined />} />
-                  </Popconfirm>
-                ]}
-                style={{ borderBottom: '1px solid #eae6df', padding: '16px 0' }}
-              >
-                <List.Item.Meta
-                  title={<span style={{ fontWeight: 500 }}>{item.name}</span>}
-                  description={<Text type="secondary" copyable>{item.path}</Text>}
-                />
-              </List.Item>
-            )}
-          />
         </section>
 
         <Divider style={{ borderColor: '#eae6df', margin: '40px 0' }} />
