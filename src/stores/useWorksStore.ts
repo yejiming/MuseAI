@@ -80,7 +80,6 @@ export const useWorksStore = create<WorksState>()(
     {
       name: 'museai-works-storage',
       partialize: (state) => ({
-        isWorkSummaryOpen: state.isWorkSummaryOpen,
         workSummarySelectedArticlePaths: state.workSummarySelectedArticlePaths,
         workSummaryResults: state.workSummaryResults,
       }),

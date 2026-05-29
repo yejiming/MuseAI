@@ -29,6 +29,7 @@ interface OutlineState {
   fileTreeWidth: number;
   agentWidth: number;
   isAgentVisible: boolean;
+  isAssessmentOpen: boolean;
   
   assessmentMessages: Message[];
   creationMessages: Message[];
@@ -58,6 +59,7 @@ interface OutlineState {
   setFileTreeWidth: (width: number) => void;
   setAgentWidth: (width: number) => void;
   setIsAgentVisible: (isVisible: boolean) => void;
+  setIsAssessmentOpen: (isOpen: boolean) => void;
   
   setAssessmentMessages: (messages: Message[] | ((messages: Message[]) => Message[])) => void;
   setCreationMessages: (messages: Message[] | ((messages: Message[]) => Message[])) => void;
@@ -93,6 +95,7 @@ export const useOutlineStore = create<OutlineState>()(
       fileTreeWidth: 280,
       agentWidth: 420,
       isAgentVisible: true,
+      isAssessmentOpen: false,
       
       assessmentMessages: [],
       creationMessages: [],
@@ -136,6 +139,7 @@ export const useOutlineStore = create<OutlineState>()(
       setFileTreeWidth: (fileTreeWidth) => set({ fileTreeWidth }),
       setAgentWidth: (agentWidth) => set({ agentWidth }),
       setIsAgentVisible: (isAgentVisible) => set({ isAgentVisible }),
+      setIsAssessmentOpen: (isAssessmentOpen) => set({ isAssessmentOpen }),
       
       setAssessmentMessages: (messages) => set((state) => ({
         assessmentMessages: typeof messages === 'function' ? messages(state.assessmentMessages) : messages,

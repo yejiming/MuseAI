@@ -26,7 +26,6 @@ interface VersionInfo {
 const Outline: React.FC = () => {
   const [isResizingFileTree, setIsResizingFileTree] = useState(false);
   const [isResizingAgent, setIsResizingAgent] = useState(false);
-  const [isAssessmentOpen, setIsAssessmentOpen] = useState(false);
   const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
 
   const fileTreeRef = useRef<HTMLDivElement>(null);
@@ -39,6 +38,8 @@ const Outline: React.FC = () => {
     setAgentWidth,
     isAgentVisible,
     setIsAgentVisible,
+    isAssessmentOpen,
+    setIsAssessmentOpen,
     versions, setVersions,
     activeVersionId, setActiveVersionId,
     suggestion, setSuggestion,

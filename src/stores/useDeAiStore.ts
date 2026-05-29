@@ -25,6 +25,7 @@ interface DeAiState {
   selectedDetectorReferences: string[];
   detectorSelectedHistoricalVersions: string[];
   removerSelectedHistoricalVersions: string[];
+  isDetectorOpen: boolean;
   setSelectedWorkFile: (file: string | null) => void;
   setSelectedReferenceFile: (file: string | null) => void;
   setActivePreviewFile: (file: string | null) => void;
@@ -43,6 +44,7 @@ interface DeAiState {
   setSelectedDetectorReferences: (references: string[] | ((references: string[]) => string[])) => void;
   setDetectorSelectedHistoricalVersions: (versions: string[] | ((versions: string[]) => string[])) => void;
   setRemoverSelectedHistoricalVersions: (versions: string[] | ((versions: string[]) => string[])) => void;
+  setIsDetectorOpen: (isOpen: boolean) => void;
 }
 
 import { persist } from 'zustand/middleware';
@@ -68,6 +70,7 @@ export const useDeAiStore = create<DeAiState>()(
       selectedDetectorReferences: [],
       detectorSelectedHistoricalVersions: [],
       removerSelectedHistoricalVersions: [],
+      isDetectorOpen: false,
       setSelectedWorkFile: (file) => set({ selectedWorkFile: file, selectedReferenceFile: null, activePreviewFile: file, activeVersionId: null, versions: [], suggestion: null, aiScore: null, parsedScoreResult: null }),
       setSelectedReferenceFile: (file) => set({ selectedWorkFile: null, selectedReferenceFile: file, activePreviewFile: file, activeVersionId: null, versions: [], suggestion: null, aiScore: null, parsedScoreResult: null }),
       setActivePreviewFile: (file) => set({ activePreviewFile: file }),
@@ -96,6 +99,7 @@ export const useDeAiStore = create<DeAiState>()(
       setRemoverSelectedHistoricalVersions: (versions) => set((state) => ({
         removerSelectedHistoricalVersions: typeof versions === 'function' ? versions(state.removerSelectedHistoricalVersions) : versions,
       })),
+      setIsDetectorOpen: (isDetectorOpen) => set({ isDetectorOpen }),
     }),
     {
       name: 'museai-deai-storage',

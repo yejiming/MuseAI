@@ -74,6 +74,8 @@ const DeAi: React.FC = () => {
     setVersions,
     selectedDetectorReferences,
     setSelectedDetectorReferences,
+    isDetectorOpen,
+    setIsDetectorOpen,
   } = useDeAiStore();
 
   const [detectorInput, setDetectorInput] = useState<string | undefined>();
@@ -83,7 +85,6 @@ const DeAi: React.FC = () => {
   const [isResizingDirectory, setIsResizingDirectory] = useState(false);
   const [isResizingAgent, setIsResizingAgent] = useState(false);
   const [isDetectorSettingsOpen, setIsDetectorSettingsOpen] = useState(false);
-  const [isDetectorOpen, setIsDetectorOpen] = useState(false);
   const [isRemoverSettingsOpen, setIsRemoverSettingsOpen] = useState(false);
   const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
   const [referenceFilesLoaded, setReferenceFilesLoaded] = useState(false);
