@@ -23,7 +23,8 @@ interface DeAiState {
   detectorRun: AgentRunState;
   removerRun: AgentRunState;
   selectedDetectorReferences: string[];
-  selectedHistoricalVersions: string[];
+  detectorSelectedHistoricalVersions: string[];
+  removerSelectedHistoricalVersions: string[];
   setSelectedWorkFile: (file: string | null) => void;
   setSelectedReferenceFile: (file: string | null) => void;
   setActivePreviewFile: (file: string | null) => void;
@@ -40,7 +41,8 @@ interface DeAiState {
   setDetectorRun: (run: AgentRunState) => void;
   setRemoverRun: (run: AgentRunState) => void;
   setSelectedDetectorReferences: (references: string[] | ((references: string[]) => string[])) => void;
-  setSelectedHistoricalVersions: (versions: string[] | ((versions: string[]) => string[])) => void;
+  setDetectorSelectedHistoricalVersions: (versions: string[] | ((versions: string[]) => string[])) => void;
+  setRemoverSelectedHistoricalVersions: (versions: string[] | ((versions: string[]) => string[])) => void;
 }
 
 import { persist } from 'zustand/middleware';
@@ -64,7 +66,8 @@ export const useDeAiStore = create<DeAiState>()(
       detectorRun: { runId: null, messageId: null },
       removerRun: { runId: null, messageId: null },
       selectedDetectorReferences: [],
-      selectedHistoricalVersions: [],
+      detectorSelectedHistoricalVersions: [],
+      removerSelectedHistoricalVersions: [],
       setSelectedWorkFile: (file) => set({ selectedWorkFile: file, selectedReferenceFile: null, activePreviewFile: file, activeVersionId: null, versions: [], suggestion: null, aiScore: null, parsedScoreResult: null }),
       setSelectedReferenceFile: (file) => set({ selectedWorkFile: null, selectedReferenceFile: file, activePreviewFile: file, activeVersionId: null, versions: [], suggestion: null, aiScore: null, parsedScoreResult: null }),
       setActivePreviewFile: (file) => set({ activePreviewFile: file }),
@@ -87,8 +90,11 @@ export const useDeAiStore = create<DeAiState>()(
       setSelectedDetectorReferences: (references) => set((state) => ({
         selectedDetectorReferences: typeof references === 'function' ? references(state.selectedDetectorReferences) : references,
       })),
-      setSelectedHistoricalVersions: (versions) => set((state) => ({
-        selectedHistoricalVersions: typeof versions === 'function' ? versions(state.selectedHistoricalVersions) : versions,
+      setDetectorSelectedHistoricalVersions: (versions) => set((state) => ({
+        detectorSelectedHistoricalVersions: typeof versions === 'function' ? versions(state.detectorSelectedHistoricalVersions) : versions,
+      })),
+      setRemoverSelectedHistoricalVersions: (versions) => set((state) => ({
+        removerSelectedHistoricalVersions: typeof versions === 'function' ? versions(state.removerSelectedHistoricalVersions) : versions,
       })),
     }),
     {
@@ -96,7 +102,8 @@ export const useDeAiStore = create<DeAiState>()(
       partialize: (state) => ({
         selectedDetectorReferences: state.selectedDetectorReferences,
         carryOverHistoricalSuggestions: state.carryOverHistoricalSuggestions,
-        selectedHistoricalVersions: state.selectedHistoricalVersions,
+        detectorSelectedHistoricalVersions: state.detectorSelectedHistoricalVersions,
+        removerSelectedHistoricalVersions: state.removerSelectedHistoricalVersions,
       }),
     }
   )

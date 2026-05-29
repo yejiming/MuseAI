@@ -52,8 +52,10 @@ const DeAi: React.FC = () => {
     aiScore,
     setAiScore,
     setSuggestion,
-    selectedHistoricalVersions,
-    setSelectedHistoricalVersions,
+    detectorSelectedHistoricalVersions,
+    removerSelectedHistoricalVersions,
+    setDetectorSelectedHistoricalVersions,
+    setRemoverSelectedHistoricalVersions,
     detectorRunning,
     setDetectorRunning,
     removerRunning,
@@ -224,9 +226,9 @@ const DeAi: React.FC = () => {
     if (!confirmed) return;
     const latestVersions = await refreshVersions(activeVersionId);
     
-    // Filter out history suggestions based on selectedHistoricalVersions (exclude activeVersionId if it exists)
+    // Filter out history suggestions based on detectorSelectedHistoricalVersions (exclude activeVersionId if it exists)
     const historySuggestions = latestVersions
-      .filter(v => v.id !== activeVersionId && v.suggestion?.trim() && selectedHistoricalVersions.includes(v.id))
+      .filter(v => v.id !== activeVersionId && v.suggestion?.trim() && detectorSelectedHistoricalVersions.includes(v.id))
       .sort((a, b) => b.timestamp - a.timestamp);
 
     if (activeVersionId) {
@@ -253,9 +255,9 @@ const DeAi: React.FC = () => {
     
     const latestVersions = await refreshVersions(activeVersionId);
     
-    // Filter out history suggestions based on selectedHistoricalVersions
+    // Filter out history suggestions based on removerSelectedHistoricalVersions
     const historySuggestions = latestVersions
-      .filter(v => v.id !== activeVersionId && v.suggestion?.trim() && extractSuggestionText(v.suggestion!) !== confirmedSuggestion && selectedHistoricalVersions.includes(v.id))
+      .filter(v => v.id !== activeVersionId && v.suggestion?.trim() && extractSuggestionText(v.suggestion!) !== confirmedSuggestion && removerSelectedHistoricalVersions.includes(v.id))
       .sort((a, b) => b.timestamp - a.timestamp);
       
     const confirmed = await new Promise<boolean>((resolve) => {
@@ -499,10 +501,10 @@ const DeAi: React.FC = () => {
             <Tree
               blockNode
               checkable
-              checkedKeys={selectedHistoricalVersions}
+              checkedKeys={removerSelectedHistoricalVersions}
               onCheck={(checkedKeys) => {
                 const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
-                setSelectedHistoricalVersions(keys.map(String));
+                setRemoverSelectedHistoricalVersions(keys.map(String));
               }}
               selectable={false}
               treeData={versions.filter(v => v.id !== activeVersionId && v.suggestion?.trim()).map((v) => ({
@@ -554,10 +556,10 @@ const DeAi: React.FC = () => {
                 <Tree
                   blockNode
                   checkable
-                  checkedKeys={selectedHistoricalVersions}
+                  checkedKeys={detectorSelectedHistoricalVersions}
                   onCheck={(checkedKeys) => {
                     const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
-                    setSelectedHistoricalVersions(keys.map(String));
+                    setDetectorSelectedHistoricalVersions(keys.map(String));
                   }}
                   selectable={false}
                   treeData={versions.filter(v => v.id !== activeVersionId && v.suggestion?.trim()).map((v) => ({
@@ -732,7 +734,7 @@ const DeAi: React.FC = () => {
                   onClick={() => setIsDetectorSettingsOpen(true)}
                   shape="circle"
                   title="选择检测范文"
-                  type={selectedDetectorReferences.length > 0 ? 'primary' : 'default'}
+                  type={(selectedDetectorReferences.length > 0 || detectorSelectedHistoricalVersions.length > 0) ? 'primary' : 'default'}
                 />
               }
               messages={detectorMessages}
@@ -783,7 +785,7 @@ const DeAi: React.FC = () => {
                 onClick={() => setIsRemoverSettingsOpen(true)}
                 shape="circle"
                 title="Agent 设置"
-                type={selectedHistoricalVersions.length > 0 ? 'primary' : 'default'}
+                type={removerSelectedHistoricalVersions.length > 0 ? 'primary' : 'default'}
               />
             }
             messages={removerMessages}
