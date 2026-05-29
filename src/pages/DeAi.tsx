@@ -8,6 +8,19 @@ import { Button, Empty, Modal, Popconfirm, Progress, Select, Tree, Typography, m
 import { DeleteOutlined, SettingOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 
+
+function extractSuggestionText(rawSuggestion: string): string {
+  if (!rawSuggestion) return '';
+  try {
+    const parsed = JSON.parse(rawSuggestion);
+    if (typeof parsed?.suggestion === 'string') return parsed.suggestion.trim();
+    if (typeof parsed?.优化建议 === 'string') return parsed.优化建议.trim();
+  } catch (e) {
+    // expected if it's already plain text
+  }
+  return rawSuggestion.trim();
+}
+
 const MIN_DIRECTORY_WIDTH = 250;
 const DEFAULT_AGENT_WIDTH = 420;
 const MIN_AGENT_WIDTH = 380;
@@ -181,30 +194,13 @@ const DeAi: React.FC = () => {
     ? `请根据以下修改意见，直接修改作品 ${activeVersionId ? getVersionPath(selectedWorkFile, activeVersionId) : selectedWorkFile}，降低AI味：\n${suggestion || ''}`
     : '';
 
-  const buildRecentSuggestionText = (sourceVersions: VersionInfo[], excludedSuggestion?: string) => {
-    const normalizedExcludedSuggestion = excludedSuggestion?.trim();
-    const recentSuggestions = sourceVersions
-      .filter((version) => {
-        const versionSuggestion = version.suggestion?.trim();
-        return versionSuggestion && versionSuggestion !== normalizedExcludedSuggestion;
-      })
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, 3);
-
-    if (recentSuggestions.length === 0) {
-      return '暂无历史修改建议。';
+  const buildDetectorPrompt = (versionId: string, historySuggestions: VersionInfo[]) => {
+    let recentSuggestionText = '暂无历史修改建议。';
+    if (historySuggestions.length > 0) {
+      recentSuggestionText = historySuggestions.map((v, i) => `${i + 1}. 版本 ${new Date(v.timestamp).toLocaleString()} (AI味: ${v.aiScore ?? '--'})：\n${extractSuggestionText(v.suggestion!)}`).join('\n\n');
     }
-
-    return recentSuggestions
-      .map((version, index) => (
-        `${index + 1}. 版本 ${new Date(version.timestamp).toLocaleString()}：\n${version.suggestion!.trim()}`
-      ))
-      .join('\n\n');
+    return `请分析作品: ${getVersionPath(selectedWorkFile!, versionId)}\n\n本次检测使用以下范文路径作为参考：\n${selectedDetectorReferences.join('\n')}\n\n你带上的历史版本检测AI味Agent给出的修改建议，请作为本次判断参考：\n${recentSuggestionText}\n\n请重点判断当前文章是否仍然存在这些旧问题，或是否因为此前修改出现矫枉过正。`;
   };
-
-  const buildDetectorPrompt = (versionId: string, sourceVersions: VersionInfo[]) => (
-    `请分析作品: ${getVersionPath(selectedWorkFile!, versionId)}\n\n本次检测使用以下范文路径作为参考：\n${selectedDetectorReferences.join('\n')}\n\n近3次该文章检测AI味Agent给出的修改建议（含所有版本），请作为本次判断参考：\n${buildRecentSuggestionText(sourceVersions)}\n\n请重点判断当前文章是否仍然存在这些旧问题，或是否因为此前修改出现矫枉过正。`
-  );
 
   const confirmDetectorWithoutReferences = async () => {
     if (selectedDetectorReferences.length > 0) return true;
@@ -225,9 +221,15 @@ const DeAi: React.FC = () => {
     const confirmed = await confirmDetectorWithoutReferences();
     if (!confirmed) return;
     const latestVersions = await refreshVersions(activeVersionId);
+    
+    // Filter out history suggestions based on selectedHistoricalVersions (exclude activeVersionId if it exists)
+    const historySuggestions = latestVersions
+      .filter(v => v.id !== activeVersionId && v.suggestion?.trim() && selectedHistoricalVersions.includes(v.id))
+      .sort((a, b) => b.timestamp - a.timestamp);
+
     if (activeVersionId) {
       detectorTargetVersionIdRef.current = activeVersionId;
-      return buildDetectorPrompt(activeVersionId, latestVersions);
+      return buildDetectorPrompt(activeVersionId, historySuggestions);
     }
     try {
       const newVersion = await invoke<VersionInfo>('create_file_version', { path: selectedWorkFile });
@@ -235,7 +237,7 @@ const DeAi: React.FC = () => {
       setActiveVersionId(newVersion.id);
       syncActiveVersionResult(newVersion);
       detectorTargetVersionIdRef.current = newVersion.id;
-      return buildDetectorPrompt(newVersion.id, latestVersions);
+      return buildDetectorPrompt(newVersion.id, historySuggestions);
     } catch (e) {
       message.error(`创建检测版本失败: ${e}`);
       throw e;
@@ -244,38 +246,38 @@ const DeAi: React.FC = () => {
 
   const handleRemoverBeforeStart = async () => {
     if (!selectedWorkFile) return;
-    const confirmedSuggestion = persistedSuggestion;
+    const confirmedSuggestion = extractSuggestionText(persistedSuggestion || '');
     if (!confirmedSuggestion) return;
     
     const latestVersions = await refreshVersions(activeVersionId);
     
     // Filter out history suggestions based on selectedHistoricalVersions
     const historySuggestions = latestVersions
-      .filter(v => v.suggestion?.trim() && v.suggestion.trim() !== confirmedSuggestion.trim() && selectedHistoricalVersions.includes(v.id))
+      .filter(v => v.id !== activeVersionId && v.suggestion?.trim() && extractSuggestionText(v.suggestion!) !== confirmedSuggestion && selectedHistoricalVersions.includes(v.id))
       .sort((a, b) => b.timestamp - a.timestamp);
       
     const confirmed = await new Promise<boolean>((resolve) => {
       Modal.confirm({
         title: '确认使用以下修改建议？',
-        width: 800,
+        width: 1000,
         content: (
-          <div className="de-ai-remover-confirm-content" style={{ display: 'flex', flexDirection: 'column', gap: 16, maxHeight: '60vh', overflowY: 'auto' }}>
-            <div style={{ padding: 16, background: '#faf9f5', borderRadius: 8, border: '1px solid #e8e8e8' }}>
+          <div className="de-ai-remover-confirm-content" style={{ display: 'flex', flexDirection: 'row', gap: 16, height: '60vh' }}>
+            <div style={{ flex: 1, padding: 16, background: '#faf9f5', borderRadius: 8, border: '1px solid #e8e8e8', display: 'flex', flexDirection: 'column' }}>
               <Typography.Text strong>本次优化建议：</Typography.Text>
-              <div style={{ marginTop: 8, maxHeight: 300, overflowY: 'auto' }}>
+              <div style={{ marginTop: 8, overflowY: 'auto', flex: 1 }}>
                 <Typography.Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
                   {confirmedSuggestion}
                 </Typography.Paragraph>
               </div>
             </div>
             {historySuggestions.length > 0 && (
-              <div style={{ padding: 16, background: '#faf9f5', borderRadius: 8, border: '1px solid #e8e8e8' }}>
+              <div style={{ flex: 1, padding: 16, background: '#faf9f5', borderRadius: 8, border: '1px solid #e8e8e8', display: 'flex', flexDirection: 'column' }}>
                 <Typography.Text strong>带上的历史版本建议：</Typography.Text>
-                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', flex: 1 }}>
                   {historySuggestions.map((v) => (
                     <div key={v.id} style={{ padding: 12, background: '#fff', borderRadius: 4, border: '1px solid #f0f0f0' }}>
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>版本 {new Date(v.timestamp).toLocaleString()}</Typography.Text>
-                      <div style={{ marginTop: 4, maxHeight: 200, overflowY: 'auto' }}>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>版本 {new Date(v.timestamp).toLocaleString()} (AI味: {v.aiScore ?? '--'})</Typography.Text>
+                      <div style={{ marginTop: 4 }}>
                         <Typography.Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
                           {v.suggestion!.trim()}
                         </Typography.Paragraph>
@@ -298,7 +300,7 @@ const DeAi: React.FC = () => {
     try {
       let recentSuggestionText = '';
       if (historySuggestions.length > 0) {
-        recentSuggestionText = historySuggestions.map((v, i) => `${i + 1}. 版本 ${new Date(v.timestamp).toLocaleString()}：\n${v.suggestion!.trim()}`).join('\n\n');
+        recentSuggestionText = historySuggestions.map((v, i) => `${i + 1}. 版本 ${new Date(v.timestamp).toLocaleString()} (AI味: ${v.aiScore ?? '--'})：\n${extractSuggestionText(v.suggestion!)}`).join('\n\n');
       }
       
       const newVersion: any = await invoke('create_file_version', { path: selectedWorkFile });
@@ -405,8 +407,8 @@ const DeAi: React.FC = () => {
         ? jsonResult.优化建议.trim()
         : suggestionMatch?.[1]?.trim();
     
-    // We want to store the full JSON if available, otherwise just the suggestion
-    const textToStore = jsonText || parsedSuggestion || '';
+    // 仅获取检测AI味Agent给出json里的“优化建议”字段
+    const textToStore = parsedSuggestion || '';
     
     if (parsedScore !== null && parsedSuggestion) {
       const roundedScore = Math.round(parsedScore);
@@ -461,7 +463,7 @@ const DeAi: React.FC = () => {
     <div style={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden', background: '#faf9f5' }}>
 
       <Modal
-        title="选择带上的历史版本检测AI味建议"
+        title="去除AI味 Agent 设置"
         open={isRemoverSettingsOpen}
         okText="确定"
         cancelText="取消"
@@ -469,8 +471,9 @@ const DeAi: React.FC = () => {
         onCancel={() => setIsRemoverSettingsOpen(false)}
         onOk={() => setIsRemoverSettingsOpen(false)}
       >
+        <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>选择带上的历史版本检测AI味建议</Typography.Text>
         <div className="de-ai-reference-picker" style={{ maxHeight: 300, overflowY: 'auto' }}>
-          {versions.filter(v => v.suggestion?.trim()).length > 0 ? (
+          {versions.filter(v => v.id !== activeVersionId && v.suggestion?.trim()).length > 0 ? (
             <Tree
               blockNode
               checkable
@@ -480,8 +483,8 @@ const DeAi: React.FC = () => {
                 setSelectedHistoricalVersions(keys.map(String));
               }}
               selectable={false}
-              treeData={versions.filter(v => v.suggestion?.trim()).map((v) => ({
-                title: `版本 ${new Date(v.timestamp).toLocaleString()}`,
+              treeData={versions.filter(v => v.id !== activeVersionId && v.suggestion?.trim()).map((v) => ({
+                title: `版本 ${new Date(v.timestamp).toLocaleString()} (AI味: ${v.aiScore ?? '--'})`,
                 key: v.id,
               }))}
             />
@@ -491,7 +494,7 @@ const DeAi: React.FC = () => {
         </div>
       </Modal>
       <Modal
-        title="选择检测范文"
+        title="检测AI味 Agent 设置"
         open={isDetectorSettingsOpen}
         okText="确定"
         cancelText="取消"
@@ -499,23 +502,52 @@ const DeAi: React.FC = () => {
         onCancel={() => setIsDetectorSettingsOpen(false)}
         onOk={() => setIsDetectorSettingsOpen(false)}
       >
-        <div className="de-ai-reference-picker">
-          {allReferenceFiles.length > 0 ? (
-            <Tree
-              blockNode
-              checkable
-              checkedKeys={selectedDetectorReferences}
-              className="de-ai-reference-picker__tree"
-              onCheck={(checkedKeys) => {
-                const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
-                setSelectedDetectorReferences(keys.map(String).filter((key) => allReferenceFiles.includes(key)));
-              }}
-              selectable={false}
-              treeData={mapReferenceTreeData(referenceTree)}
-            />
-          ) : (
-            <Empty description="范文目录暂无可选文件" />
-          )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxHeight: '60vh', overflowY: 'auto' }}>
+          <div>
+            <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>选择检测范文</Typography.Text>
+            <div className="de-ai-reference-picker" style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6 }}>
+              {allReferenceFiles.length > 0 ? (
+                <Tree
+                  blockNode
+                  checkable
+                  checkedKeys={selectedDetectorReferences}
+                  className="de-ai-reference-picker__tree"
+                  onCheck={(checkedKeys) => {
+                    const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
+                    setSelectedDetectorReferences(keys.map(String).filter((key) => allReferenceFiles.includes(key)));
+                  }}
+                  selectable={false}
+                  treeData={mapReferenceTreeData(referenceTree)}
+                />
+              ) : (
+                <Empty description="范文目录暂无可选文件" />
+              )}
+            </div>
+          </div>
+          
+          <div>
+            <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>选择带上的历史版本检测AI味建议</Typography.Text>
+            <div className="de-ai-reference-picker" style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6 }}>
+              {versions.filter(v => v.id !== activeVersionId && v.suggestion?.trim()).length > 0 ? (
+                <Tree
+                  blockNode
+                  checkable
+                  checkedKeys={selectedHistoricalVersions}
+                  onCheck={(checkedKeys) => {
+                    const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
+                    setSelectedHistoricalVersions(keys.map(String));
+                  }}
+                  selectable={false}
+                  treeData={versions.filter(v => v.id !== activeVersionId && v.suggestion?.trim()).map((v) => ({
+                    title: `版本 ${new Date(v.timestamp).toLocaleString()} (AI味: ${v.aiScore ?? '--'})`,
+                    key: v.id,
+                  }))}
+                />
+              ) : (
+                <Empty description="暂无可用的历史版本建议" />
+              )}
+            </div>
+          </div>
         </div>
       </Modal>
       <div ref={directoryRef} style={{ width: directoryWidth, minWidth: directoryWidth, borderRight: '1px solid rgba(0, 0, 0, 0.04)', display: 'flex', flexDirection: 'column', position: 'relative' }}>
