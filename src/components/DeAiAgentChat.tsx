@@ -10,7 +10,7 @@ import { Message, AgentToolEntry } from '../stores/useAgentStore';
 
 interface ChatStreamEvent {
   runId: string;
-  eventType: 'start' | 'delta' | 'thinking_delta' | 'tool_start' | 'tool_output' | 'tool_end' | 'todo_update' | 'done' | 'error';
+  eventType: 'start' | 'delta' | 'thinking_delta' | 'thinking_signature' | 'tool_start' | 'tool_output' | 'tool_end' | 'todo_update' | 'done' | 'error';
   delta?: string;
   message?: string;
   toolCallId?: string;
@@ -106,17 +106,21 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
   };
 
   useEffect(() => {
-    const unlistenPromise = listen<ChatStreamEvent>('agent-chat-stream', (event) => {
-      const active = activeRunRef.current;
+    let isMounted = true;
+    let unlistenFn: (() => void) | null = null;
+
+    listen<ChatStreamEvent>('agent-chat-stream', (event) => {
+      if (!isMounted) return;
+      const activeRun = activeRunRef.current;
       const payload = event.payload;
-      if (!active.runId || payload.runId !== active.runId || !active.messageId) {
+      if (!activeRun.runId || payload.runId !== activeRun.runId || !activeRun.messageId) {
         return;
       }
 
       if (payload.eventType === 'delta' && payload.delta) {
         currentThinkingIdRef.current = null;
         setSyncedMessages((prev) => prev.map((msg) => (
-          msg.id === active.messageId
+          msg.id === activeRun.messageId
             ? { ...msg, content: msg.content + payload.delta }
             : msg
         )));
@@ -125,7 +129,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
 
       if (payload.eventType === 'thinking_delta' && payload.delta) {
         setSyncedMessages((prev) => prev.map((msg) => {
-          if (msg.id !== active.messageId) return msg;
+          if (msg.id !== activeRun.messageId) return msg;
           let newContent = msg.content;
           const newThinkingBlocks = [...(msg.thinkingBlocks ?? [])];
           
@@ -153,11 +157,26 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
         return;
       }
 
+      if (payload.eventType === 'thinking_signature' && payload.delta) {
+        setSyncedMessages((prev) => prev.map((msg) => {
+          if (msg.id !== activeRun.messageId) return msg;
+          const newThinkingBlocks = [...(msg.thinkingBlocks ?? [])];
+          if (newThinkingBlocks.length > 0) {
+            newThinkingBlocks[newThinkingBlocks.length - 1] = {
+              ...newThinkingBlocks[newThinkingBlocks.length - 1],
+              signature: payload.delta
+            };
+          }
+          return { ...msg, thinkingBlocks: newThinkingBlocks };
+        }));
+        return;
+      }
+
       if (payload.eventType === 'tool_start') {
         currentThinkingIdRef.current = null;
         const toolId = payload.toolCallId || `tool-${Date.now()}`;
         setSyncedMessages((prev) => {
-          const next = updateMessageTool(prev, active.messageId!, {
+          const next = updateMessageTool(prev, activeRun.messageId!, {
             id: toolId,
             name: payload.toolName || '未知工具',
             result: payload.message || '正在执行工具',
@@ -165,7 +184,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
             arguments: payload.toolArguments || '{}',
           }, 'start');
           return next.map((msg) =>
-            msg.id === active.messageId
+            msg.id === activeRun.messageId
               ? { ...msg, content: msg.content + `\n\n[[TOOL:${toolId}]]\n\n` }
               : msg
           );
@@ -174,7 +193,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
       }
 
       if (payload.eventType === 'tool_output' || payload.eventType === 'tool_end') {
-        setSyncedMessages((prev) => updateMessageTool(prev, active.messageId!, {
+        setSyncedMessages((prev) => updateMessageTool(prev, activeRun.messageId!, {
           id: payload.toolCallId,
           name: payload.toolName || '未知工具',
           result: payload.message || payload.delta || '',
@@ -186,7 +205,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
       if (payload.eventType === 'error') {
         currentThinkingIdRef.current = null;
         setSyncedMessages((prev) => prev.map((msg) => (
-          msg.id === active.messageId
+          msg.id === activeRun.messageId
             ? { ...msg, content: payload.message ? `请求模型失败：${payload.message}` : '请求模型失败' }
             : msg
         )));
@@ -201,7 +220,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
         activeRunRef.current = { runId: null, messageId: null };
         setActiveRun({ runId: null, messageId: null });
         onRunningChangeRef.current?.(false);
-        const lastMsg = messagesRef.current.find(m => m.id === active.messageId);
+        const lastMsg = messagesRef.current.find(m => m.id === activeRun.messageId);
         if (lastMsg && onDoneRef.current) {
           const result = onDoneRef.current(lastMsg.content);
           const handleResult = (res: any) => {
@@ -219,10 +238,18 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
           }
         }
       }
+    }).then((fn) => {
+      unlistenFn = fn;
+      if (!isMounted) {
+        fn();
+      }
     });
 
     return () => {
-      unlistenPromise.then((unlisten) => unlisten());
+      isMounted = false;
+      if (unlistenFn) {
+        unlistenFn();
+      }
     };
   }, []);
 
@@ -306,7 +333,11 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
           thinkingDepth: settings.agentConfigs?.[agentId]?.thinkingDepth ?? settings.thinkingDepth,
           systemPrompt: systemPrompt,
           workspacePath: settings.worksDirectory,
-          messages: [...historyMessages, userMessage].map(m => ({ role: m.role, content: m.content })),
+          messages: [...historyMessages, userMessage].map(m => ({
+            role: m.role,
+            content: m.content,
+            thinkingBlocks: m.thinkingBlocks,
+          })),
           allowedTools: allowedTools,
           allowedWritePaths: resolvedAllowedWritePaths,
         },

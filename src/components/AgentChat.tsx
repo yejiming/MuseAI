@@ -13,12 +13,13 @@ import {
   AgentTodo,
   SkillDefinition,
   AgentSessionSummary,
-  AgentSessionRecord
+  AgentSessionRecord,
+  ThinkingBlock
 } from '../stores/useAgentStore';
 
 interface ChatStreamEvent {
   runId: string;
-  eventType: 'start' | 'delta' | 'thinking_delta' | 'tool_start' | 'tool_output' | 'tool_end' | 'todo_update' | 'done' | 'error';
+  eventType: 'start' | 'delta' | 'thinking_delta' | 'thinking_signature' | 'tool_start' | 'tool_output' | 'tool_end' | 'todo_update' | 'done' | 'error';
   delta?: string;
   message?: string;
   toolCallId?: string;
@@ -39,6 +40,7 @@ interface ModelMessage {
   content: string;
   toolCallId?: string;
   toolCalls?: AgentToolCallPayload[];
+  thinkingBlocks?: ThinkingBlock[];
 }
 
 interface AgentChatProps {
@@ -114,17 +116,21 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
   }, [todos]);
 
   useEffect(() => {
-    const unlistenPromise = listen<ChatStreamEvent>('agent-chat-stream', (event) => {
-      const active = activeRunRef.current;
+    let isMounted = true;
+    let unlistenFn: (() => void) | null = null;
+
+    listen<ChatStreamEvent>('agent-chat-stream', (event) => {
+      if (!isMounted) return;
+      const activeRun = activeRunRef.current;
       const payload = event.payload;
-      if (!active.runId || payload.runId !== active.runId || !active.messageId) {
+      if (!activeRun.runId || payload.runId !== activeRun.runId || !activeRun.messageId) {
         return;
       }
 
       if (payload.eventType === 'delta' && payload.delta) {
         currentThinkingIdRef.current = null;
         setMessages((prev) => prev.map((msg) => (
-          msg.id === active.messageId
+          msg.id === activeRun.messageId
             ? { ...msg, content: msg.content + payload.delta }
             : msg
         )));
@@ -133,7 +139,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
 
       if (payload.eventType === 'thinking_delta' && payload.delta) {
         setMessages((prev) => prev.map((msg) => {
-          if (msg.id !== active.messageId) return msg;
+          if (msg.id !== activeRun.messageId) return msg;
           let newContent = msg.content;
           const newThinkingBlocks = [...(msg.thinkingBlocks ?? [])];
           
@@ -161,11 +167,26 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
         return;
       }
 
+      if (payload.eventType === 'thinking_signature' && payload.delta) {
+        setMessages((prev) => prev.map((msg) => {
+          if (msg.id !== activeRun.messageId) return msg;
+          const newThinkingBlocks = [...(msg.thinkingBlocks ?? [])];
+          if (newThinkingBlocks.length > 0) {
+            newThinkingBlocks[newThinkingBlocks.length - 1] = {
+              ...newThinkingBlocks[newThinkingBlocks.length - 1],
+              signature: payload.delta
+            };
+          }
+          return { ...msg, thinkingBlocks: newThinkingBlocks };
+        }));
+        return;
+      }
+
       if (payload.eventType === 'tool_start') {
         currentThinkingIdRef.current = null;
         const toolId = payload.toolCallId || `tool-${Date.now()}`;
         setMessages((prev) => {
-          const next = updateMessageTool(prev, active.messageId!, {
+          const next = updateMessageTool(prev, activeRun.messageId!, {
             id: toolId,
             name: payload.toolName || '未知工具',
             result: payload.message || '正在执行工具',
@@ -173,7 +194,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
             arguments: payload.toolArguments || '{}',
           }, 'start');
           return next.map((msg) =>
-            msg.id === active.messageId
+            msg.id === activeRun.messageId
               ? { ...msg, content: msg.content + `\n\n[[TOOL:${toolId}]]\n\n` }
               : msg
           );
@@ -182,7 +203,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
       }
 
       if (payload.eventType === 'tool_output' || payload.eventType === 'tool_end') {
-        setMessages((prev) => updateMessageTool(prev, active.messageId!, {
+        setMessages((prev) => updateMessageTool(prev, activeRun.messageId!, {
           id: payload.toolCallId,
           name: payload.toolName || '未知工具',
           result: payload.message || payload.delta || '',
@@ -203,7 +224,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
       if (payload.eventType === 'error') {
         currentThinkingIdRef.current = null;
         setMessages((prev) => prev.map((msg) => (
-          msg.id === active.messageId
+          msg.id === activeRun.messageId
             ? { ...msg, content: payload.message ? `请求模型失败：${payload.message}` : '请求模型失败' }
             : msg
         )));
@@ -222,10 +243,18 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
           void saveCurrentSession();
         }, 0);
       }
+    }).then((fn) => {
+      unlistenFn = fn;
+      if (!isMounted) {
+        fn();
+      }
     });
 
     return () => {
-      unlistenPromise.then((unlisten) => unlisten());
+      isMounted = false;
+      if (unlistenFn) {
+        unlistenFn();
+      }
     };
   }, []);
 
@@ -1024,7 +1053,7 @@ function buildAssistantHistoryMessages(message: Message): ModelMessage[] {
       return;
     }
 
-    modelMessages.push(buildAssistantToolCallMessage(assistantText, [tool]));
+    modelMessages.push(buildAssistantToolCallMessage(assistantText, [tool], message.thinkingBlocks));
     modelMessages.push(buildToolResultMessage(tool));
     emittedToolIds.add(match[1]);
     assistantText = '';
@@ -1032,7 +1061,7 @@ function buildAssistantHistoryMessages(message: Message): ModelMessage[] {
 
   const remainingTools = tools.filter((tool) => !tool.id || !emittedToolIds.has(tool.id));
   if (remainingTools.length > 0) {
-    modelMessages.push(buildAssistantToolCallMessage(assistantText, remainingTools));
+    modelMessages.push(buildAssistantToolCallMessage(assistantText, remainingTools, message.thinkingBlocks));
     remainingTools.forEach((tool) => modelMessages.push(buildToolResultMessage(tool)));
     assistantText = '';
   }
@@ -1041,13 +1070,14 @@ function buildAssistantHistoryMessages(message: Message): ModelMessage[] {
     modelMessages.push({
       role: 'assistant',
       content: assistantText,
+      thinkingBlocks: message.thinkingBlocks,
     });
   }
 
   return modelMessages;
 }
 
-function buildAssistantToolCallMessage(content: string, tools: AgentToolEntry[]): ModelMessage {
+function buildAssistantToolCallMessage(content: string, tools: AgentToolEntry[], thinkingBlocks?: ThinkingBlock[]): ModelMessage {
   return {
     role: 'assistant',
     content,
@@ -1056,6 +1086,7 @@ function buildAssistantToolCallMessage(content: string, tools: AgentToolEntry[])
       name: tool.name,
       arguments: tool.arguments || '{}',
     })),
+    thinkingBlocks,
   };
 }
 

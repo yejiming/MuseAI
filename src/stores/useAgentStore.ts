@@ -11,6 +11,7 @@ export interface AgentToolEntry {
 export interface ThinkingBlock {
   id: string;
   content: string;
+  signature?: string;
 }
 
 export interface Message {

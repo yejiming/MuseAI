@@ -47,6 +47,7 @@ pub struct ChatMessage {
     pub content: String,
     pub tool_call_id: Option<String>,
     pub tool_calls: Option<Vec<ChatToolCall>>,
+    pub thinking_blocks: Option<Vec<Value>>,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

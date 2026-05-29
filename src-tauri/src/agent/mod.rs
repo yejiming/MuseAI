@@ -296,7 +296,17 @@ async fn stream_anthropic_round(
                         }
                     }
                     AnthropicStreamEvent::ThinkingSignature { index, signature } => {
-                        result.set_thinking_signature(index, signature);
+                        result.set_thinking_signature(index, signature.clone());
+                        if options.emit_events {
+                            emit_chat_event(
+                                app,
+                                run_id,
+                                "thinking_signature",
+                                Some(signature),
+                                None,
+                                options,
+                            );
+                        }
                     }
                     AnthropicStreamEvent::RedactedThinking { index, data } => {
                         result.push_redacted_thinking(index, data);
@@ -664,6 +674,7 @@ fn run_subagent_agent_loop<'a>(
             content: task,
             tool_call_id: None,
             tool_calls: None,
+            thinking_blocks: None,
         }];
 
         let result = match child_request.model_interface.as_str() {

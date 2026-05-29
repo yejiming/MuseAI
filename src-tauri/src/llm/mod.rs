@@ -137,25 +137,58 @@ pub fn anthropic_history_messages(history: &[ChatMessage]) -> Vec<Value> {
                 "content": message.content,
             })),
             "assistant" => {
-                if let Some(tool_calls) = message
+                let has_tool_calls = message
                     .tool_calls
                     .as_deref()
-                    .filter(|calls| !calls.is_empty())
-                {
+                    .map(|calls| !calls.is_empty())
+                    .unwrap_or(false);
+                let has_thinking = message
+                    .thinking_blocks
+                    .as_deref()
+                    .map(|blocks| !blocks.is_empty())
+                    .unwrap_or(false);
+
+                if has_tool_calls || has_thinking {
                     let mut content = Vec::new();
+                    if let Some(blocks) = message.thinking_blocks.as_deref() {
+                        for block in blocks {
+                            if let Some(obj) = block.as_object() {
+                                if obj.get("type").and_then(Value::as_str) == Some("redacted_thinking") {
+                                    content.push(block.clone());
+                                } else {
+                                    let mut thinking_block = serde_json::Map::new();
+                                    thinking_block.insert("type".to_string(), json!("thinking"));
+                                    if let Some(thinking) = obj.get("content")
+                                        .or_else(|| obj.get("thinking"))
+                                        .and_then(Value::as_str)
+                                    {
+                                        thinking_block.insert("thinking".to_string(), json!(thinking));
+                                    }
+                                    if let Some(signature) = obj.get("signature").and_then(Value::as_str) {
+                                        thinking_block.insert("signature".to_string(), json!(signature));
+                                    }
+                                    content.push(Value::Object(thinking_block));
+                                }
+                            } else {
+                                content.push(block.clone());
+                            }
+                        }
+                    }
                     if !message.content.trim().is_empty() {
                         content.push(json!({
                             "type": "text",
                             "text": message.content,
                         }));
                     }
-                    for call in tool_calls {
-                        content.push(json!({
-                            "type": "tool_use",
-                            "id": call.id,
-                            "name": call.name,
-                            "input": parse_tool_arguments(&call.arguments),
-                        }));
+                    if let Some(tool_calls) = message.tool_calls.as_deref() {
+                        for call in tool_calls {
+                            content.push(json!({
+                                "type": "tool_use",
+                                "id": call.id,
+                                "name": call.name,
+                                "input": parse_tool_arguments(&call.arguments),
+                            }));
+                        }
                     }
                     messages.push(json!({
                         "role": "assistant",
