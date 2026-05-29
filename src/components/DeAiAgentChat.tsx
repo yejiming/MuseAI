@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Tooltip } from 'antd';
-import { BulbOutlined, PlayCircleOutlined, ReloadOutlined, RobotOutlined, StopOutlined, ToolOutlined } from '@ant-design/icons';
+import { Button, Tooltip, Input } from 'antd';
+import { BulbOutlined, InfoCircleOutlined, PlayCircleOutlined, ReloadOutlined, RobotOutlined, StopOutlined, ToolOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import ReactMarkdown from 'react-markdown';
@@ -34,7 +34,7 @@ interface DeAiAgentChatProps {
   activeRun: { runId: string | null; messageId: string | null };
   setActiveRun: (run: { runId: string | null; messageId: string | null }) => void;
   autoTriggerContent?: string;
-  onDone?: (lastAgentMessage: string) => void;
+  onDone?: (lastAgentMessage: string) => void | string | Promise<void | string>;
   isRunning?: boolean;
   onRunningChange?: (running: boolean) => void;
 }
@@ -72,6 +72,25 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
   const onRunningChangeRef = useRef(onRunningChange);
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const settings = useSettingsStore();
+  const [fullSystemPrompt, setFullSystemPrompt] = useState('');
+  const [input, setInput] = useState('');
+  const [hasStarted, setHasStarted] = useState(false);
+
+  useEffect(() => {
+    const build = async () => {
+      try {
+        const full = await invoke<string>('build_full_system_prompt', {
+          systemPrompt,
+          workspacePath: settings.worksDirectory,
+          selectedReferenceFiles: [],
+        });
+        setFullSystemPrompt(full);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    build();
+  }, [systemPrompt, settings.worksDirectory]);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
@@ -171,6 +190,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
             ? { ...msg, content: payload.message ? `请求模型失败：${payload.message}` : '请求模型失败' }
             : msg
         )));
+        activeRunRef.current = { runId: null, messageId: null };
         setActiveRun({ runId: null, messageId: null });
         onRunningChangeRef.current?.(false);
         return;
@@ -178,11 +198,25 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
 
       if (payload.eventType === 'done') {
         currentThinkingIdRef.current = null;
+        activeRunRef.current = { runId: null, messageId: null };
         setActiveRun({ runId: null, messageId: null });
         onRunningChangeRef.current?.(false);
         const lastMsg = messagesRef.current.find(m => m.id === active.messageId);
         if (lastMsg && onDoneRef.current) {
-          onDoneRef.current(lastMsg.content);
+          const result = onDoneRef.current(lastMsg.content);
+          const handleResult = (res: any) => {
+            if (typeof res === 'string' && res.trim() !== '') {
+              // Using timeout to ensure state is clean before next send
+              setTimeout(() => {
+                void handleSend(res);
+              }, 100);
+            }
+          };
+          if (result && typeof result === 'object' && 'then' in result) {
+            result.then(handleResult).catch(console.error);
+          } else {
+            handleResult(result);
+          }
         }
       }
     });
@@ -203,7 +237,8 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
   const handleSend = async (overrideInput?: string) => {
     let resolvedInput = overrideInput;
     let resolvedAllowedWritePaths: string[] | undefined;
-    if (onBeforeStart) {
+    
+    if (onBeforeStart && !hasStarted) {
       try {
         const result = await onBeforeStart();
         if (result === undefined) {
@@ -221,15 +256,16 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
       }
     }
     
-    const textToSend = resolvedInput ?? startContent.trim();
-    if (!resolvedInput && startDisabled) {
+    const textToSend = resolvedInput ?? (hasStarted ? input.trim() : startContent.trim());
+    if (!hasStarted && !resolvedInput && startDisabled) {
       onStartBlocked?.();
       return;
     }
     if (!textToSend || isRunning) {
       return;
     }
-    const shouldResetContext = !resolvedInput;
+    
+    const shouldResetContext = !hasStarted;
     stopRequestedRef.current = false;
 
     const userMessage: Message = {
@@ -253,6 +289,8 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
     }
     messagesRef.current = nextMessages;
     setMessages(nextMessages);
+    setHasStarted(true);
+    setInput('');
     onRunningChange?.(true);
     scrollToBottomOnce();
 
@@ -276,12 +314,15 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
       });
       if (stopRequestedRef.current) {
         await invoke('stop_chat_stream', { runId });
+        activeRunRef.current = { runId: null, messageId: null };
         setActiveRun({ runId: null, messageId: null });
         onRunningChange?.(false);
         return;
       }
+      activeRunRef.current = { runId, messageId: agentMessageId };
       setActiveRun({ runId, messageId: agentMessageId });
     } catch (err) {
+      activeRunRef.current = { runId: null, messageId: null };
       setActiveRun({ runId: null, messageId: null });
       onRunningChange?.(false);
       setMessages((prev) => prev.map((msg) => (
@@ -301,6 +342,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
   const handleStop = async () => {
     stopRequestedRef.current = true;
     const runId = activeRunRef.current.runId;
+    activeRunRef.current = { runId: null, messageId: null };
     setActiveRun({ runId: null, messageId: null });
     if (runId) {
       try {
@@ -316,11 +358,65 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
     await handleStop();
     setMessages([]);
     setExpandedBlocks({});
+    setHasStarted(false);
+    setInput('');
   };
 
   const toggleBlock = (id: string) => {
     setExpandedBlocks((prev) => ({ ...prev, [id]: !prev[id] }));
   };
+
+  const contextStats = estimateContextUsage({
+    systemPrompt: fullSystemPrompt,
+    workspacePath: settings.worksDirectory,
+    messages,
+    draft: input,
+  });
+  const contextUsed = contextStats.total;
+  const contextPercent = settings.maxContextTokens > 0
+    ? Math.min(100, Math.round((contextUsed / settings.maxContextTokens) * 100))
+    : 0;
+
+  const contextTooltip = (
+    <div className="agent-context-popover">
+      <div className="agent-context-popover__header">
+        <strong>上下文详情</strong>
+      </div>
+      <div className="agent-context-popover__row">
+        <span className="agent-context-popover__label">模型：</span>
+        <span className="agent-context-popover__value">{settings.llmModel || '未设置'}</span>
+      </div>
+      <div className="agent-context-popover__row">
+        <span className="agent-context-popover__label">工作空间：</span>
+        <span className="agent-context-popover__value" style={{ wordBreak: 'break-all' }}>{settings.worksDirectory || '未选择'}</span>
+      </div>
+      <div className="agent-context-popover__divider" />
+      <div className="agent-context-popover__row">
+        <span className="agent-context-popover__label">消息数：</span>
+        <span className="agent-context-popover__value">{messages.length} 条</span>
+      </div>
+      <div className="agent-context-popover__row">
+        <span className="agent-context-popover__label">总 token：</span>
+        <span className="agent-context-popover__value agent-context-popover__value--highlight">{contextStats.total} / {settings.maxContextTokens || 0}</span>
+      </div>
+      <div className="agent-context-popover__row">
+        <span className="agent-context-popover__label">用户消息：</span>
+        <span className="agent-context-popover__value">{contextStats.user}</span>
+      </div>
+      <div className="agent-context-popover__row">
+        <span className="agent-context-popover__label">AI 回复：</span>
+        <span className="agent-context-popover__value">{contextStats.assistant}</span>
+      </div>
+      <div className="agent-context-popover__row">
+        <span className="agent-context-popover__label">系统设定：</span>
+        <span className="agent-context-popover__value">{contextStats.system}</span>
+      </div>
+      <div className="agent-context-popover__row">
+        <span className="agent-context-popover__label">工具消耗：</span>
+        <span className="agent-context-popover__value">{contextStats.tool}</span>
+      </div>
+    </div>
+  );
 
   return (
     <div className="agent-chat" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -339,6 +435,21 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
       </div>
 
       <div ref={chatHistoryRef} className="agent-chat__history" style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
+        {messages.some((m) => m.role === 'user') && (
+          <div className="agent-message-row agent-message-row--system">
+            <div className="agent-message-bubble agent-message-bubble--system">
+              <FoldBlock
+                icon={<InfoCircleOutlined />}
+                variant="thinking"
+                title="系统提示词"
+                preview={fullSystemPrompt.slice(0, 80) + (fullSystemPrompt.length > 80 ? '...' : '')}
+                detail={fullSystemPrompt}
+                expanded={Boolean(expandedBlocks['system-prompt'])}
+                onToggle={() => toggleBlock('system-prompt')}
+              />
+            </div>
+          </div>
+        )}
         {messages.map((msg) => (
           <div className={`agent-message-row agent-message-row--${msg.role}`} key={msg.id}>
             <div className={`agent-message-bubble agent-message-bubble--${msg.role}`}>
@@ -436,23 +547,60 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
         ))}
       </div>
 
-      <div className="agent-composer" style={{ padding: 12, borderTop: '1px solid #e8e8e8' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ minHeight: 32, display: 'flex', alignItems: 'center' }}>
+      <div
+        className="agent-composer"
+        style={agentId === 'detector' ? { padding: '8px 12px', background: 'transparent' } : { padding: 12, borderTop: '1px solid #e8e8e8' }}
+      >
+        <div
+          id="agent-composer-box"
+          className={agentId === 'detector' ? '' : 'agent-composer__box'}
+          style={agentId === 'detector' ? { position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } : { position: 'relative' }}
+        >
+          {hasStarted && agentId !== 'detector' && (
+            <Input.TextArea
+              className="agent-composer__textarea"
+              autoSize={{ minRows: 1, maxRows: 8 }}
+              onChange={(e) => setInput(e.target.value)}
+              style={{ zIndex: 2, position: 'relative', background: 'transparent', boxShadow: 'none', border: 'none' }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  void handleSend();
+                }
+              }}
+              placeholder="与 Agent 对话，或按 Cmd/Ctrl + Enter 发送..."
+              value={input}
+            />
+          )}
+          <div className="agent-composer__actions" style={agentId === 'detector' ? { width: '100%', padding: 0 } : {}}>
             {footerLeft}
+            <div className="agent-send-cluster">
+              {agentId !== 'detector' && (
+                <Tooltip color="#fff" placement="topRight" title={contextTooltip} overlayInnerStyle={{ width: 'max-content', maxWidth: 320, padding: '8px 12px' }}>
+                  <button
+                    aria-label="查看上下文详情"
+                    className="agent-context-ring"
+                    style={{ '--context-fill': `${contextPercent}%` } as React.CSSProperties}
+                    type="button"
+                  >
+                    <span>{contextPercent}%</span>
+                  </button>
+                </Tooltip>
+              )}
+              <Tooltip title={isRunning ? '停止' : '开始'}>
+                <Button
+                  aria-label={isRunning ? '停止' : '开始'}
+                  className="de-ai-agent-run-button"
+                  disabled={!isRunning && ((!hasStarted && startDisabled) || (!hasStarted && !startContent.trim()) || (hasStarted && agentId !== 'detector' && !input.trim()))}
+                  icon={isRunning ? <StopOutlined /> : <PlayCircleOutlined />}
+                  onClick={isRunning ? handleStop : () => handleSend()}
+                  shape="circle"
+                  type={isRunning ? "default" : "primary"}
+                  danger={isRunning}
+                />
+              </Tooltip>
+            </div>
           </div>
-          <Tooltip title={isRunning ? '停止' : '开始'}>
-          <Button
-            aria-label={isRunning ? '停止' : '开始'}
-            className="de-ai-agent-run-button"
-            disabled={!isRunning && (startDisabled || !startContent.trim())}
-            icon={isRunning ? <StopOutlined /> : <PlayCircleOutlined />}
-            onClick={isRunning ? handleStop : () => handleSend()}
-            shape="circle"
-            type={isRunning ? "default" : "primary"}
-            danger={isRunning}
-          />
-          </Tooltip>
         </div>
       </div>
     </div>
@@ -463,6 +611,7 @@ function FoldBlock({
   icon,
   title,
   preview,
+  detail,
   expanded,
   onToggle,
   variant = 'tool',
@@ -470,6 +619,7 @@ function FoldBlock({
   icon: React.ReactNode;
   title: string;
   preview: string;
+  detail?: string;
   expanded: boolean;
   onToggle: () => void;
   variant?: 'tool' | 'thinking';
@@ -480,7 +630,7 @@ function FoldBlock({
         <span className="agent-fold-block__title">{icon}{title}</span>
         <span className="agent-fold-block__preview">{preview || '暂无内容'}</span>
       </button>
-      {expanded && <pre className="agent-fold-block__detail">{preview}</pre>}
+      {expanded && <pre className="agent-fold-block__detail">{detail ?? preview}</pre>}
     </div>
   );
 }
@@ -515,6 +665,55 @@ function updateMessageTool(
     };
     return { ...msg, tools };
   });
+}
+
+function estimateContextUsage({
+  systemPrompt,
+  workspacePath,
+  messages,
+  draft,
+}: {
+  systemPrompt: string;
+  workspacePath: string | null;
+  messages: Message[];
+  draft: string;
+}) {
+  const stats = {
+    system: estimateTokens(buildEstimatedSystemPrompt(systemPrompt, workspacePath)),
+    user: estimateTokens([draft, ...messages.filter((message) => message.role === 'user').map((message) => message.content)].join('')),
+    assistant: estimateTokens(messages
+      .filter((message) => message.role === 'agent')
+      .map((message) => message.content.replace(/\[\[TOOL:[^\]]+\]\]/g, ''))
+      .join('')),
+    tool: estimateTokens(messages
+      .flatMap((message) => message.tools ?? [])
+      .map((tool) => `${tool.name}\n${tool.arguments || ''}\n${tool.result}`)
+      .join('')),
+  };
+
+  return {
+    ...stats,
+    total: stats.system + stats.user + stats.assistant + stats.tool,
+  };
+}
+
+function estimateTokens(text: string) {
+  return Math.max(0, Math.ceil(text.length * 1.5));
+}
+
+function buildEstimatedSystemPrompt(
+  systemPrompt: string,
+  workspacePath: string | null,
+) {
+  const lines = [systemPrompt.trim()];
+  const workspaceLines = [
+    '## 当前环境',
+    workspacePath?.trim()
+      ? `当前工作空间路径：${workspacePath.trim()}`
+      : '当前工作空间路径：未选择',
+  ];
+  lines.push(workspaceLines.join('\n'));
+  return lines.filter(Boolean).join('\n\n');
 }
 
 export default DeAiAgentChat;

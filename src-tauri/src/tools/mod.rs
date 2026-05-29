@@ -5,17 +5,16 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-
 use glob::glob;
 use regex::Regex;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use crate::models::*;
-use crate::utils::*;
 use crate::bash_permission_channels;
 use crate::commands::skills::{discover_skills, list_skill_files};
+use crate::models::*;
+use crate::utils::*;
 
 pub mod registry;
 pub use registry::*;
@@ -63,12 +62,16 @@ fn shell_path() -> String {
     env::var("SHELL").unwrap_or_else(|_| String::from("/bin/zsh"))
 }
 
-pub fn ensure_write_path_allowed(request: &ChatStreamRequest, file_path: &str) -> Result<(), String> {
+pub fn ensure_write_path_allowed(
+    request: &ChatStreamRequest,
+    file_path: &str,
+) -> Result<(), String> {
     let Some(allowed_paths) = &request.allowed_write_paths else {
         return Ok(());
     };
 
-    let requested_path = normalize_tool_path(&expand_path(request.workspace_path.as_deref(), file_path));
+    let requested_path =
+        normalize_tool_path(&expand_path(request.workspace_path.as_deref(), file_path));
     let is_allowed = allowed_paths
         .iter()
         .map(|path| normalize_tool_path(&expand_path(request.workspace_path.as_deref(), path)))
@@ -114,7 +117,12 @@ pub fn ensure_read_path_allowed(
 }
 
 #[tauri::command]
-pub fn tool_read(file_path: String, offset: Option<usize>, limit: Option<usize>, workspace: Option<String>) -> ToolResult {
+pub fn tool_read(
+    file_path: String,
+    offset: Option<usize>,
+    limit: Option<usize>,
+    workspace: Option<String>,
+) -> ToolResult {
     match read_file_with_lines(
         &expand_path(workspace.as_deref(), &file_path).to_string_lossy(),
         offset.unwrap_or(1),
@@ -132,7 +140,12 @@ pub fn tool_read(file_path: String, offset: Option<usize>, limit: Option<usize>,
 }
 
 #[tauri::command]
-pub fn tool_write(app: tauri::AppHandle, file_path: String, content: String, workspace: Option<String>) -> ToolResult {
+pub fn tool_write(
+    app: tauri::AppHandle,
+    file_path: String,
+    content: String,
+    workspace: Option<String>,
+) -> ToolResult {
     let path = expand_path(workspace.as_deref(), &file_path);
     let result = (|| -> Result<String, String> {
         if let Some(parent) = path.parent() {
@@ -149,7 +162,13 @@ pub fn tool_write(app: tauri::AppHandle, file_path: String, content: String, wor
 }
 
 #[tauri::command]
-pub fn tool_edit(app: tauri::AppHandle, file_path: String, old_string: String, new_string: String, workspace: Option<String>) -> ToolResult {
+pub fn tool_edit(
+    app: tauri::AppHandle,
+    file_path: String,
+    old_string: String,
+    new_string: String,
+    workspace: Option<String>,
+) -> ToolResult {
     let path = expand_path(workspace.as_deref(), &file_path);
     let result = (|| -> Result<String, String> {
         if !path.exists() {
@@ -334,7 +353,7 @@ pub async fn tool_bash(
 
     let status = child.wait().ok();
     let exit_code = status.and_then(|status| status.code());
-    
+
     // Commands like `touch` or `mkdir` might have modified the workspace
     if exit_code == Some(0) {
         let _ = app.emit("workspace-changed", ());
@@ -349,7 +368,12 @@ pub async fn tool_bash(
     }
 }
 #[tauri::command]
-pub fn tool_grep(pattern: String, path: Option<String>, include: Option<String>, workspace: Option<String>) -> ToolResult {
+pub fn tool_grep(
+    pattern: String,
+    path: Option<String>,
+    include: Option<String>,
+    workspace: Option<String>,
+) -> ToolResult {
     let result = (|| -> Result<String, String> {
         let regex = Regex::new(&pattern).map_err(|e| format!("Invalid regex: {}", e))?;
         let base = expand_path(workspace.as_deref(), path.as_deref().unwrap_or("."));

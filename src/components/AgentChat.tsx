@@ -1,20 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Tooltip, Dropdown, Tag, Input, Cascader, Form, Modal, Tree, Empty } from 'antd';
-import { BulbOutlined, CloseOutlined, HistoryOutlined, PlusCircleOutlined, RobotOutlined, StopOutlined, ToolOutlined, UnorderedListOutlined, SettingOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { Button, Tooltip, Dropdown, Tag, Input, Cascader, Form, Modal, Tree, TreeSelect, Empty } from 'antd';
+import { BulbOutlined, CloseOutlined, HistoryOutlined, PlusCircleOutlined, RobotOutlined, StopOutlined, ToolOutlined, UnorderedListOutlined, SettingOutlined, PlayCircleOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSettingsStore } from '../stores/useSettingsStore';
-import { 
-  useAgentStore, 
-  Message, 
-  AgentToolEntry, 
-  AgentTodo, 
-  SkillDefinition, 
-  AgentSessionSummary, 
-  AgentSessionRecord,
-  createWelcomeMessage
+import {
+  useAgentStore,
+  Message,
+  AgentToolEntry,
+  AgentTodo,
+  SkillDefinition,
+  AgentSessionSummary,
+  AgentSessionRecord
 } from '../stores/useAgentStore';
 
 interface ChatStreamEvent {
@@ -61,7 +60,8 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     sessionTitle, setSessionTitle,
     activeRun, setActiveRun,
     createNewSession,
-    selectedReferenceFiles, setSelectedReferenceFiles
+    selectedReferenceFiles, setSelectedReferenceFiles,
+    selectedOutlineFile, setSelectedOutlineFile
   } = useAgentStore();
 
   const settings = useSettingsStore();
@@ -71,6 +71,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
   const activeRunRef = useRef(activeRun);
   const messagesRef = useRef(messages);
   const selectedReferenceFilesRef = useRef(selectedReferenceFiles);
+  const selectedOutlineFileRef = useRef(selectedOutlineFile);
   const sessionIdRef = useRef(sessionId);
   const sessionTitleRef = useRef(sessionTitle);
   const todosRef = useRef(todos);
@@ -79,6 +80,8 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
   const [allReferenceFiles, setAllReferenceFiles] = useState<string[]>([]);
   const [referenceTree, setReferenceTree] = useState<any[]>([]);
   const [referenceFilesLoaded, setReferenceFilesLoaded] = useState(false);
+  const [outlineTree, setOutlineTree] = useState<any[]>([]);
+  const [outlineFilesLoaded, setOutlineFilesLoaded] = useState(false);
 
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
   useEffect(() => {
@@ -93,6 +96,10 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
   useEffect(() => {
     selectedReferenceFilesRef.current = selectedReferenceFiles;
   }, [selectedReferenceFiles]);
+
+  useEffect(() => {
+    selectedOutlineFileRef.current = selectedOutlineFile;
+  }, [selectedOutlineFile]);
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
@@ -272,6 +279,36 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     );
   }, [allReferenceFiles, referenceFilesLoaded]);
 
+  useEffect(() => {
+    const fetchOutline = async () => {
+      try {
+        setOutlineFilesLoaded(false);
+        const dir = await invoke<string>('get_workspace_dir', { dirType: 'outline' });
+
+        const fetchTree = async (path: string): Promise<any[]> => {
+          const items = await invoke<any[]>('list_dir', { path });
+          return Promise.all(items
+            .filter((item) => item.name !== '.versions')
+            .map(async (item) => (
+              item.is_dir
+                ? { ...item, children: await fetchTree(item.path) }
+                : item
+            )));
+        };
+
+        const tree = await fetchTree(dir);
+        setOutlineTree(tree);
+        setOutlineFilesLoaded(true);
+      } catch (e) {
+        console.error(e);
+        setOutlineFilesLoaded(true);
+      }
+    };
+    if (isSettingsOpen && !outlineFilesLoaded) {
+      fetchOutline();
+    }
+  }, [isSettingsOpen, outlineFilesLoaded]);
+
   const scrollToBottomOnce = () => {
     window.requestAnimationFrame(() => {
       if (chatHistoryRef.current) {
@@ -346,6 +383,10 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     }
     const mentionedSkills = skills.filter(s => mentionedSkillNames.includes(s.name));
 
+    const effectiveSystemPrompt = selectedOutlineFile
+      ? `${settings.systemPrompt}\n\n【大纲文件】请根据以下大纲文件进行写作：${selectedOutlineFile}`
+      : settings.systemPrompt;
+
     try {
       const runId = await invoke<string>('start_chat_completion_stream', {
         request: {
@@ -357,7 +398,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
           maxOutputTokens: settings.agentConfigs?.writer?.maxOutputTokens ?? settings.maxOutputTokens,
           maxContextTokens: settings.agentConfigs?.writer?.maxContextTokens ?? settings.maxContextTokens,
           thinkingDepth: settings.agentConfigs?.writer?.thinkingDepth ?? settings.thinkingDepth,
-          systemPrompt: settings.systemPrompt,
+          systemPrompt: effectiveSystemPrompt,
           workspacePath: settings.worksDirectory,
           messages: buildModelMessages(messages.concat(userMessage), userMessage.id, mentionedSkills),
           selectedReferenceFiles: selectedReferenceFiles,
@@ -416,6 +457,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
           savedAt: 0,
           messages: messagesRef.current,
           selectedReferenceFiles: selectedReferenceFilesRef.current,
+          selectedOutlineFile: selectedOutlineFileRef.current,
           todos: todosRef.current,
         },
       });
@@ -432,8 +474,9 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
       setActiveRun({ runId: null, messageId: null });
       setSessionId(session.id);
       setSessionTitle(session.title);
-      setMessages(session.messages.length > 0 ? session.messages : [createWelcomeMessage()]);
+      setMessages(session.messages);
       setSelectedReferenceFiles(session.selectedReferenceFiles ?? []);
+      setSelectedOutlineFile(session.selectedOutlineFile ?? null);
       setTodos(session.todos ?? []);
       setIsTodoOpen(false);
       setIsStreaming(false);
@@ -444,8 +487,30 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     }
   };
 
+  const effectiveSystemPrompt = selectedOutlineFile
+    ? `${settings.systemPrompt}\n\n【大纲文件】请根据以下大纲文件进行写作：${selectedOutlineFile}`
+    : settings.systemPrompt;
+
+  const [fullSystemPrompt, setFullSystemPrompt] = useState('');
+
+  useEffect(() => {
+    const build = async () => {
+      try {
+        const full = await invoke<string>('build_full_system_prompt', {
+          systemPrompt: effectiveSystemPrompt,
+          workspacePath: settings.worksDirectory,
+          selectedReferenceFiles,
+        });
+        setFullSystemPrompt(full);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    build();
+  }, [effectiveSystemPrompt, settings.worksDirectory, selectedReferenceFiles]);
+
   const contextStats = estimateContextUsage({
-    systemPrompt: settings.systemPrompt,
+    systemPrompt: effectiveSystemPrompt,
     workspacePath: settings.worksDirectory,
     selectedReferenceFiles,
     skills,
@@ -465,6 +530,15 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     selectable: false,
     children: node.children ? mapReferenceTreeData(node.children) : undefined,
   }));
+
+  const mapOutlineTreeForSelect = (nodes: any[]): any[] =>
+    nodes
+      .filter((node) => node.name !== '.versions')
+      .map((node) => ({
+        title: node.name,
+        value: node.is_dir ? undefined : node.path,
+        children: node.children ? mapOutlineTreeForSelect(node.children) : undefined,
+      }));
 
   const contextTooltip = (
     <div className="agent-context-popover">
@@ -560,7 +634,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
             />
           </Form.Item>
           
-          <Form.Item label="选择参考范文" style={{ marginBottom: 0 }}>
+          <Form.Item label="选择参考范文">
             <div className="de-ai-reference-picker">
               {allReferenceFiles.length > 0 ? (
                 <Tree
@@ -579,6 +653,21 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
                 <Empty description="范文目录暂无可选文件" />
               )}
             </div>
+          </Form.Item>
+          <Form.Item label="选择大纲文件" style={{ marginBottom: 0 }}>
+            {outlineTree.length > 0 ? (
+              <TreeSelect
+                allowClear
+                placeholder="请选择大纲文件（可选）"
+                style={{ width: '100%' }}
+                treeData={mapOutlineTreeForSelect(outlineTree)}
+                value={selectedOutlineFile}
+                onChange={(val) => setSelectedOutlineFile(val || null)}
+                treeDefaultExpandAll
+              />
+            ) : (
+              <Empty description="大纲目录暂无可选文件" />
+            )}
           </Form.Item>
         </Form>
       </Modal>
@@ -627,6 +716,21 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
       </div>
 
       <div ref={chatHistoryRef} className="agent-chat__history">
+        {messages.some((m) => m.role === 'user') && (
+          <div className="agent-message-row agent-message-row--system">
+            <div className="agent-message-bubble agent-message-bubble--system">
+              <FoldBlock
+                icon={<InfoCircleOutlined />}
+                variant="thinking"
+                title="系统提示词"
+                preview={fullSystemPrompt.slice(0, 80) + (fullSystemPrompt.length > 80 ? '...' : '')}
+                detail={fullSystemPrompt}
+                expanded={Boolean(expandedBlocks['system-prompt'])}
+                onToggle={() => toggleBlock('system-prompt')}
+              />
+            </div>
+          </div>
+        )}
         {messages.map((msg) => (
           <div
             className={`agent-message-row agent-message-row--${msg.role}`}
@@ -697,7 +801,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
                     <div className="agent-markdown" key={`md-${i}`}>
                       {i === 0 && msg.articleType && msg.articleType !== '默认' && (
                         <div style={{ marginBottom: 8 }}>
-                          <Tag color="orange" style={{ border: 'none', background: 'rgba(217, 119, 87, 0.1)', color: '#d97757', fontWeight: 500 }}>
+                          <Tag style={{ border: 'none', background: msg.role === 'user' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(217, 119, 87, 0.1)', color: msg.role === 'user' ? '#fff' : '#d97757', fontWeight: 500 }}>
                             {msg.articleType}
                           </Tag>
                         </div>
@@ -760,7 +864,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
         <div id="agent-composer-box" className="agent-composer__box" style={{ position: 'relative' }}>
           {settings.articleType && settings.articleType.length > 0 && settings.articleType.join('-') !== '默认' && (
             <div style={{ padding: '12px 12px 0 12px' }}>
-              <Tag color="orange" style={{ border: 'none', background: 'rgba(217, 119, 87, 0.1)', color: '#d97757', fontWeight: 500 }}>
+              <Tag style={{ border: 'none', background: 'rgba(217, 119, 87, 0.1)', color: '#d97757', fontWeight: 500 }}>
                 {settings.articleType.join('-')}
               </Tag>
             </div>
@@ -823,6 +927,7 @@ function FoldBlock({
   icon,
   title,
   preview,
+  detail,
   expanded,
   onToggle,
   variant = 'tool',
@@ -830,6 +935,7 @@ function FoldBlock({
   icon: React.ReactNode;
   title: string;
   preview: string;
+  detail?: string;
   expanded: boolean;
   onToggle: () => void;
   variant?: 'tool' | 'thinking';
@@ -840,7 +946,7 @@ function FoldBlock({
         <span className="agent-fold-block__title">{icon}{title}</span>
         <span className="agent-fold-block__preview">{preview || '暂无内容'}</span>
       </button>
-      {expanded && <pre className="agent-fold-block__detail">{preview}</pre>}
+      {expanded && <pre className="agent-fold-block__detail">{detail ?? preview}</pre>}
     </div>
   );
 }
@@ -887,7 +993,9 @@ function buildModelMessages(
     if (message.role === 'user') {
       let content = message.content;
       if (message.id === currentUserMessageId && mentionedSkills.length > 0) {
-        content += `\n\n【系统指令】用户明确要求你在本轮回答中，必须优先调用以下技能：${mentionedSkills.map((skill) => skill.name).join(', ')}`;
+        const skillNames = mentionedSkills.map((skill) => skill.name);
+        const slashCommands = skillNames.map((name) => `/${name}`).join('\n');
+        content = `${slashCommands}\n【系统指令】本轮必须优先调用以下技能：${skillNames.join(', ')}\n\n${content}`;
       }
       return [{ role: 'user', content }];
     }
@@ -1022,8 +1130,8 @@ function buildEstimatedSystemPrompt(
 
   const systemLines = [
     '## 系统信息',
-    `- **当前时间戳**：${Math.floor(Date.now() / 1000)}`,
-    '- **操作系统**：darwin',
+    `- **当前时间**：${new Date().toLocaleString('sv-SE', { hour12: false })}`,
+    '- **操作系统**：由桌面端注入系统版本号',
     '- **Python 环境**：已配置',
     '- **可用 Skills**：',
   ];
@@ -1032,7 +1140,7 @@ function buildEstimatedSystemPrompt(
     systemLines.push('  （无可用 skill）');
   } else {
     skills.forEach((skill) => {
-      systemLines.push(`  - \`${skill.name}\`: ${skill.description}`);
+      systemLines.push(`  - \`${skill.name}\`: ${skill.description}（路径：${skill.path}）`);
     });
   }
 

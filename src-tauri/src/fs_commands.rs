@@ -57,37 +57,41 @@ pub fn move_item_cmd(source: String, target_dir: String) -> Result<(), String> {
     let file_name = src.file_name().ok_or("Invalid source file name")?;
     let dest = target.join(file_name);
     if dest.exists() {
-        return Err("A file or folder with the same name already exists in the target directory".to_string());
+        return Err(
+            "A file or folder with the same name already exists in the target directory"
+                .to_string(),
+        );
     }
     fs::rename(src, dest).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn import_local_folder_shallow_cmd(source: String, target_dir: String) -> Result<String, String> {
+pub fn import_local_folder_shallow_cmd(
+    source: String,
+    target_dir: String,
+) -> Result<String, String> {
     let src = Path::new(&source);
     let target = Path::new(&target_dir);
     if !src.exists() || !src.is_dir() {
         return Err("Source must be a directory".to_string());
     }
     fs::create_dir_all(target).map_err(|e| e.to_string())?;
-    
+
     let folder_name = src.file_name().ok_or("Invalid source folder name")?;
     let dest_folder = target.join(folder_name);
-    
+
     let mut actual_dest = dest_folder.clone();
     let mut counter = 1;
     while actual_dest.exists() {
         actual_dest = target.join(format!("{} ({})", folder_name.to_string_lossy(), counter));
         counter += 1;
     }
-    
+
     fs::create_dir_all(&actual_dest).map_err(|e| e.to_string())?;
     copy_importable_text_files_recursive(src, &actual_dest)?;
-    
+
     Ok(actual_dest.to_string_lossy().into_owned())
 }
-
-
 
 #[tauri::command]
 pub fn create_untitled_item_cmd(target_dir: String, is_dir: bool) -> Result<String, String> {
@@ -95,23 +99,31 @@ pub fn create_untitled_item_cmd(target_dir: String, is_dir: bool) -> Result<Stri
     if !target.exists() || !target.is_dir() {
         return Err("Target directory does not exist or is not a directory".to_string());
     }
-    
-    let base_name = if is_dir { "未命名文件夹" } else { "未命名文件" };
+
+    let base_name = if is_dir {
+        "未命名文件夹"
+    } else {
+        "未命名文件"
+    };
     let ext = if is_dir { "" } else { ".md" };
-    
+
     let mut item_path = target.join(format!("{}{}", base_name, ext));
     let mut counter = 1;
-    
+
     while item_path.exists() {
         item_path = target.join(format!("{} ({}){}", base_name, counter, ext));
         counter += 1;
     }
-    
+
     if is_dir {
         fs::create_dir(&item_path).map_err(|e| e.to_string())?;
     } else {
         fs::write(&item_path, "").map_err(|e| e.to_string())?;
     }
-    
-    Ok(item_path.file_name().unwrap().to_string_lossy().into_owned())
+
+    Ok(item_path
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned())
 }

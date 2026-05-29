@@ -1,25 +1,33 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
+use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager};
 use walkdir::WalkDir;
 
 use crate::models::*;
 use crate::utils::*;
 
+const BUILTIN_SKILL_NAMES: &[&str] = &[
+    "kitt-writer",
+    "fanqie-short-nuexin-outline",
+    "fanqie-short-nuexin-writer",
+    "fanqie-xuanhuan-outline",
+    "fanqie-xuanhuan-writer",
+];
+
+static BUILTIN_SKILLS_SYNCED: OnceLock<()> = OnceLock::new();
+
 pub fn discover_skills(app: Option<&AppHandle>) -> Vec<SkillDefinition> {
     let mut roots = Vec::new();
     if let Some(app_handle) = app {
         if let Ok(dir) = app_handle.path().app_data_dir() {
-            roots.push(dir.join("skills"));
+            let skills_dir = dir.join("skills");
+            ensure_builtin_skills_synced(app_handle, &skills_dir);
+            roots.push(skills_dir);
         }
     }
-
-    roots.push(std::path::PathBuf::from("/Users/yejiming/Documents/Obsidian Vault/.codex/skills/fanqie-short-nuexin-outline"));
-    roots.push(std::path::PathBuf::from("/Users/yejiming/Documents/Obsidian Vault/.codex/skills/fanqie-short-nuexin-writer"));
-    roots.push(std::path::PathBuf::from("/Users/yejiming/Documents/Obsidian Vault/.codex/skills/fanqie-xuanhuan-outline"));
-    roots.push(std::path::PathBuf::from("/Users/yejiming/Documents/Obsidian Vault/.codex/skills/fanqie-xuanhuan-writer"));
-    roots.push(std::path::PathBuf::from("/Users/yejiming/Documents/Obsidian Vault/.codex/skills/kitt-writer"));
 
     let mut skills = Vec::new();
     for root in roots {
@@ -32,6 +40,54 @@ pub fn discover_skills(app: Option<&AppHandle>) -> Vec<SkillDefinition> {
         }
     }
     skills
+}
+fn ensure_builtin_skills_synced(app: &AppHandle, skills_dir: &Path) {
+    BUILTIN_SKILLS_SYNCED.get_or_init(|| {
+        if let Err(error) = sync_builtin_skills(app, skills_dir) {
+            eprintln!("同步内置 Skill 失败: {}", error);
+        }
+    });
+}
+fn sync_builtin_skills(app: &AppHandle, skills_dir: &Path) -> Result<(), String> {
+    let source_dir = builtin_skills_source_dir(app)?;
+    fs::create_dir_all(skills_dir).map_err(|e| e.to_string())?;
+
+    for skill_name in BUILTIN_SKILL_NAMES {
+        let source = source_dir.join(skill_name);
+        if !source.join("SKILL.md").is_file() {
+            return Err(format!("内置 Skill '{}' 缺少 SKILL.md", skill_name));
+        }
+
+        let dest = skills_dir.join(skill_name);
+        if dest.exists() {
+            if dest.is_dir() {
+                fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
+            } else {
+                fs::remove_file(&dest).map_err(|e| e.to_string())?;
+            }
+        }
+        copy_dir_recursive(&source, &dest).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+fn builtin_skills_source_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let bundled = app
+        .path()
+        .resolve("skills", BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    if bundled.is_dir() {
+        return Ok(bundled);
+    }
+
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("skills");
+    if dev.is_dir() {
+        return Ok(dev);
+    }
+
+    Err(format!("未找到内置 Skill 资源目录: {}", bundled.display()))
 }
 fn collect_skills_from_root(root: &Path, skills: &mut Vec<SkillDefinition>) {
     if !root.is_dir() {

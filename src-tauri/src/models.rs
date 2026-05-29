@@ -129,6 +129,7 @@ pub struct AgentSessionRecord {
     pub saved_at: u64,
     pub messages: Vec<AgentSessionMessage>,
     pub selected_reference_files: Vec<String>,
+    pub selected_outline_file: Option<String>,
     pub todos: Vec<AgentSessionTodo>,
 }
 #[derive(Clone, Serialize)]

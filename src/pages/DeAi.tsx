@@ -340,26 +340,51 @@ const DeAi: React.FC = () => {
     }
   }, [isAutoLooping, detectorRunning, removerRunning, autoLoopCount, aiScore, detectorReferenceText]);
 
-  const handleDetectorDone = (lastAgentMessage: string) => {
+  const handleDetectorDone = async (lastAgentMessage: string) => {
     const jsonText = lastAgentMessage.match(/\{[\s\S]*\}/)?.[0];
-    let jsonResult: { ai_score?: number; suggestion?: string } | null = null;
+    let jsonResult: any = null;
+    let jsonParseError: any = null;
     if (jsonText) {
       try {
         jsonResult = JSON.parse(jsonText);
       } catch (err) {
         console.error('Failed to parse detector JSON:', err);
+        jsonParseError = err;
       }
     }
     const scoreMatch = lastAgentMessage.match(/<score>(\d+(?:\.\d+)?)<\/score>/);
     const suggestionMatch = lastAgentMessage.match(/<suggestion>([\s\S]*?)<\/suggestion>/);
-    const parsedScore = typeof jsonResult?.ai_score === 'number'
-      ? jsonResult.ai_score
-      : scoreMatch
-        ? Number(scoreMatch[1])
-        : null;
+    let parsedScore: number | null = null;
+    if (typeof jsonResult?.ai_score === 'number') {
+      parsedScore = jsonResult.ai_score;
+    } else if (jsonResult) {
+      // Calculate total score from sub-scores
+      const subScoreKeys = ['可预测的节奏', '功能性用词', '机械式写作', '可预测的句法', '缺乏创造性语法', '实用主义词汇', '单调的句法', '机械般的正式感'];
+      let total = 0;
+      let hasSubScores = false;
+      for (const key of subScoreKeys) {
+        if (typeof jsonResult[key] === 'number') {
+          total += jsonResult[key];
+          hasSubScores = true;
+        }
+      }
+      if (hasSubScores) {
+        parsedScore = total;
+      }
+    }
+    
+    if (parsedScore === null && scoreMatch) {
+      parsedScore = Number(scoreMatch[1]);
+    }
+
     const parsedSuggestion = typeof jsonResult?.suggestion === 'string'
       ? jsonResult.suggestion.trim()
-      : suggestionMatch?.[1]?.trim();
+      : typeof jsonResult?.优化建议 === 'string'
+        ? jsonResult.优化建议.trim()
+        : suggestionMatch?.[1]?.trim();
+    
+    // We want to store the full JSON if available, otherwise just the suggestion
+    const textToStore = jsonText || parsedSuggestion || '';
     
     if (parsedScore !== null && parsedSuggestion) {
       const roundedScore = Math.round(parsedScore);
@@ -369,23 +394,29 @@ const DeAi: React.FC = () => {
       if (selectedWorkFile && targetVersionId) {
         setVersions(versions.map((version: VersionInfo) => (
           version.id === targetVersionId
-            ? { ...version, aiScore: roundedScore, suggestion: parsedSuggestion }
+            ? { ...version, aiScore: roundedScore, suggestion: textToStore }
             : version
         )));
-        invoke('update_version_ai_result', {
-          path: selectedWorkFile,
-          versionId: targetVersionId,
-          score: roundedScore,
-          suggestion: parsedSuggestion,
-        })
-          .then(() => refreshVersions(targetVersionId))
-          .catch((err) => {
-            console.error(err);
-            message.error(`保存检测结果失败: ${err}`);
+        try {
+          await invoke('update_version_ai_result', {
+            path: selectedWorkFile,
+            versionId: targetVersionId,
+            score: roundedScore,
+            suggestion: textToStore,
           });
+          await refreshVersions(targetVersionId);
+        } catch (err) {
+          console.error(err);
+          message.error(`保存检测结果失败: ${err}`);
+          return `保存结果到本地失败：${err}。请检查 JSON 格式是否完全合法，然后重新输出。`;
+        }
       }
     } else {
       message.warning('未能读取检测结果，请确认检测AI味Agent输出了AI评分和修改建议');
+      if (jsonParseError) {
+        return `JSON 解析失败：${jsonParseError}。请检查 JSON 语法是否有误（如缺少引号、多余逗号等），然后重新输出合法的 JSON 格式。`;
+      }
+      return '未能提取到合法的 JSON 格式。请务必严格按照要求，只输出一段合法的 JSON，不要包含任何前缀、代码块标记或解释性文字。请重新输出。';
     }
 
     if (isAutoLooping && parsedSuggestion && parsedScore !== null && parsedScore > 30) {

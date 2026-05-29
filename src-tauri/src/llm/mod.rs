@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
-use crate::models::*;
 use crate::agent::parse_tool_arguments;
+use crate::models::*;
 
 pub fn approximate_token_count(text: &str) -> usize {
     (text.chars().count() + 3) / 4

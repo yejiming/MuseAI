@@ -1,13 +1,13 @@
+use serde_json::{json, Value};
 use std::fs;
 use tauri::AppHandle;
-use serde_json::{json, Value};
 use uuid::Uuid;
 
+use super::*;
+use crate::llm::*;
 use crate::models::*;
 use crate::utils::*;
-use crate::llm::*;
 use crate::ActiveStreams;
-use super::*;
 
 #[tauri::command]
 pub fn list_agent_sessions(app: AppHandle) -> Result<Vec<AgentSessionSummary>, String> {
@@ -238,8 +238,22 @@ pub fn start_chat_completion_stream(
         };
 
         match result {
-            Ok(_) => emit_chat_event(&app, &spawned_run_id, "done", None, None, &AgentRunOptions::parent()),
-            Err(error) => emit_chat_event(&app, &spawned_run_id, "error", None, Some(error), &AgentRunOptions::parent()),
+            Ok(_) => emit_chat_event(
+                &app,
+                &spawned_run_id,
+                "done",
+                None,
+                None,
+                &AgentRunOptions::parent(),
+            ),
+            Err(error) => emit_chat_event(
+                &app,
+                &spawned_run_id,
+                "error",
+                None,
+                Some(error),
+                &AgentRunOptions::parent(),
+            ),
         }
 
         if let Some(active_streams) = state_app.try_state::<ActiveStreams>() {
@@ -253,7 +267,10 @@ pub fn start_chat_completion_stream(
     Ok(run_id)
 }
 #[tauri::command]
-pub fn stop_chat_stream(run_id: String, state: tauri::State<'_, ActiveStreams>) -> Result<(), String> {
+pub fn stop_chat_stream(
+    run_id: String,
+    state: tauri::State<'_, ActiveStreams>,
+) -> Result<(), String> {
     if let Some(handle) = state.0.lock().unwrap().remove(&run_id) {
         handle.abort();
     }

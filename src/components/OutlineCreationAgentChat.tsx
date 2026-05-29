@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Tooltip, Tag, Input, Cascader, Form, Modal, Tree, TreeSelect, Select, Empty } from 'antd';
-import { BulbOutlined, CloseOutlined, PlusCircleOutlined, RobotOutlined, StopOutlined, ToolOutlined, UnorderedListOutlined, SettingOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { BulbOutlined, CloseOutlined, InfoCircleOutlined, PlusCircleOutlined, RobotOutlined, StopOutlined, ToolOutlined, UnorderedListOutlined, SettingOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import ReactMarkdown from 'react-markdown';
@@ -78,6 +78,25 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
   const [referenceFilesLoaded, setReferenceFilesLoaded] = useState(false);
   const [outlineDir, setOutlineDir] = useState<string>('');
   const [outlineTree, setOutlineTree] = useState<any[]>([]);
+  const [fullSystemPrompt, setFullSystemPrompt] = useState('');
+
+  const systemPrompt = `${settings.outlineCreationPrompt}\n\n【系统指令】请将产出的大纲保存到系统工作区 ~/Documents/MuseAI/outline 文件夹中。`;
+
+  useEffect(() => {
+    const build = async () => {
+      try {
+        const full = await invoke<string>('build_full_system_prompt', {
+          systemPrompt,
+          workspacePath: outlineDir,
+          selectedReferenceFiles,
+        });
+        setFullSystemPrompt(full);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    build();
+  }, [systemPrompt, outlineDir, selectedReferenceFiles]);
 
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
   useEffect(() => {
@@ -384,7 +403,7 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
           maxOutputTokens: settings.agentConfigs?.outlineCreation?.maxOutputTokens ?? settings.maxOutputTokens,
           maxContextTokens: settings.agentConfigs?.outlineCreation?.maxContextTokens ?? settings.maxContextTokens,
           thinkingDepth: settings.agentConfigs?.outlineCreation?.thinkingDepth ?? settings.thinkingDepth,
-          systemPrompt: `${settings.outlineCreationPrompt}\n\n【系统指令】请将产出的大纲保存到系统工作区 ~/Documents/MuseAI/outline 文件夹中。`,
+          systemPrompt: systemPrompt,
           workspacePath: outlineDir,
           messages: buildModelMessages(messages.concat(userMessage), userMessage.id, mentionedSkills),
           selectedReferenceFiles: selectedReferenceFiles,
@@ -465,7 +484,7 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
 
 
   const contextStats = estimateContextUsage({
-    systemPrompt: settings.systemPrompt,
+    systemPrompt: systemPrompt,
     workspacePath: outlineDir,
     selectedReferenceFiles,
     skills,
@@ -674,6 +693,21 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
       </div>
 
       <div ref={chatHistoryRef} className="agent-chat__history">
+        {messages.some((m) => m.role === 'user') && (
+          <div className="agent-message-row agent-message-row--system">
+            <div className="agent-message-bubble agent-message-bubble--system">
+              <FoldBlock
+                icon={<InfoCircleOutlined />}
+                variant="thinking"
+                title="系统提示词"
+                preview={fullSystemPrompt.slice(0, 80) + (fullSystemPrompt.length > 80 ? '...' : '')}
+                detail={fullSystemPrompt}
+                expanded={Boolean(expandedBlocks['system-prompt'])}
+                onToggle={() => toggleBlock('system-prompt')}
+              />
+            </div>
+          </div>
+        )}
         {messages.map((msg) => (
           <div
             className={`agent-message-row agent-message-row--${msg.role}`}
@@ -744,7 +778,7 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
                     <div className="agent-markdown" key={`md-${i}`}>
                       {i === 0 && msg.articleType && msg.articleType !== '默认' && (
                         <div style={{ marginBottom: 8 }}>
-                          <Tag color="orange" style={{ border: 'none', background: 'rgba(217, 119, 87, 0.1)', color: '#d97757', fontWeight: 500 }}>
+                          <Tag style={{ border: 'none', background: msg.role === 'user' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(217, 119, 87, 0.1)', color: msg.role === 'user' ? '#fff' : '#d97757', fontWeight: 500 }}>
                             {msg.articleType}
                           </Tag>
                         </div>
@@ -870,6 +904,7 @@ function FoldBlock({
   icon,
   title,
   preview,
+  detail,
   expanded,
   onToggle,
   variant = 'tool',
@@ -877,6 +912,7 @@ function FoldBlock({
   icon: React.ReactNode;
   title: string;
   preview: string;
+  detail?: string;
   expanded: boolean;
   onToggle: () => void;
   variant?: 'tool' | 'thinking';
@@ -887,7 +923,7 @@ function FoldBlock({
         <span className="agent-fold-block__title">{icon}{title}</span>
         <span className="agent-fold-block__preview">{preview || '暂无内容'}</span>
       </button>
-      {expanded && <pre className="agent-fold-block__detail">{preview}</pre>}
+      {expanded && <pre className="agent-fold-block__detail">{detail ?? preview}</pre>}
     </div>
   );
 }
@@ -934,7 +970,9 @@ function buildModelMessages(
     if (message.role === 'user') {
       let content = message.content;
       if (message.id === currentUserMessageId && mentionedSkills.length > 0) {
-        content += `\n\n【系统指令】用户明确要求你在本轮回答中，必须优先调用以下技能：${mentionedSkills.map((skill) => skill.name).join(', ')}`;
+        const skillNames = mentionedSkills.map((skill) => skill.name);
+        const slashCommands = skillNames.map((name) => `/${name}`).join('\n');
+        content = `${slashCommands}\n【系统指令】本轮必须优先调用以下技能：${skillNames.join(', ')}\n\n${content}`;
       }
       return [{ role: 'user', content }];
     }
@@ -1069,8 +1107,8 @@ function buildEstimatedSystemPrompt(
 
   const systemLines = [
     '## 系统信息',
-    `- **当前时间戳**：${Math.floor(Date.now() / 1000)}`,
-    '- **操作系统**：darwin',
+    `- **当前时间**：${new Date().toLocaleString('sv-SE', { hour12: false })}`,
+    '- **操作系统**：由桌面端注入系统版本号',
     '- **Python 环境**：已配置',
     '- **可用 Skills**：',
   ];
@@ -1079,7 +1117,7 @@ function buildEstimatedSystemPrompt(
     systemLines.push('  （无可用 skill）');
   } else {
     skills.forEach((skill) => {
-      systemLines.push(`  - \`${skill.name}\`: ${skill.description}`);
+      systemLines.push(`  - \`${skill.name}\`: ${skill.description}（路径：${skill.path}）`);
     });
   }
 

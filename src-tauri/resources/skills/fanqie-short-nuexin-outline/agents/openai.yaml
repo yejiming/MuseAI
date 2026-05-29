@@ -1,0 +1,4 @@
+interface:
+  display_name: "番茄短篇虐心大纲"
+  short_description: "番茄短篇虐心婚恋选题、追妻火葬场节奏与全文大纲生成器"
+  default_prompt: "使用 $fanqie-short-nuexin-outline 生成一个番茄短篇虐心婚恋选题和全文大纲。"

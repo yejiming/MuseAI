@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
-use tauri::Emitter;
 use base64::{engine::general_purpose, Engine as _};
+use tauri::Emitter;
 
 use crate::models::*;
 use crate::utils::*;
@@ -121,7 +121,11 @@ pub fn create_dir(app: tauri::AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn rename_path(app: tauri::AppHandle, path: String, new_name: String) -> Result<String, String> {
+pub fn rename_path(
+    app: tauri::AppHandle,
+    path: String,
+    new_name: String,
+) -> Result<String, String> {
     let source = Path::new(&path);
     if !source.exists() {
         return Err("文件或文件夹不存在".to_string());

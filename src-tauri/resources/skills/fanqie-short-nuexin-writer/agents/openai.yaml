@@ -1,0 +1,4 @@
+interface:
+  display_name: "番茄短篇虐心婚恋写作"
+  short_description: "创作番茄短篇虐心婚恋小说追悔火葬场与清醒离开正文规则"
+  default_prompt: "写一篇番茄短篇虐心婚恋小说，包含强钩子、情绪递进、追悔火葬场和四层自检。"

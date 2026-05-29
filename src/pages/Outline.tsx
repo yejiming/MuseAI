@@ -8,6 +8,7 @@ import { defaultOutlineAssessmentPrompt, useSettingsStore } from '../stores/useS
 import { Button, Popover, Progress, Select, Popconfirm, message } from 'antd';
 import { RobotOutlined, CheckCircleOutlined, DeleteOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import { ScoreDetailsModal } from '../components/ScoreDetailsModal';
 
 const MIN_FILE_TREE_WIDTH = 250;
 const MAX_FILE_TREE_WIDTH = 420;
@@ -26,6 +27,7 @@ const Outline: React.FC = () => {
   const [isResizingFileTree, setIsResizingFileTree] = useState(false);
   const [isResizingAgent, setIsResizingAgent] = useState(false);
   const [isAssessmentOpen, setIsAssessmentOpen] = useState(false);
+  const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
 
   const fileTreeRef = useRef<HTMLDivElement>(null);
   const {
@@ -157,6 +159,10 @@ const Outline: React.FC = () => {
     ? `请分析大纲: ${activeVersionId ? getVersionPath(selectedOutlineFile, activeVersionId) : selectedOutlineFile}`
     : '';
 
+  useEffect(() => {
+    setIsScoreModalOpen(false);
+  }, [selectedOutlineFile]);
+
   return (
     <div style={{ height: '100%', width: '100%', overflowX: 'hidden', overflowY: 'hidden', background: '#faf9f5' }}>
       <div style={{ display: 'flex', height: '100%', minWidth: fileTreeWidth + EDITOR_MIN_WIDTH + (isAgentVisible ? agentWidth : 0) }}>
@@ -213,105 +219,119 @@ const Outline: React.FC = () => {
               </div>
             ) : <span />}
 
-            {selectedOutlineFile && (
-              <div className="de-ai-editor-toolbar__meta">
-                <Select
-                  className="de-ai-version-select"
-                  style={{ width: 240 }}
-                  value={activeVersionId || 'original'}
-                  onChange={(val) => {
-                    if (val === 'original') {
-                      setActiveVersionId(null);
-                      syncActiveVersionResult(null);
-                    } else {
-                      setActiveVersionId(val);
-                      const v = versions.find(x => x.id === val);
-                      syncActiveVersionResult(v ?? null);
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center', flex: '1 1 auto', justifyContent: 'flex-end', minWidth: 0 }}>
+              {selectedOutlineFile && (
+                <div className="de-ai-editor-toolbar__meta" style={{ flex: '0 1 auto' }}>
+                  <Select
+                    className="de-ai-version-select"
+                    style={{ width: 240 }}
+                    value={activeVersionId || 'original'}
+                    onChange={(val) => {
+                      if (val === 'original') {
+                        setActiveVersionId(null);
+                        syncActiveVersionResult(null);
+                      } else {
+                        setActiveVersionId(val);
+                        const v = versions.find(x => x.id === val);
+                        syncActiveVersionResult(v ?? null);
+                      }
+                    }}
+                    options={[
+                      { value: 'original', label: '原文件' },
+                      ...versions.map(v => ({
+                        value: v.id,
+                        label: `版本 ${new Date(v.timestamp).toLocaleString()}`
+                      }))
+                    ]}
+                  />
+                  {activeVersionId && (
+                    <Popconfirm title="确定删除该版本？" onConfirm={async () => {
+                      try {
+                        await invoke('delete_file_version', { path: selectedOutlineFile, versionId: activeVersionId });
+                        setVersions(versions.filter(v => v.id !== activeVersionId));
+                        setActiveVersionId(null);
+                        syncActiveVersionResult(null);
+                        message.success('已删除版本');
+                      } catch (e) {
+                        message.error(`删除失败: ${e}`);
+                      }
+                    }}>
+                      <Button className="de-ai-delete-version" type="text" danger icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  )}
+                  <Popover
+                    placement="bottomRight"
+                    content={
+                      parsedAssessment ? (
+                        <div style={{ minWidth: 200 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span>引流能力</span><span>{parsedAssessment['引流能力']}/20</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span>开局钩子</span><span>{parsedAssessment['开局钩子']}/20</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span>设定新鲜感</span><span>{parsedAssessment['设定新鲜感']}/20</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span>情绪爽点密度</span><span>{parsedAssessment['情绪爽点密度']}/20</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span>人设代入与话题性</span><span>{parsedAssessment['人设代入与话题性']}/20</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ padding: '8px 16px', color: '#999' }}>暂无评估结果</div>
+                      )
                     }
+                  >
+                    <div 
+                      className="de-ai-score-pill" 
+                      style={{ cursor: 'pointer' }} 
+                      aria-label={`大纲评分${parsedAssessment ? totalScore : '暂无'}`}
+                      onClick={() => {
+                        if (parsedAssessment) {
+                          setIsScoreModalOpen(true);
+                        }
+                      }}
+                    >
+                      <span className="de-ai-score-pill__label">大纲分</span>
+                      <Progress 
+                        type="circle" 
+                        percent={parsedAssessment ? totalScore : 0} 
+                        size={30} 
+                        format={(p) => parsedAssessment ? p : '--'}
+                        status={parsedAssessment ? (totalScore > 80 ? 'success' : 'normal') : 'normal'}
+                        strokeColor={parsedAssessment ? undefined : "#e8e8e8"} 
+                      />
+                    </div>
+                  </Popover>
+                  
+                  <ScoreDetailsModal 
+                    isOpen={isScoreModalOpen} 
+                    onClose={() => setIsScoreModalOpen(false)} 
+                    parsedAssessment={parsedAssessment} 
+                    totalScore={totalScore} 
+                  />
+                </div>
+              )}
+              {!isAgentVisible && (
+                <Button
+                  type="primary"
+                  icon={<RobotOutlined />}
+                  onClick={() => setIsAgentVisible(true)}
+                  style={{
+                    background: '#d97757',
+                    border: 'none',
+                    boxShadow: '0 4px 12px rgba(217, 119, 87, 0.2)',
+                    flexShrink: 0
                   }}
-                  options={[
-                    { value: 'original', label: '原文件' },
-                    ...versions.map(v => ({
-                      value: v.id,
-                      label: `版本 ${new Date(v.timestamp).toLocaleString()}`
-                    }))
-                  ]}
-                />
-                {activeVersionId && (
-                  <Popconfirm title="确定删除该版本？" onConfirm={async () => {
-                    try {
-                      await invoke('delete_file_version', { path: selectedOutlineFile, versionId: activeVersionId });
-                      setVersions(versions.filter(v => v.id !== activeVersionId));
-                      setActiveVersionId(null);
-                      syncActiveVersionResult(null);
-                      message.success('已删除版本');
-                    } catch (e) {
-                      message.error(`删除失败: ${e}`);
-                    }
-                  }}>
-                    <Button className="de-ai-delete-version" type="text" danger icon={<DeleteOutlined />} />
-                  </Popconfirm>
-                )}
-                <Popover
-                  placement="bottomRight"
-                  content={
-                    parsedAssessment ? (
-                      <div style={{ minWidth: 200 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <span>引流能力</span><span>{parsedAssessment['引流能力']}/20</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <span>开局钩子</span><span>{parsedAssessment['开局钩子']}/20</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <span>设定新鲜感</span><span>{parsedAssessment['设定新鲜感']}/20</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <span>情绪爽点密度</span><span>{parsedAssessment['情绪爽点密度']}/20</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <span>人设代入与话题性</span><span>{parsedAssessment['人设代入与话题性']}/20</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ padding: '8px 16px', color: '#999' }}>暂无评估结果</div>
-                    )
-                  }
                 >
-                  <div className="de-ai-score-pill" style={{ cursor: 'pointer' }} aria-label={`大纲评分${parsedAssessment ? totalScore : '暂无'}`}>
-                    <span className="de-ai-score-pill__label">大纲分</span>
-                    <Progress 
-                      type="circle" 
-                      percent={parsedAssessment ? totalScore : 0} 
-                      size={30} 
-                      format={(p) => parsedAssessment ? p : '--'}
-                      status={parsedAssessment ? (totalScore > 80 ? 'success' : 'normal') : 'normal'}
-                      strokeColor={parsedAssessment ? undefined : "#e8e8e8"} 
-                    />
-                  </div>
-                </Popover>
-              </div>
-            )}
+                  打开 Agent
+                </Button>
+              )}
+            </div>
           </div>
-
-          {!isAgentVisible && (
-            <Button
-              type="primary"
-              icon={<RobotOutlined />}
-              onClick={() => setIsAgentVisible(true)}
-              style={{
-                position: 'absolute',
-                top: '16px',
-                right: '16px',
-                background: '#d97757',
-                border: 'none',
-                boxShadow: '0 4px 12px rgba(217, 119, 87, 0.2)',
-                zIndex: 10,
-              }}
-            >
-              打开 Agent
-            </Button>
-          )}
 
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
             <MarkdownEditor filePath={activeVersionId ? getVersionPath(selectedOutlineFile!, activeVersionId) : selectedOutlineFile} />
@@ -366,16 +386,20 @@ const Outline: React.FC = () => {
                         await invoke('update_version_ai_result', {
                           path: state.selectedOutlineFile,
                           versionId: versionToUpdate,
-                          score: sum,
+                          score: Math.round(sum),
                           suggestion: jsonStr,
                         });
+                        await refreshVersions(versionToUpdate);
                       } catch (err) {
                         console.error('update_version_ai_result error:', err);
+                        return `保存结果到本地失败：${err}。请检查 JSON 格式是否完全合法，然后重新输出。`;
                       }
-                      await refreshVersions(versionToUpdate);
+                    } else {
+                      return '未能提取到合法的 JSON 格式。请务必严格按照要求，只输出一段 JSON 数据，不要包含任何前缀、代码块标记或解释性文字。请重新输出。';
                     }
                   } catch (e) {
                     console.error('Failed to parse assessment JSON', e);
+                    return `JSON 解析失败：${e}。请检查 JSON 语法是否有误（如缺少引号、多余逗号等），然后重新输出合法的 JSON 格式。`;
                   }
                 }}
               />

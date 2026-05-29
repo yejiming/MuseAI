@@ -43,6 +43,7 @@ export interface AgentSessionSummary {
 export interface AgentSessionRecord extends AgentSessionSummary {
   messages: Message[];
   selectedReferenceFiles: string[];
+  selectedOutlineFile?: string | null;
   todos: AgentTodo[];
 }
 
@@ -53,11 +54,6 @@ function createSessionId() {
   return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export const createWelcomeMessage = (): Message => ({
-  id: 'welcome',
-  role: 'agent',
-  content: '你好！我是 MuseAI 的 Agent 助手。我可以帮助你构思剧情、修改文本或执行本地工具。有什么我可以帮忙的吗？',
-});
 
 interface AgentStoreState {
   messages: Message[];
@@ -65,6 +61,7 @@ interface AgentStoreState {
   isStreaming: boolean;
   expandedBlocks: Record<string, boolean>;
   selectedReferenceFiles: string[];
+  selectedOutlineFile: string | null;
   todos: AgentTodo[];
   isTodoOpen: boolean;
   sessions: AgentSessionSummary[];
@@ -78,6 +75,7 @@ interface AgentStoreState {
   setIsStreaming: (isStreaming: boolean) => void;
   setExpandedBlocks: (blocks: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
   setSelectedReferenceFiles: (files: string[]) => void;
+  setSelectedOutlineFile: (file: string | null) => void;
   setTodos: (todos: AgentTodo[]) => void;
   setIsTodoOpen: (isOpen: boolean | ((prev: boolean) => boolean)) => void;
   setSessions: (sessions: AgentSessionSummary[]) => void;
@@ -94,11 +92,12 @@ import { persist } from 'zustand/middleware';
 export const useAgentStore = create<AgentStoreState>()(
   persist(
     (set) => ({
-      messages: [createWelcomeMessage()],
+      messages: [],
       input: '',
       isStreaming: false,
       expandedBlocks: {},
       selectedReferenceFiles: [],
+      selectedOutlineFile: null,
       todos: [],
       isTodoOpen: false,
       sessions: [],
@@ -116,6 +115,7 @@ export const useAgentStore = create<AgentStoreState>()(
         expandedBlocks: typeof updater === 'function' ? updater(state.expandedBlocks) : updater,
       })),
       setSelectedReferenceFiles: (selectedReferenceFiles) => set({ selectedReferenceFiles }),
+      setSelectedOutlineFile: (selectedOutlineFile) => set({ selectedOutlineFile }),
       setTodos: (todos) => set({ todos }),
       setIsTodoOpen: (updater) => set((state) => ({
         isTodoOpen: typeof updater === 'function' ? updater(state.isTodoOpen) : updater,
@@ -127,23 +127,26 @@ export const useAgentStore = create<AgentStoreState>()(
       setActiveRun: (activeRun) => set({ activeRun }),
 
       createNewSession: () => {
-        set({
+        set((state) => ({
           activeRun: { runId: null, messageId: null },
-          messages: [createWelcomeMessage()],
+          messages: [],
           input: '',
           isStreaming: false,
           expandedBlocks: {},
+          selectedReferenceFiles: state.selectedReferenceFiles,
+          selectedOutlineFile: state.selectedOutlineFile,
           todos: [],
           isTodoOpen: false,
           sessionId: createSessionId(),
           sessionTitle: '新对话',
-        });
+        }));
       },
     }),
     {
       name: 'museai-agent-storage',
       partialize: (state) => ({
         selectedReferenceFiles: state.selectedReferenceFiles,
+        selectedOutlineFile: state.selectedOutlineFile,
       }),
     }
   )

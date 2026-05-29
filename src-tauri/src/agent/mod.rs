@@ -1,17 +1,18 @@
 #[macro_use]
 pub mod sessions;
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::Command;
 
+use chrono::Local;
 use futures_util::{future::BoxFuture, StreamExt};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::commands::skills::discover_skills;
+use crate::llm::*;
 use crate::models::*;
 use crate::tools::*;
-use crate::llm::*;
 use crate::utils::*;
-use crate::commands::skills::discover_skills;
 
 pub async fn run_openai_agent_loop(
     app: &AppHandle,
@@ -127,7 +128,14 @@ async fn stream_openai_round(
             if let Some(event) = parse_openai_stream_event(data) {
                 if let Some(reasoning) = event.reasoning_content {
                     if options.emit_events {
-                        emit_chat_event(app, run_id, "thinking_delta", Some(reasoning), None, options);
+                        emit_chat_event(
+                            app,
+                            run_id,
+                            "thinking_delta",
+                            Some(reasoning),
+                            None,
+                            options,
+                        );
                     }
                 }
                 if let Some(delta) = event.content {
@@ -194,8 +202,7 @@ pub async fn run_anthropic_agent_loop(
             return Err(format!("Anthropic 兼容接口请求失败：{} {}", status, body));
         }
 
-        let stream_result =
-            stream_anthropic_round(app, run_id, response, &options).await?;
+        let stream_result = stream_anthropic_round(app, run_id, response, &options).await?;
         if stream_result.tool_calls.is_empty() {
             return Ok(stream_result.content);
         }
@@ -278,7 +285,14 @@ async fn stream_anthropic_round(
                     AnthropicStreamEvent::ThinkingDelta { index, thinking } => {
                         result.push_thinking_delta(index, &thinking);
                         if options.emit_events {
-                            emit_chat_event(app, run_id, "thinking_delta", Some(thinking), None, options);
+                            emit_chat_event(
+                                app,
+                                run_id,
+                                "thinking_delta",
+                                Some(thinking),
+                                None,
+                                options,
+                            );
                         }
                     }
                     AnthropicStreamEvent::ThinkingSignature { index, signature } => {
@@ -372,7 +386,11 @@ pub fn emit_tool_event(
             let args = tool_arguments.unwrap_or("{}");
             delta = format!("\n[调用子工具 {} ({})]\n", tool_name, args);
         } else if event_type == "tool_end" {
-            delta = format!("\n[子工具 {} 执行完毕: {}]\n", tool_name, message.clone().unwrap_or_default());
+            delta = format!(
+                "\n[子工具 {} 执行完毕: {}]\n",
+                tool_name,
+                message.clone().unwrap_or_default()
+            );
         }
 
         if !delta.is_empty() {
@@ -449,26 +467,33 @@ async fn execute_agent_tool(
     }
 
     let parsed = serde_json::from_str::<Value>(arguments).unwrap_or_else(|_| json!({}));
-    let execution =
-        match execute_agent_tool_inner(app, run_id, request, options.clone(), tool_call_id, tool_name, &parsed)
-            .await
-        {
-            Ok((output, todos)) => {
-                if options.emit_todo_updates {
-                    if let Some(todos) = todos {
-                        emit_todo_update(app, run_id, todos);
-                    }
-                }
-                AgentToolExecution {
-                    success: true,
-                    model_output: normalize_agent_tool_output(true, &output),
+    let execution = match execute_agent_tool_inner(
+        app,
+        run_id,
+        request,
+        options.clone(),
+        tool_call_id,
+        tool_name,
+        &parsed,
+    )
+    .await
+    {
+        Ok((output, todos)) => {
+            if options.emit_todo_updates {
+                if let Some(todos) = todos {
+                    emit_todo_update(app, run_id, todos);
                 }
             }
-            Err(output) => AgentToolExecution {
-                success: false,
-                model_output: normalize_agent_tool_output(false, &output),
-            },
-        };
+            AgentToolExecution {
+                success: true,
+                model_output: normalize_agent_tool_output(true, &output),
+            }
+        }
+        Err(output) => AgentToolExecution {
+            success: false,
+            model_output: normalize_agent_tool_output(false, &output),
+        },
+    };
 
     if options.emit_events {
         emit_tool_event(
@@ -535,7 +560,12 @@ async fn execute_agent_tool_inner(
         "write" => {
             let file_path = required_string(input, "file_path")?;
             ensure_write_path_allowed(request, &file_path)?;
-            let result = tool_write(app.clone(), file_path, required_string(input, "content")?, request.workspace_path.clone());
+            let result = tool_write(
+                app.clone(),
+                file_path,
+                required_string(input, "content")?,
+                request.workspace_path.clone(),
+            );
             result_to_agent_execution(result).map(|output| (output, None))
         }
         "edit" => {
@@ -597,7 +627,9 @@ async fn execute_agent_tool_inner(
         }
         "subagent" => {
             let task = required_string(input, "task")?;
-            let output = run_subagent_agent_loop(app, run_id, request, task, tool_call_id.to_string()).await?;
+            let output =
+                run_subagent_agent_loop(app, run_id, request, task, tool_call_id.to_string())
+                    .await?;
             Ok((output, None))
         }
         "todo" => {
@@ -636,12 +668,22 @@ fn run_subagent_agent_loop<'a>(
 
         let result = match child_request.model_interface.as_str() {
             "Anthropic-compatible" => {
-                run_anthropic_agent_loop(app, run_id, &child_request, AgentRunOptions::subagent(Some(parent_tool_call_id)))
-                    .await
+                run_anthropic_agent_loop(
+                    app,
+                    run_id,
+                    &child_request,
+                    AgentRunOptions::subagent(Some(parent_tool_call_id)),
+                )
+                .await
             }
             _ => {
-                run_openai_agent_loop(app, run_id, &child_request, AgentRunOptions::subagent(Some(parent_tool_call_id)))
-                    .await
+                run_openai_agent_loop(
+                    app,
+                    run_id,
+                    &child_request,
+                    AgentRunOptions::subagent(Some(parent_tool_call_id)),
+                )
+                .await
             }
         };
 
@@ -756,14 +798,11 @@ pub fn assemble_system_prompt(
         prompt.push_str(&workspace_context);
     }
 
-    let sys_time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let current_time = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     prompt.push_str(&format!(
-        "\n\n## 系统信息\n- **当前时间戳**：{}\n- **操作系统**：{}\n- **Python 环境**：{}\n- **可用 Skills**：\n",
-        sys_time,
-        std::env::consts::OS,
+        "\n\n## 系统信息\n- **当前时间**：{}\n- **操作系统**：{}\n- **Python 环境**：{}\n- **可用 Skills**：\n",
+        current_time,
+        operating_system_info(),
         get_python_info()
     ));
 
@@ -772,11 +811,54 @@ pub fn assemble_system_prompt(
         prompt.push_str("  （无可用 skill）\n");
     } else {
         for skill in skills {
-            prompt.push_str(&format!("  - `{}`: {}\n", skill.name, skill.description));
+            prompt.push_str(&format!(
+                "  - `{}`: {}（路径：{}）\n",
+                skill.name,
+                skill.description,
+                skill.path.display()
+            ));
         }
     }
 
     Ok(prompt)
+}
+
+fn operating_system_info() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let product = Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let build = Command::new("sw_vers")
+            .arg("-buildVersion")
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if let Some(product) = product {
+            return match build {
+                Some(build) => format!("macOS {} ({})", product, build),
+                None => format!("macOS {}", product),
+            };
+        }
+    }
+
+    let release = Command::new("uname")
+        .arg("-r")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    match release {
+        Some(release) => format!("{} {}", std::env::consts::OS, release),
+        None => std::env::consts::OS.to_string(),
+    }
 }
 pub fn build_workspace_context(request: &ChatStreamRequest) -> String {
     let mut lines = Vec::new();

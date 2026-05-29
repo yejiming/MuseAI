@@ -5,6 +5,7 @@ import {
   defaultSystemPrompt,
   defaultDeAiDetectorPrompt,
   defaultDeAiRemoverPrompt,
+  defaultWorkSummaryPrompt,
   defaultOutlineCreationPrompt,
   defaultOutlineAssessmentPrompt,
 } from '../stores/useSettingsStore';
@@ -53,6 +54,7 @@ const Settings: React.FC = () => {
   const agentOptions = [
     { value: 'global', label: '全局默认配置' },
     { value: 'writer', label: '写文章Agent' },
+    { value: 'workSummary', label: '作品总结Agent' },
     { value: 'detector', label: '检测AI味Agent' },
     { value: 'remover', label: '去除AI味Agent' },
     { value: 'outlineCreation', label: '大纲制作Agent' },
@@ -76,6 +78,7 @@ const Settings: React.FC = () => {
 
     promptForm.setFieldsValue({
       systemPrompt: store.systemPrompt || defaultSystemPrompt,
+      workSummaryPrompt: store.workSummaryPrompt || defaultWorkSummaryPrompt,
       deAiDetectorPrompt: store.deAiDetectorPrompt || defaultDeAiDetectorPrompt,
       deAiRemoverPrompt: store.deAiRemoverPrompt || defaultDeAiRemoverPrompt,
       outlineCreationPrompt: store.outlineCreationPrompt || defaultOutlineCreationPrompt,
@@ -117,6 +120,13 @@ const Settings: React.FC = () => {
       reset: () => {
         promptForm.setFieldsValue({ deAiDetectorPrompt: defaultDeAiDetectorPrompt });
         store.resetDeAiDetectorPrompt();
+      },
+    },
+    workSummaryPrompt: {
+      save: () => store.setWorkSummaryPrompt(promptForm.getFieldValue('workSummaryPrompt')),
+      reset: () => {
+        promptForm.setFieldsValue({ workSummaryPrompt: defaultWorkSummaryPrompt });
+        store.resetWorkSummaryPrompt();
       },
     },
     deAiRemoverPrompt: {
@@ -272,6 +282,7 @@ const Settings: React.FC = () => {
             layout="vertical"
             initialValues={{
               systemPrompt: store.systemPrompt || defaultSystemPrompt,
+              workSummaryPrompt: store.workSummaryPrompt || defaultWorkSummaryPrompt,
               deAiDetectorPrompt: store.deAiDetectorPrompt || defaultDeAiDetectorPrompt,
               deAiRemoverPrompt: store.deAiRemoverPrompt || defaultDeAiRemoverPrompt,
               outlineCreationPrompt: store.outlineCreationPrompt || defaultOutlineCreationPrompt,
@@ -297,6 +308,29 @@ const Settings: React.FC = () => {
                     保存提示词
                   </Button>
                   <Button size="large" onClick={() => handleResetPrompt('systemPrompt')}>
+                    恢复默认
+                  </Button>
+                </div>
+              </div>
+
+              <div>
+                <Form.Item
+                  label="作品总结 Agent"
+                  name="workSummaryPrompt"
+                  help="此提示词将作为作品页作品总结Agent的核心设定。"
+                  style={{ marginBottom: 16 }}
+                >
+                  <TextArea 
+                    rows={8} 
+                    placeholder="请输入作品总结Agent的系统提示词..."
+                    style={{ resize: 'none', backgroundColor: '#faf9f5', border: '1px solid #eae6df' }} 
+                  />
+                </Form.Item>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <Button type="primary" size="large" onClick={() => handleSavePrompt('workSummaryPrompt')}>
+                    保存提示词
+                  </Button>
+                  <Button size="large" onClick={() => handleResetPrompt('workSummaryPrompt')}>
                     恢复默认
                   </Button>
                 </div>

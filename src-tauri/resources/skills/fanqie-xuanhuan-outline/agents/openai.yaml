@@ -1,0 +1,4 @@
+interface:
+  display_name: "番茄玄幻脑洞大纲"
+  short_description: "番茄小说玄幻脑洞选题、节奏拆解与前30章大纲生成器"
+  default_prompt: "使用 $fanqie-xuanhuan-outline 生成一个番茄玄幻脑洞选题和前30章大纲。"

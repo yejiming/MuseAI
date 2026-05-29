@@ -3,8 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tauri::{AppHandle, Manager};
 use std::sync::OnceLock;
+use tauri::{AppHandle, Manager};
 use walkdir::WalkDir;
 
 use crate::models::*;
@@ -20,7 +20,11 @@ pub fn is_supported_content_file(path: &Path) -> bool {
 }
 
 #[tauri::command]
-pub fn read_file_with_lines(file_path: &str, offset: usize, limit: usize) -> Result<String, String> {
+pub fn read_file_with_lines(
+    file_path: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<String, String> {
     let path = expand_path(None, file_path);
     if !path.exists() {
         return Err(format!("Error: {} not found", path.display()));
@@ -354,4 +358,3 @@ pub fn agent_session_path(app: &AppHandle, id: &str) -> Result<std::path::PathBu
     let safe_id = sanitize_session_id(id)?;
     Ok(agent_sessions_dir(app)?.join(format!("{}.json", safe_id)))
 }
-

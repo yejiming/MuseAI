@@ -14,8 +14,8 @@ interface DeAiState {
   versions: any[];
   suggestion: string | null;
   aiScore: number | null;
-  autoLoopCount: number;
-  isAutoLooping: boolean;
+  parsedScoreResult: any | null;
+  carryOverHistoricalSuggestions: boolean;
   detectorRunning: boolean;
   removerRunning: boolean;
   detectorMessages: Message[];
@@ -23,6 +23,9 @@ interface DeAiState {
   detectorRun: AgentRunState;
   removerRun: AgentRunState;
   selectedDetectorReferences: string[];
+  selectedHistoricalVersions: string[];
+  isAutoLooping: boolean;
+  autoLoopCount: number;
   setSelectedWorkFile: (file: string | null) => void;
   setSelectedReferenceFile: (file: string | null) => void;
   setActivePreviewFile: (file: string | null) => void;
@@ -30,8 +33,8 @@ interface DeAiState {
   setVersions: (versions: any[]) => void;
   setSuggestion: (suggestion: string | null) => void;
   setAiScore: (score: number | null) => void;
-  setAutoLoopCount: (count: number) => void;
-  setIsAutoLooping: (isLooping: boolean) => void;
+  setParsedScoreResult: (result: any | null) => void;
+  setCarryOverHistoricalSuggestions: (carry: boolean) => void;
   setDetectorRunning: (isRunning: boolean) => void;
   setRemoverRunning: (isRunning: boolean) => void;
   setDetectorMessages: (messages: Message[] | ((messages: Message[]) => Message[])) => void;
@@ -39,6 +42,9 @@ interface DeAiState {
   setDetectorRun: (run: AgentRunState) => void;
   setRemoverRun: (run: AgentRunState) => void;
   setSelectedDetectorReferences: (references: string[] | ((references: string[]) => string[])) => void;
+  setSelectedHistoricalVersions: (versions: string[] | ((versions: string[]) => string[])) => void;
+  setIsAutoLooping: (isAutoLooping: boolean) => void;
+  setAutoLoopCount: (count: number) => void;
 }
 
 import { persist } from 'zustand/middleware';
@@ -53,8 +59,8 @@ export const useDeAiStore = create<DeAiState>()(
       versions: [],
       suggestion: null,
       aiScore: null,
-      autoLoopCount: 0,
-      isAutoLooping: false,
+      parsedScoreResult: null,
+      carryOverHistoricalSuggestions: false,
       detectorRunning: false,
       removerRunning: false,
       detectorMessages: [],
@@ -62,15 +68,18 @@ export const useDeAiStore = create<DeAiState>()(
       detectorRun: { runId: null, messageId: null },
       removerRun: { runId: null, messageId: null },
       selectedDetectorReferences: [],
-      setSelectedWorkFile: (file) => set({ selectedWorkFile: file, selectedReferenceFile: null, activePreviewFile: file, activeVersionId: null, versions: [], suggestion: null, aiScore: null }),
-      setSelectedReferenceFile: (file) => set({ selectedWorkFile: null, selectedReferenceFile: file, activePreviewFile: file, activeVersionId: null, versions: [], suggestion: null, aiScore: null }),
+      selectedHistoricalVersions: [],
+      isAutoLooping: false,
+      autoLoopCount: 0,
+      setSelectedWorkFile: (file) => set({ selectedWorkFile: file, selectedReferenceFile: null, activePreviewFile: file, activeVersionId: null, versions: [], suggestion: null, aiScore: null, parsedScoreResult: null }),
+      setSelectedReferenceFile: (file) => set({ selectedWorkFile: null, selectedReferenceFile: file, activePreviewFile: file, activeVersionId: null, versions: [], suggestion: null, aiScore: null, parsedScoreResult: null }),
       setActivePreviewFile: (file) => set({ activePreviewFile: file }),
       setActiveVersionId: (id) => set({ activeVersionId: id }),
       setVersions: (versions) => set({ versions }),
       setSuggestion: (suggestion) => set({ suggestion }),
       setAiScore: (score) => set({ aiScore: score }),
-      setAutoLoopCount: (count) => set({ autoLoopCount: count }),
-      setIsAutoLooping: (isAutoLooping) => set({ isAutoLooping }),
+      setParsedScoreResult: (parsedScoreResult) => set({ parsedScoreResult }),
+      setCarryOverHistoricalSuggestions: (carry) => set({ carryOverHistoricalSuggestions: carry }),
       setDetectorRunning: (detectorRunning) => set({ detectorRunning }),
       setRemoverRunning: (removerRunning) => set({ removerRunning }),
       setDetectorMessages: (messages) => set((state) => ({
@@ -84,11 +93,18 @@ export const useDeAiStore = create<DeAiState>()(
       setSelectedDetectorReferences: (references) => set((state) => ({
         selectedDetectorReferences: typeof references === 'function' ? references(state.selectedDetectorReferences) : references,
       })),
+      setSelectedHistoricalVersions: (versions) => set((state) => ({
+        selectedHistoricalVersions: typeof versions === 'function' ? versions(state.selectedHistoricalVersions) : versions,
+      })),
+      setIsAutoLooping: (isAutoLooping) => set({ isAutoLooping }),
+      setAutoLoopCount: (autoLoopCount) => set({ autoLoopCount }),
     }),
     {
       name: 'museai-deai-storage',
       partialize: (state) => ({
         selectedDetectorReferences: state.selectedDetectorReferences,
+        carryOverHistoricalSuggestions: state.carryOverHistoricalSuggestions,
+        selectedHistoricalVersions: state.selectedHistoricalVersions,
       }),
     }
   )

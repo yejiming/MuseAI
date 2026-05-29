@@ -35,7 +35,6 @@ pub fn bash_permission_channels() -> &'static Mutex<HashMap<String, oneshot::Sen
 
 pub struct ActiveStreams(Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>);
 
-
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -48,10 +47,7 @@ fn rename_item(path: String, new_name: String) -> Result<(), String> {
 
 #[tauri::command]
 fn move_item(app: AppHandle, source: String, target_dir: String) -> Result<(), String> {
-    let doc_dir = app
-        .path()
-        .document_dir()
-        .map_err(|e| e.to_string())?;
+    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
     let museai_dir = doc_dir.join("MuseAI");
     let refs_dir = museai_dir.join("references");
     let articles_dir = museai_dir.join("articles");
@@ -85,8 +81,46 @@ fn import_local_folder_shallow(source: String, target_dir: String) -> Result<Str
 }
 
 #[tauri::command]
-fn crawl_fanqie_article(url: String, novel_type: String, target_dir: String) -> Result<String, String> {
+fn crawl_fanqie_article(
+    url: String,
+    novel_type: String,
+    target_dir: String,
+) -> Result<String, String> {
     crawler::crawl_fanqie_article(&url, &novel_type, &target_dir)
+}
+
+#[tauri::command]
+fn build_full_system_prompt(
+    app: AppHandle,
+    system_prompt: String,
+    workspace_path: Option<String>,
+    selected_reference_files: Option<Vec<String>>,
+) -> Result<String, String> {
+    let request = models::ChatStreamRequest {
+        model_interface: String::new(),
+        base_url: String::new(),
+        api_key: String::new(),
+        model: String::new(),
+        temperature: None,
+        max_output_tokens: None,
+        max_context_tokens: None,
+        thinking_depth: None,
+        system_prompt,
+        workspace_path,
+        messages: vec![],
+        selected_reference_files,
+        allowed_tools: None,
+        allowed_write_paths: None,
+    };
+
+    let mut full = agent::assemble_system_prompt(Some(&app), &request)?;
+
+    let reference_ctx = agent::build_reference_context(&request);
+    if !reference_ctx.is_empty() {
+        full.push_str(&reference_ctx);
+    }
+
+    Ok(full)
 }
 
 #[tauri::command]
@@ -139,11 +173,14 @@ pub fn run() {
             import_workspace_item,
             delete_workspace_item,
             get_workspace_dir,
+            save_work_summary_result,
+            load_work_summary_result,
             rename_item,
             move_item,
             import_local_folder_shallow,
             crawl_fanqie_article,
-            create_untitled_item
+            create_untitled_item,
+            build_full_system_prompt,
         ])
         .manage(ActiveStreams(Mutex::new(HashMap::new())))
         .run(tauri::generate_context!())
@@ -188,7 +225,7 @@ mod tests {
             "关键词".to_string(),
             Some(dir.display().to_string()),
             Some("*.md".to_string()),
-            None
+            None,
         );
 
         assert!(result.success);

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Tooltip } from 'antd';
-import { BulbOutlined, PlayCircleOutlined, ReloadOutlined, RobotOutlined, StopOutlined, ToolOutlined } from '@ant-design/icons';
+import { BulbOutlined, InfoCircleOutlined, PlayCircleOutlined, ReloadOutlined, RobotOutlined, StopOutlined, ToolOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import ReactMarkdown from 'react-markdown';
@@ -21,7 +21,8 @@ interface ChatStreamEvent {
 
 interface OutlineAssessmentAgentChatProps {
   title: string;
-  agentId: 'outlineAssessment';
+  agentId: 'outlineAssessment' | 'workSummary';
+  workspaceDirType?: 'articles' | 'outline';
   systemPrompt: string;
   allowedTools: string[];
   startContent: string;
@@ -34,7 +35,7 @@ interface OutlineAssessmentAgentChatProps {
   activeRun: { runId: string | null; messageId: string | null };
   setActiveRun: (run: { runId: string | null; messageId: string | null }) => void;
   autoTriggerContent?: string;
-  onDone?: (lastAgentMessage: string) => void;
+  onDone?: (lastAgentMessage: string) => void | string | Promise<void | string>;
   isRunning?: boolean;
   onRunningChange?: (running: boolean) => void;
 }
@@ -47,6 +48,7 @@ interface StartOverride {
 const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({ 
   title, 
   agentId,
+  workspaceDirType,
   systemPrompt, 
   allowedTools,
   startContent,
@@ -63,6 +65,7 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
   isRunning,
   onRunningChange
 }) => {
+  const resolvedWorkspaceDirType = workspaceDirType ?? 'outline';
   const [expandedBlocks, setExpandedBlocks] = useState<Record<string, boolean>>({});
   const stopRequestedRef = useRef(false);
   const currentThinkingIdRef = useRef<string | null>(null);
@@ -72,6 +75,24 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
   const onRunningChangeRef = useRef(onRunningChange);
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const settings = useSettingsStore();
+  const [fullSystemPrompt, setFullSystemPrompt] = useState('');
+
+  useEffect(() => {
+    const build = async () => {
+      try {
+        const workspaceDir = await invoke<string>('get_workspace_dir', { dirType: resolvedWorkspaceDirType });
+        const full = await invoke<string>('build_full_system_prompt', {
+          systemPrompt,
+          workspacePath: workspaceDir,
+          selectedReferenceFiles: [],
+        });
+        setFullSystemPrompt(full);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    build();
+  }, [systemPrompt, resolvedWorkspaceDirType]);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
@@ -171,6 +192,7 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
             ? { ...msg, content: payload.message ? `请求模型失败：${payload.message}` : '请求模型失败' }
             : msg
         )));
+        activeRunRef.current = { runId: null, messageId: null };
         setActiveRun({ runId: null, messageId: null });
         onRunningChangeRef.current?.(false);
         return;
@@ -178,11 +200,25 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
 
       if (payload.eventType === 'done') {
         currentThinkingIdRef.current = null;
+        activeRunRef.current = { runId: null, messageId: null };
         setActiveRun({ runId: null, messageId: null });
         onRunningChangeRef.current?.(false);
         const lastMsg = messagesRef.current.find(m => m.id === active.messageId);
         if (lastMsg && onDoneRef.current) {
-          onDoneRef.current(lastMsg.content);
+          const result = onDoneRef.current(lastMsg.content);
+          const handleResult = (res: any) => {
+            if (typeof res === 'string' && res.trim() !== '') {
+              // Using timeout to ensure state is clean before next send
+              setTimeout(() => {
+                void handleSend(res);
+              }, 100);
+            }
+          };
+          if (result && typeof result === 'object' && 'then' in result) {
+            result.then(handleResult).catch(console.error);
+          } else {
+            handleResult(result);
+          }
         }
       }
     });
@@ -257,7 +293,7 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
     scrollToBottomOnce();
 
     try {
-      const outlineDir = await invoke<string>('get_workspace_dir', { dirType: 'outline' });
+      const workspaceDir = await invoke<string>('get_workspace_dir', { dirType: resolvedWorkspaceDirType });
       const runId = await invoke<string>('start_chat_completion_stream', {
         request: {
           modelInterface: settings.modelInterface,
@@ -269,7 +305,7 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
           maxContextTokens: settings.agentConfigs?.[agentId]?.maxContextTokens ?? settings.maxContextTokens,
           thinkingDepth: settings.agentConfigs?.[agentId]?.thinkingDepth ?? settings.thinkingDepth,
           systemPrompt: systemPrompt,
-          workspacePath: outlineDir,
+          workspacePath: workspaceDir,
           messages: [...historyMessages, userMessage].map(m => ({ role: m.role, content: m.content })),
           allowedTools: allowedTools,
           allowedWritePaths: resolvedAllowedWritePaths,
@@ -277,12 +313,15 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
       });
       if (stopRequestedRef.current) {
         await invoke('stop_chat_stream', { runId });
+        activeRunRef.current = { runId: null, messageId: null };
         setActiveRun({ runId: null, messageId: null });
         onRunningChange?.(false);
         return;
       }
+      activeRunRef.current = { runId, messageId: agentMessageId };
       setActiveRun({ runId, messageId: agentMessageId });
     } catch (err) {
+      activeRunRef.current = { runId: null, messageId: null };
       setActiveRun({ runId: null, messageId: null });
       onRunningChange?.(false);
       setMessages((prev) => prev.map((msg) => (
@@ -302,6 +341,7 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
   const handleStop = async () => {
     stopRequestedRef.current = true;
     const runId = activeRunRef.current.runId;
+    activeRunRef.current = { runId: null, messageId: null };
     setActiveRun({ runId: null, messageId: null });
     if (runId) {
       try {
@@ -340,6 +380,21 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
       </div>
 
       <div ref={chatHistoryRef} className="agent-chat__history" style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
+        {messages.some((m) => m.role === 'user') && (
+          <div className="agent-message-row agent-message-row--system">
+            <div className="agent-message-bubble agent-message-bubble--system">
+              <FoldBlock
+                icon={<InfoCircleOutlined />}
+                variant="thinking"
+                title="系统提示词"
+                preview={fullSystemPrompt.slice(0, 80) + (fullSystemPrompt.length > 80 ? '...' : '')}
+                detail={fullSystemPrompt}
+                expanded={Boolean(expandedBlocks['system-prompt'])}
+                onToggle={() => toggleBlock('system-prompt')}
+              />
+            </div>
+          </div>
+        )}
         {messages.map((msg) => (
           <div className={`agent-message-row agent-message-row--${msg.role}`} key={msg.id}>
             <div className={`agent-message-bubble agent-message-bubble--${msg.role}`}>
@@ -464,6 +519,7 @@ function FoldBlock({
   icon,
   title,
   preview,
+  detail,
   expanded,
   onToggle,
   variant = 'tool',
@@ -471,6 +527,7 @@ function FoldBlock({
   icon: React.ReactNode;
   title: string;
   preview: string;
+  detail?: string;
   expanded: boolean;
   onToggle: () => void;
   variant?: 'tool' | 'thinking';
@@ -481,7 +538,7 @@ function FoldBlock({
         <span className="agent-fold-block__title">{icon}{title}</span>
         <span className="agent-fold-block__preview">{preview || '暂无内容'}</span>
       </button>
-      {expanded && <pre className="agent-fold-block__detail">{preview}</pre>}
+      {expanded && <pre className="agent-fold-block__detail">{detail ?? preview}</pre>}
     </div>
   );
 }
