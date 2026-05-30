@@ -5,6 +5,8 @@ import Settings from './pages/Settings';
 import DeAi from './pages/DeAi';
 import Outline from './pages/Outline';
 import Examples from './pages/Examples';
+import Background from './pages/Background';
+import Chat from './pages/Chat';
 import { useSettingsStore } from './stores/useSettingsStore';
 import { invoke } from '@tauri-apps/api/core';
 import { useEffect } from 'react';
@@ -28,6 +30,8 @@ function App() {
           <Route path="examples" element={<Examples />} />
           <Route path="de-ai" element={<DeAi />} />
           <Route path="outline" element={<Outline />} />
+          <Route path="background" element={<Background />} />
+          <Route path="chat" element={<Chat />} />
         </Route>
       </Routes>
     </Router>
