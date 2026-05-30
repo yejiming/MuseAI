@@ -435,7 +435,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.temperature,
+          temperature: settings.agentConfigs?.[agentId]?.temperature ?? 0.7,
           maxOutputTokens: 64,
           text: textToSend,
         },
@@ -457,10 +457,10 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.[agentId]?.temperature ?? settings.temperature,
-          maxOutputTokens: settings.agentConfigs?.[agentId]?.maxOutputTokens ?? settings.maxOutputTokens,
-          maxContextTokens: settings.agentConfigs?.[agentId]?.maxContextTokens ?? settings.maxContextTokens,
-          thinkingDepth: settings.agentConfigs?.[agentId]?.thinkingDepth ?? settings.thinkingDepth,
+          temperature: settings.agentConfigs?.[agentId]?.temperature ?? 0.7,
+          maxOutputTokens: settings.agentConfigs?.[agentId]?.maxOutputTokens ?? 4096,
+          maxContextTokens: settings.agentConfigs?.[agentId]?.maxContextTokens ?? 128000,
+          thinkingDepth: settings.agentConfigs?.[agentId]?.thinkingDepth ?? 'off',
           systemPrompt: systemPrompt,
           workspacePath: settings.worksDirectory,
           messages: [...historyMessages, userMessage].map(m => ({
@@ -536,8 +536,9 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
     draft: input,
   });
   const contextUsed = contextStats.total;
-  const contextPercent = settings.maxContextTokens > 0
-    ? Math.min(100, Math.round((contextUsed / settings.maxContextTokens) * 100))
+  const maxContext = settings.agentConfigs?.[agentId]?.maxContextTokens ?? 128000;
+  const contextPercent = maxContext > 0
+    ? Math.min(100, Math.round((contextUsed / maxContext) * 100))
     : 0;
 
   const contextTooltip = (
@@ -560,7 +561,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
       </div>
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">总 token：</span>
-        <span className="agent-context-popover__value agent-context-popover__value--highlight">{contextStats.total} / {settings.maxContextTokens || 0}</span>
+        <span className="agent-context-popover__value agent-context-popover__value--highlight">{contextStats.total} / {settings.agentConfigs?.[agentId]?.maxContextTokens || 128000}</span>
       </div>
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">用户消息：</span>

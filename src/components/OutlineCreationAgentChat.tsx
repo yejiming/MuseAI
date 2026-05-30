@@ -491,7 +491,7 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.temperature,
+          temperature: settings.agentConfigs?.outlineCreation?.temperature ?? 0.7,
           maxOutputTokens: 64,
           text: originalInput,
         },
@@ -544,10 +544,10 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.outlineCreation?.temperature ?? settings.temperature,
-          maxOutputTokens: settings.agentConfigs?.outlineCreation?.maxOutputTokens ?? settings.maxOutputTokens,
-          maxContextTokens: settings.agentConfigs?.outlineCreation?.maxContextTokens ?? settings.maxContextTokens,
-          thinkingDepth: settings.agentConfigs?.outlineCreation?.thinkingDepth ?? settings.thinkingDepth,
+          temperature: settings.agentConfigs?.outlineCreation?.temperature ?? 0.7,
+          maxOutputTokens: settings.agentConfigs?.outlineCreation?.maxOutputTokens ?? 4096,
+          maxContextTokens: settings.agentConfigs?.outlineCreation?.maxContextTokens ?? 128000,
+          thinkingDepth: settings.agentConfigs?.outlineCreation?.thinkingDepth ?? 'off',
           systemPrompt: systemPrompt,
           workspacePath: outlineDir,
           messages: buildModelMessages(messages.concat(userMessage), userMessage.id, mentionedSkills),
@@ -637,8 +637,9 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
     draft: input,
   });
   const contextUsed = contextStats.total;
-  const contextPercent = settings.maxContextTokens > 0
-    ? Math.min(100, Math.round((contextUsed / settings.maxContextTokens) * 100))
+  const maxContext = settings.agentConfigs?.outlineCreation?.maxContextTokens ?? 128000;
+  const contextPercent = maxContext > 0
+    ? Math.min(100, Math.round((contextUsed / maxContext) * 100))
     : 0;
 
   const selectedLibNames = selectedReferenceFiles.length > 0 ? `${selectedReferenceFiles.length} 篇` : '';
@@ -682,7 +683,7 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
       </div>
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">总 token：</span>
-        <span className="agent-context-popover__value agent-context-popover__value--highlight">{contextStats.total} / {settings.maxContextTokens || 0}</span>
+        <span className="agent-context-popover__value agent-context-popover__value--highlight">{contextStats.total} / {settings.agentConfigs?.outlineCreation?.maxContextTokens || 128000}</span>
       </div>
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">用户消息：</span>

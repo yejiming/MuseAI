@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { Modal, Typography } from 'antd';
+import { Modal, Typography, Button, Tooltip, message } from 'antd';
+import { CopyOutlined } from '@ant-design/icons';
 import { ScoreRadarChart } from './ScoreRadarChart';
 
 const { Title, Paragraph, Text } = Typography;
@@ -135,12 +136,47 @@ export const ScoreDetailsModal: React.FC<ScoreDetailsModalProps> = ({
                   border: '1px solid rgba(217, 119, 87, 0.1)'
                 }}>
                   <div style={{ 
-                    color: '#d97757', 
-                    fontWeight: 600, 
-                    marginBottom: 8,
-                    fontSize: 14 
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 8
                   }}>
-                    {item.label}
+                    <span style={{ 
+                      color: '#d97757', 
+                      fontWeight: 600, 
+                      fontSize: 14 
+                    }}>
+                      {item.label}
+                    </span>
+                    <Tooltip title="复制建议全文">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CopyOutlined style={{ color: '#d97757' }} />}
+                        onClick={() => {
+                          navigator.clipboard.writeText(item.text)
+                            .then(() => {
+                              message.success('已复制优化建议全文');
+                            })
+                            .catch((err) => {
+                              console.error('复制失败:', err);
+                              message.error('复制失败，请手动选择复制');
+                            });
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          opacity: 0.8,
+                          transition: 'opacity 0.2s',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.8')}
+                      />
+                    </Tooltip>
                   </div>
                   <Paragraph style={{ color: '#555', margin: 0, fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                     {item.text}

@@ -16,10 +16,6 @@ export interface SettingsState {
   llmBaseUrl: string;
   llmApiKey: string;
   llmModel: string;
-  temperature: number;
-  maxOutputTokens: number;
-  maxContextTokens: number;
-  thinkingDepth: 'off' | 'low' | 'medium' | 'high';
 
   systemPrompt: string;
   deAiDetectorPrompt: string;
@@ -425,10 +421,6 @@ export const useSettingsStore = create<SettingsState>()(
       llmBaseUrl: 'https://api.openai.com/v1',
       llmApiKey: '',
       llmModel: 'gpt-4o',
-      temperature: 0.7,
-      maxOutputTokens: 4096,
-      maxContextTokens: 128000,
-      thinkingDepth: 'off',
 
       systemPrompt: defaultSystemPrompt,
       deAiDetectorPrompt: defaultDeAiDetectorPrompt,
@@ -439,7 +431,14 @@ export const useSettingsStore = create<SettingsState>()(
 
 
       worksDirectory: null,
-      agentConfigs: {},
+      agentConfigs: {
+        writer: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' },
+        workSummary: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' },
+        detector: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' },
+        remover: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' },
+        outlineCreation: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' },
+        outlineAssessment: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' },
+      },
       articleType: ['男频', '长篇', '玄幻脑洞'],
 
       setLlmConfig: (config) => set((state) => ({ ...state, ...config })),
@@ -485,15 +484,41 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'museai-settings-storage',
-      version: 6,
+      version: 7,
       partialize: (state) => {
         const { worksDirectory: _, ...rest } = state;
         return rest as SettingsState;
       },
       migrate: (persistedState, version) => {
-        const state = persistedState as Partial<SettingsState>;
+        const state = persistedState as any;
+        const defaultConfigs = {
+          writer: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' as const },
+          workSummary: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' as const },
+          detector: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' as const },
+          remover: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' as const },
+          outlineCreation: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' as const },
+          outlineAssessment: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' as const },
+        };
+        const migratedAgentConfigs = { ...defaultConfigs };
+        const oldGlobalTemp = typeof state.temperature === 'number' ? state.temperature : 0.7;
+        const oldGlobalMaxOutput = typeof state.maxOutputTokens === 'number' ? state.maxOutputTokens : 4096;
+        const oldGlobalMaxContext = typeof state.maxContextTokens === 'number' ? state.maxContextTokens : 128000;
+        const oldGlobalDepth = state.thinkingDepth || 'off';
+
+        Object.keys(defaultConfigs).forEach((key) => {
+          const k = key as keyof typeof defaultConfigs;
+          migratedAgentConfigs[k] = {
+            temperature: oldGlobalTemp,
+            maxOutputTokens: oldGlobalMaxOutput,
+            maxContextTokens: oldGlobalMaxContext,
+            thinkingDepth: oldGlobalDepth as any,
+            ...state.agentConfigs?.[k]
+          };
+        });
+
         const base = {
           ...state,
+          agentConfigs: migratedAgentConfigs,
           deAiDetectorPrompt: !state.deAiDetectorPrompt || state.deAiDetectorPrompt === legacyDeAiDetectorPrompt
             ? defaultDeAiDetectorPrompt
             : state.deAiDetectorPrompt,
