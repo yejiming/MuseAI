@@ -130,6 +130,7 @@ const Chat: React.FC = () => {
   const sessionIdRef = useRef(sessionId);
   const sessionTitleRef = useRef(sessionTitle);
   const isSessionArchivedRef = useRef(isSessionArchived);
+  const selectedCharacterCardIdRef = useRef(selectedCharacterCardId);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
@@ -150,6 +151,7 @@ const Chat: React.FC = () => {
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   useEffect(() => { sessionTitleRef.current = sessionTitle; }, [sessionTitle]);
   useEffect(() => { isSessionArchivedRef.current = isSessionArchived; }, [isSessionArchived]);
+  useEffect(() => { selectedCharacterCardIdRef.current = selectedCharacterCardId; }, [selectedCharacterCardId]);
 
   useEffect(() => {
     void refreshSessions();
@@ -559,7 +561,8 @@ const Chat: React.FC = () => {
           selectedReferenceFiles: [],
           selectedOutlineFile: null,
           todos: [],
-          isArchived: isSessionArchivedRef.current
+          isArchived: isSessionArchivedRef.current,
+          characterCardId: selectedCharacterCardIdRef.current
         }
       });
       await refreshSessions();

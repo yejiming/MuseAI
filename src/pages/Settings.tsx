@@ -9,6 +9,7 @@ import {
   GlobalOutlined,
   MessageOutlined,
   CompassOutlined,
+  HeartOutlined,
   PlusOutlined,
   DeleteOutlined,
   CheckOutlined,
@@ -373,7 +374,8 @@ const Settings: React.FC = () => {
           items={[
             { key: 'background-config', href: '#background-config', title: '背景页设置' },
             { key: 'partner-chat-config', href: '#partner-chat-config', title: '聊天页设置' },
-            { key: 'story-agent-config', href: '#story-agent-config', title: '故事页设置' },
+            { key: 'story-agent-config', href: '#story-agent-config', title: '冒险页设置' },
+            { key: 'bond-config', href: '#bond-config', title: '羁绊页设置' },
           ]}
         />
       </div>
@@ -760,11 +762,11 @@ const Settings: React.FC = () => {
           <section id="story-agent-config" style={{ marginBottom: 48 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
               <CompassOutlined style={{ fontSize: '20px', color: '#d97757' }} />
-              <Title level={4} style={{ color: '#33312e', margin: 0, fontWeight: 600, fontFamily: '"Inter", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>故事页设置</Title>
+              <Title level={4} style={{ color: '#33312e', margin: 0, fontWeight: 600, fontFamily: '"Inter", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>冒险页设置</Title>
             </div>
 
             <AgentSettingCard
-              title="故事 Agent"
+              title="冒险 Agent"
               agentId="storyAgent"
               defaultPrompt={defaultStoryAgentPrompt}
               currentPrompt={store.storyAgentPrompt}
@@ -772,6 +774,35 @@ const Settings: React.FC = () => {
               onResetPrompt={store.resetStoryAgentPrompt}
               helpText="此提示词将作为跑团/文字冒险故事中故事 Agent（主持GM）的核心系统提示词。结尾将自动且优雅地嵌入用户选择的世界书、多个角色卡和个人信息。第一条用户消息为填入的初始剧情。"
             />
+          </section>
+
+          <Divider style={{ borderColor: '#eae6df', margin: '48px 0' }} />
+
+          {/* 羁绊页设置区域 */}
+          <section id="bond-config" style={{ marginBottom: 48 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
+              <HeartOutlined style={{ fontSize: '20px', color: '#d97757' }} />
+              <Title level={4} style={{ color: '#33312e', margin: 0, fontWeight: 600, fontFamily: '"Inter", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>羁绊页设置</Title>
+            </div>
+
+            <Card
+              style={{
+                backgroundColor: '#ffffff',
+                border: '1px solid #eae6df',
+                borderRadius: '12px',
+                boxShadow: '0 4px 20px rgba(217, 119, 87, 0.02)',
+                marginBottom: '24px',
+              }}
+              styles={{
+                body: {
+                  padding: '24px',
+                  textAlign: 'center',
+                  color: '#8c8882'
+                }
+              }}
+            >
+              羁绊页设置暂时留空
+            </Card>
           </section>
 
         </div>

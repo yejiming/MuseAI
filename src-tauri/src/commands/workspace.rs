@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -6,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
+use crate::models;
 use crate::utils::*;
 
 #[derive(Deserialize, Serialize)]
@@ -234,6 +236,99 @@ pub fn load_work_summary_result(
 ) -> Result<Option<String>, String> {
     let articles_dir = articles_root(&app)?;
     load_work_summary_result_for_root(&articles_dir, Path::new(&article_path))
+}
+
+fn count_words_in_content(content: &str) -> usize {
+    content.chars().filter(|c| c.is_alphanumeric()).count()
+}
+
+fn collect_writing_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
+    if !dir.exists() || !dir.is_dir() {
+        return Ok(files);
+    }
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let name = entry.file_name().into_string().unwrap_or_default();
+        if name.starts_with('.') {
+            continue;
+        }
+        if path.is_dir() {
+            files.extend(collect_writing_files(&path)?);
+        } else if is_supported_content_file(&path) {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}
+
+#[tauri::command]
+pub fn get_writing_stats(app: AppHandle) -> Result<models::WritingStats, String> {
+    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let articles_dir = doc_dir.join("MuseAI").join("articles");
+
+    let files = collect_writing_files(&articles_dir)?;
+    let total_works = files.len();
+
+    let mut total_word_count: usize = 0;
+    let now = SystemTime::now();
+    let now_secs = now
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs() as i64;
+    let today_start = now_secs - (now_secs % 86400);
+
+    // Initialize daily counts for last 30 days
+    let mut daily_counts: HashMap<String, usize> = HashMap::new();
+    for i in (0..30).rev() {
+        let day_start = today_start - i * 86400;
+        let date_str = chrono::DateTime::from_timestamp(day_start, 0)
+            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
+        daily_counts.insert(date_str, 0);
+    }
+
+    for file_path in &files {
+        // Count words
+        if let Ok(content) = fs::read_to_string(file_path) {
+            total_word_count += count_words_in_content(&content);
+        }
+
+        // Track daily activity based on modification time
+        if let Ok(metadata) = fs::metadata(file_path) {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(duration) = modified.duration_since(UNIX_EPOCH) {
+                    let modified_secs = duration.as_secs() as i64;
+                    let day_start = modified_secs - (modified_secs % 86400);
+                    if let Some(date_str) = chrono::DateTime::from_timestamp(day_start, 0)
+                        .map(|dt| dt.format("%Y-%m-%d").to_string())
+                    {
+                        if let Some(counter) = daily_counts.get_mut(&date_str) {
+                            *counter += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Build ordered daily activity (oldest to newest)
+    let mut daily_activity = Vec::new();
+    for i in (0..30).rev() {
+        let day_start = today_start - i * 86400;
+        let date_str = chrono::DateTime::from_timestamp(day_start, 0)
+            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
+        let count = daily_counts.get(&date_str).copied().unwrap_or(0);
+        daily_activity.push(models::DailyActivity { date: date_str, count });
+    }
+
+    Ok(models::WritingStats {
+        total_works,
+        total_word_count,
+        daily_activity,
+    })
 }
 
 #[cfg(test)]

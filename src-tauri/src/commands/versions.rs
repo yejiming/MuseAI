@@ -146,3 +146,30 @@ pub fn update_version_ai_result(
     fs::write(&meta_path, serde_json::to_string(&meta).unwrap()).map_err(|e| e.to_string())?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn get_versions_meta_path_basic() {
+        let path = Path::new("/home/user/documents/story.md");
+        let meta = get_versions_meta_path(path);
+        assert_eq!(meta, PathBuf::from("/home/user/documents/.versions/story.md.meta.json"));
+    }
+
+    #[test]
+    fn get_version_file_path_basic() {
+        let path = Path::new("/home/user/documents/story.md");
+        let version = get_version_file_path(path, "v1");
+        assert_eq!(version, PathBuf::from("/home/user/documents/.versions/story.md/v1"));
+    }
+
+    #[test]
+    fn get_versions_meta_path_no_parent() {
+        let path = Path::new("story.md");
+        let meta = get_versions_meta_path(path);
+        assert_eq!(meta, PathBuf::from(".versions/story.md.meta.json"));
+    }
+}

@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import AppShell from './components/AppShell';
+import Home from './pages/Home';
 import Works from './pages/Works';
 import Settings from './pages/Settings';
 import DeAi from './pages/DeAi';
@@ -8,6 +9,7 @@ import Examples from './pages/Examples';
 import Background from './pages/Background';
 import Chat from './pages/Chat';
 import Story from './pages/Story';
+import Bond from './pages/Bond';
 import { useSettingsStore } from './stores/useSettingsStore';
 import { invoke } from '@tauri-apps/api/core';
 import { useEffect } from 'react';
@@ -26,7 +28,8 @@ function App() {
     <Router>
       <Routes>
         <Route path="/" element={<AppShell />}>
-          <Route index element={<Works />} />
+          <Route index element={<Home />} />
+          <Route path="works" element={<Works />} />
           <Route path="settings" element={<Settings />} />
           <Route path="examples" element={<Examples />} />
           <Route path="de-ai" element={<DeAi />} />
@@ -34,6 +37,7 @@ function App() {
           <Route path="background" element={<Background />} />
           <Route path="chat" element={<Chat />} />
           <Route path="story" element={<Story />} />
+          <Route path="bond" element={<Bond />} />
         </Route>
       </Routes>
     </Router>

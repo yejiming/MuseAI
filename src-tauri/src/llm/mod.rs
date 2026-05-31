@@ -371,3 +371,250 @@ pub fn parse_anthropic_stream_event(data: &str) -> Option<AnthropicStreamEvent> 
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn approximate_token_count_basic() {
+        assert_eq!(approximate_token_count(""), 0);
+        assert_eq!(approximate_token_count("a"), 1);
+        assert_eq!(approximate_token_count("abcd"), 1);
+        assert_eq!(approximate_token_count("abcde"), 2);
+        assert_eq!(approximate_token_count("abcdefgh"), 2);
+        assert_eq!(approximate_token_count("中文测试"), 1); // 4 chars -> (4+3)/4 = 1
+    }
+
+    #[test]
+    fn chat_message_token_estimate_basic() {
+        let msg = ChatMessage {
+            role: "user".to_string(),
+            content: "hello world".to_string(),
+            tool_call_id: None,
+            tool_calls: None,
+            thinking_blocks: None,
+        };
+        // role (4 chars -> 1) + content (11 chars -> 3) + 8 overhead = 12
+        assert_eq!(chat_message_token_estimate(&msg), 12);
+    }
+
+    #[test]
+    fn chat_message_token_estimate_with_tool_calls() {
+        let msg = ChatMessage {
+            role: "assistant".to_string(),
+            content: "ok".to_string(),
+            tool_call_id: None,
+            tool_calls: Some(vec![
+                ChatToolCall {
+                    id: "call_1".to_string(),
+                    name: "read".to_string(),
+                    arguments: "{\"file_path\": \"test.md\"}".to_string(),
+                },
+            ]),
+            thinking_blocks: None,
+        };
+        let estimate = chat_message_token_estimate(&msg);
+        // role (9->3) + content (2->1) + tool_call_id(0) + tool_calls(call_1(6->2) + read(4->1) + args(24->6)) + 8 = 3+1+0+2+1+6+8 = 21
+        assert_eq!(estimate, 21);
+    }
+
+    #[test]
+    fn trim_history_to_context_budget_no_budget() {
+        let history = vec![
+            ChatMessage { role: "user".to_string(), content: "hi".to_string(), tool_call_id: None, tool_calls: None, thinking_blocks: None },
+        ];
+        let result = trim_history_to_context_budget("system", &history, None);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn trim_history_to_context_budget_zero() {
+        let history = vec![
+            ChatMessage { role: "user".to_string(), content: "hi".to_string(), tool_call_id: None, tool_calls: None, thinking_blocks: None },
+        ];
+        let result = trim_history_to_context_budget("system", &history, Some(1));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn trim_history_to_context_budget_trims() {
+        let history = vec![
+            ChatMessage { role: "user".to_string(), content: "message one".to_string(), tool_call_id: None, tool_calls: None, thinking_blocks: None },
+            ChatMessage { role: "assistant".to_string(), content: "message two".to_string(), tool_call_id: None, tool_calls: None, thinking_blocks: None },
+        ];
+        // System prompt is "sys" (3 chars -> 0 tokens after (3+3)/4=1)
+        // Budget = 10 - 1 = 9
+        // First message from end: assistant "message two" (11 chars -> 2) + role (9->2) + 8 = 12 > 9, but it's the first so it gets pushed anyway
+        let result = trim_history_to_context_budget("sys", &history, Some(10));
+        // With budget 10, only the last message should fit (first one gets pushed even if over budget)
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].content, "message two");
+    }
+
+    #[test]
+    fn trim_history_to_context_budget_strips_leading_tool() {
+        let history = vec![
+            ChatMessage { role: "tool".to_string(), content: "result".to_string(), tool_call_id: Some("id".to_string()), tool_calls: None, thinking_blocks: None },
+            ChatMessage { role: "user".to_string(), content: "hi".to_string(), tool_call_id: None, tool_calls: None, thinking_blocks: None },
+        ];
+        let result = trim_history_to_context_budget("sys", &history, Some(1000));
+        // Leading tool messages should be stripped
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].role, "user");
+    }
+
+    #[test]
+    fn build_endpoint_openai() {
+        assert_eq!(build_endpoint("https://api.openai.com", "v1/chat/completions", "chat/completions"), "https://api.openai.com/v1/chat/completions");
+        assert_eq!(build_endpoint("https://api.openai.com/", "v1/chat/completions", "chat/completions"), "https://api.openai.com/v1/chat/completions");
+        assert_eq!(build_endpoint("https://api.openai.com/v1", "v1/chat/completions", "chat/completions"), "https://api.openai.com/v1/chat/completions");
+        assert_eq!(build_endpoint("https://api.openai.com/v1/chat/completions", "v1/chat/completions", "chat/completions"), "https://api.openai.com/v1/chat/completions");
+    }
+
+    #[test]
+    fn build_endpoint_anthropic() {
+        assert_eq!(build_endpoint("https://api.anthropic.com", "v1/messages", "messages"), "https://api.anthropic.com/v1/messages");
+        assert_eq!(build_endpoint("https://api.anthropic.com/v1", "v1/messages", "messages"), "https://api.anthropic.com/v1/messages");
+    }
+
+    #[test]
+    fn anthropic_thinking_config_variants() {
+        assert!(anthropic_thinking_config(Some("off"), 4096).is_none());
+        assert!(anthropic_thinking_config(None, 4096).is_none());
+        assert!(anthropic_thinking_config(Some("low"), 1024).is_none()); // max_tokens <= 1024
+        assert!(anthropic_thinking_config(Some("invalid"), 4096).is_none());
+
+        let low = anthropic_thinking_config(Some("low"), 4096).unwrap();
+        assert_eq!(low["type"], "enabled");
+        assert_eq!(low["budget_tokens"], 1024);
+
+        let medium = anthropic_thinking_config(Some("medium"), 4096).unwrap();
+        assert_eq!(medium["budget_tokens"], 2048);
+
+        let high = anthropic_thinking_config(Some("high"), 4096).unwrap();
+        // budget is capped at max_tokens - 1 = 4095
+        assert_eq!(high["budget_tokens"], 4095);
+    }
+
+    #[test]
+    fn process_sse_buffer_basic() {
+        let mut buffer = String::from("data: hello\n\ndata: world\n\n");
+        let mut received = Vec::new();
+        process_sse_buffer(&mut buffer, |data| received.push(data.to_string()));
+        assert_eq!(received, vec!["hello", "world"]);
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn process_sse_buffer_partial() {
+        let mut buffer = String::from("data: hello\n\npartial");
+        let mut received = Vec::new();
+        process_sse_buffer(&mut buffer, |data| received.push(data.to_string()));
+        assert_eq!(received, vec!["hello"]);
+        assert_eq!(buffer, "partial");
+    }
+
+    #[test]
+    fn parse_openai_stream_event_basic() {
+        let data = r#"{"choices":[{"delta":{"content":"hello"}}]}"#;
+        let event = parse_openai_stream_event(data).unwrap();
+        assert_eq!(event.content, Some("hello".to_string()));
+        assert!(event.reasoning_content.is_none());
+        assert!(event.tool_call_chunks.is_empty());
+    }
+
+    #[test]
+    fn parse_openai_stream_event_with_tool_call() {
+        let data = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read"}}]}}]}"#;
+        let event = parse_openai_stream_event(data).unwrap();
+        assert_eq!(event.tool_call_chunks.len(), 1);
+        assert_eq!(event.tool_call_chunks[0].index, 0);
+        assert_eq!(event.tool_call_chunks[0].name, Some("read".to_string()));
+    }
+
+    #[test]
+    fn parse_anthropic_stream_event_thinking_start() {
+        let data = r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}"#;
+        match parse_anthropic_stream_event(data) {
+            Some(AnthropicStreamEvent::ThinkingStart { index }) => assert_eq!(index, 0),
+            _ => panic!("Expected ThinkingStart"),
+        }
+    }
+
+    #[test]
+    fn parse_anthropic_stream_event_text_delta() {
+        let data = r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}"#;
+        match parse_anthropic_stream_event(data) {
+            Some(AnthropicStreamEvent::Text(text)) => assert_eq!(text, "hello"),
+            _ => panic!("Expected Text"),
+        }
+    }
+
+    #[test]
+    fn parse_anthropic_stream_event_tool_start() {
+        let data = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool_1","name":"read"}}"#;
+        match parse_anthropic_stream_event(data) {
+            Some(AnthropicStreamEvent::ToolStart { index, id, name }) => {
+                assert_eq!(index, 1);
+                assert_eq!(id, "tool_1");
+                assert_eq!(name, "read");
+            }
+            _ => panic!("Expected ToolStart"),
+        }
+    }
+
+    #[test]
+    fn parse_anthropic_stream_event_invalid() {
+        assert!(parse_anthropic_stream_event("not json").is_none());
+        assert!(parse_anthropic_stream_event(r#"{"type":"unknown"}"#).is_none());
+    }
+
+    #[test]
+    fn openai_history_messages_basic() {
+        let history = vec![
+            ChatMessage { role: "user".to_string(), content: "hi".to_string(), tool_call_id: None, tool_calls: None, thinking_blocks: None },
+        ];
+        let messages = openai_history_messages("system prompt", &history);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "system prompt");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "hi");
+    }
+
+    #[test]
+    fn openai_history_messages_with_tool_calls() {
+        let history = vec![
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "".to_string(),
+                tool_call_id: None,
+                tool_calls: Some(vec![ChatToolCall {
+                    id: "call_1".to_string(),
+                    name: "read".to_string(),
+                    arguments: "{}".to_string(),
+                }]),
+                thinking_blocks: None,
+            },
+            ChatMessage { role: "tool".to_string(), content: "result".to_string(), tool_call_id: Some("call_1".to_string()), tool_calls: None, thinking_blocks: None },
+        ];
+        let messages = openai_history_messages("sys", &history);
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["role"], "assistant");
+        assert!(messages[1]["tool_calls"].is_array());
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_call_id"], "call_1");
+    }
+
+    #[test]
+    fn anthropic_history_messages_basic() {
+        let history = vec![
+            ChatMessage { role: "user".to_string(), content: "hi".to_string(), tool_call_id: None, tool_calls: None, thinking_blocks: None },
+        ];
+        let messages = anthropic_history_messages(&history);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "hi");
+    }
+}

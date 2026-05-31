@@ -134,6 +134,8 @@ pub struct AgentSessionRecord {
     pub selected_outline_file: Option<String>,
     pub todos: Vec<AgentSessionTodo>,
     pub is_archived: Option<bool>,
+    pub character_card_id: Option<String>,
+    pub character_card_ids: Option<Vec<String>>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,6 +143,8 @@ pub struct AgentSessionSummary {
     pub id: String,
     pub title: String,
     pub saved_at: u64,
+    pub character_card_id: Option<String>,
+    pub character_card_ids: Option<Vec<String>>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -320,6 +324,21 @@ pub struct TestConnectionRequest {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyActivity {
+    pub date: String,
+    pub count: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WritingStats {
+    pub total_works: usize,
+    pub total_word_count: usize,
+    pub daily_activity: Vec<DailyActivity>,
 }
 
 #[cfg(test)]

@@ -39,6 +39,8 @@ export interface AgentSessionSummary {
   id: string;
   title: string;
   savedAt: number;
+  characterCardId?: string | null;
+  characterCardIds?: string[] | null;
 }
 
 export interface AgentSessionRecord extends AgentSessionSummary {
@@ -47,6 +49,8 @@ export interface AgentSessionRecord extends AgentSessionSummary {
   selectedOutlineFile?: string | null;
   todos: AgentTodo[];
   isArchived?: boolean;
+  characterCardId?: string | null;
+  characterCardIds?: string[] | null;
 }
 
 function createSessionId() {

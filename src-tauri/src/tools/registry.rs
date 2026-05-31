@@ -347,3 +347,160 @@ impl AnthropicRoundResult {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::AgentRunOptions;
+
+    #[test]
+    fn agent_tool_definitions_count() {
+        let defs = agent_tool_definitions();
+        assert_eq!(defs.len(), 9);
+        let names: Vec<_> = defs.iter().map(|d| d.name).collect();
+        assert!(names.contains(&"read"));
+        assert!(names.contains(&"write"));
+        assert!(names.contains(&"edit"));
+        assert!(names.contains(&"bash"));
+        assert!(names.contains(&"grep"));
+        assert!(names.contains(&"glob"));
+        assert!(names.contains(&"skill"));
+        assert!(names.contains(&"subagent"));
+        assert!(names.contains(&"todo"));
+    }
+
+    #[test]
+    fn filtered_agent_tool_definitions_allows_all_by_default() {
+        let opts = AgentRunOptions::parent();
+        let filtered = filtered_agent_tool_definitions(&opts);
+        assert_eq!(filtered.len(), 9);
+    }
+
+    #[test]
+    fn filtered_agent_tool_definitions_excludes_tools() {
+        let opts = AgentRunOptions {
+            excluded_tools: vec!["bash".to_string(), "subagent".to_string()],
+            ..AgentRunOptions::parent()
+        };
+        let filtered = filtered_agent_tool_definitions(&opts);
+        assert_eq!(filtered.len(), 7);
+        let names: Vec<_> = filtered.iter().map(|d| d.name).collect();
+        assert!(!names.contains(&"bash"));
+        assert!(!names.contains(&"subagent"));
+    }
+
+    #[test]
+    fn filtered_agent_tool_definitions_allowed_list() {
+        let opts = AgentRunOptions {
+            allowed_tools: Some(vec!["read".to_string(), "write".to_string()]),
+            ..AgentRunOptions::parent()
+        };
+        let filtered = filtered_agent_tool_definitions(&opts);
+        assert_eq!(filtered.len(), 2);
+        let names: Vec<_> = filtered.iter().map(|d| d.name).collect();
+        assert!(names.contains(&"read"));
+        assert!(names.contains(&"write"));
+    }
+
+    #[test]
+    fn openai_tool_definitions_format() {
+        let opts = AgentRunOptions::parent();
+        let defs = openai_tool_definitions(&opts);
+        assert!(!defs.is_empty());
+        let first = &defs[0];
+        assert_eq!(first["type"], "function");
+        assert!(first["function"]["name"].is_string());
+        assert!(first["function"]["parameters"].is_object());
+    }
+
+    #[test]
+    fn anthropic_tool_definitions_format() {
+        let opts = AgentRunOptions::parent();
+        let defs = anthropic_tool_definitions(&opts);
+        assert!(!defs.is_empty());
+        let first = &defs[0];
+        assert!(first["name"].is_string());
+        assert!(first["input_schema"].is_object());
+    }
+
+    #[test]
+    fn openai_round_result_apply_tool_call_chunk_new() {
+        let mut result = OpenAiRoundResult::default();
+        result.apply_tool_call_chunk(OpenAiToolCallChunk {
+            index: 0,
+            id: Some("call_1".to_string()),
+            name: Some("read".to_string()),
+            arguments: Some("{\"path\":\"test.md\"}".to_string()),
+        });
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].id, "call_1");
+        assert_eq!(result.tool_calls[0].name, "read");
+        assert_eq!(result.tool_calls[0].arguments, "{\"path\":\"test.md\"}");
+    }
+
+    #[test]
+    fn openai_round_result_apply_tool_call_chunk_append() {
+        let mut result = OpenAiRoundResult::default();
+        result.apply_tool_call_chunk(OpenAiToolCallChunk {
+            index: 0,
+            id: Some("call_1".to_string()),
+            name: Some("read".to_string()),
+            arguments: Some("{\"path\":\"".to_string()),
+        });
+        result.apply_tool_call_chunk(OpenAiToolCallChunk {
+            index: 0,
+            id: None,
+            name: None,
+            arguments: Some("test.md\"}".to_string()),
+        });
+        assert_eq!(result.tool_calls[0].arguments, "{\"path\":\"test.md\"}");
+    }
+
+    #[test]
+    fn anthropic_round_result_thinking_block_lifecycle() {
+        let mut result = AnthropicRoundResult::default();
+        result.start_thinking_block(0);
+        result.push_thinking_delta(0, "thinking...");
+        result.set_thinking_signature(0, "sig123".to_string());
+
+        let blocks = result.finalized_thinking_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "thinking");
+        assert_eq!(blocks[0]["thinking"], "thinking...");
+        assert_eq!(blocks[0]["signature"], "sig123");
+        assert!(blocks[0].get("_index").is_none());
+    }
+
+    #[test]
+    fn anthropic_round_result_push_redacted_thinking() {
+        let mut result = AnthropicRoundResult::default();
+        result.push_redacted_thinking(0, "redacted_data".to_string());
+        let blocks = result.finalized_thinking_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "redacted_thinking");
+        assert_eq!(blocks[0]["data"], "redacted_data");
+    }
+
+    #[test]
+    fn anthropic_round_result_tool_call_lifecycle() {
+        let mut result = AnthropicRoundResult::default();
+        result.start_tool_call(0, "call_1".to_string(), "read".to_string());
+        result.push_tool_arguments(0, "{\"path\":\"test.md\"}");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].id, "call_1");
+        assert_eq!(result.tool_calls[0].name, "read");
+        assert_eq!(result.tool_calls[0].arguments, "{\"path\":\"test.md\"}");
+    }
+
+    #[test]
+    fn anthropic_round_result_finalized_sorts_by_index() {
+        let mut result = AnthropicRoundResult::default();
+        result.push_thinking_delta(2, "third");
+        result.push_thinking_delta(0, "first");
+        result.push_thinking_delta(1, "second");
+        let blocks = result.finalized_thinking_blocks();
+        assert_eq!(blocks[0]["thinking"], "first");
+        assert_eq!(blocks[1]["thinking"], "second");
+        assert_eq!(blocks[2]["thinking"], "third");
+    }
+}

@@ -44,6 +44,8 @@ pub fn list_agent_sessions(
             id: record.id,
             title: record.title,
             saved_at: record.saved_at,
+            character_card_id: record.character_card_id,
+            character_card_ids: record.character_card_ids,
         });
     }
 
@@ -71,6 +73,8 @@ pub fn save_agent_session(
         id: session.id,
         title: session.title,
         saved_at: session.saved_at,
+        character_card_id: session.character_card_id,
+        character_card_ids: session.character_card_ids,
     })
 }
 #[tauri::command]
@@ -197,6 +201,8 @@ pub fn update_agent_session_title(
         id: record.id,
         title: record.title,
         saved_at: record.saved_at,
+        character_card_id: record.character_card_id,
+        character_card_ids: record.character_card_ids,
     })
 }
 #[tauri::command]
@@ -778,6 +784,63 @@ pub async fn test_llm_connection(request: TestConnectionRequest) -> Result<Strin
 
             Ok("连接成功".to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_json_response;
+
+    #[test]
+    fn clean_json_response_extracts_json_object() {
+        let input = r#"Some text before {"key": "value"} some text after"#.to_string();
+        assert_eq!(clean_json_response(input), r#"{"key": "value"}"#);
+    }
+
+    #[test]
+    fn clean_json_response_extracts_json_array() {
+        let input = r#"Here is the result: [1, 2, 3] Done."#.to_string();
+        assert_eq!(clean_json_response(input), r#"[1, 2, 3]"#);
+    }
+
+    #[test]
+    fn clean_json_response_strips_json_code_block() {
+        let input = r#"```json
+{"key": "value"}
+```"#
+        .to_string();
+        assert_eq!(clean_json_response(input), r#"{"key": "value"}"#);
+    }
+
+    #[test]
+    fn clean_json_response_strips_plain_code_block() {
+        let input = r#"```
+{"key": "value"}
+```"#
+        .to_string();
+        assert_eq!(clean_json_response(input), r#"{"key": "value"}"#);
+    }
+
+    #[test]
+    fn clean_json_response_prefers_braces_over_code_block() {
+        // When braces exist, they take precedence over code block stripping
+        let input = r#"Text {"nested": {"a": 1}} more"#.to_string();
+        assert_eq!(clean_json_response(input), r#"{"nested": {"a": 1}}"#);
+    }
+
+    #[test]
+    fn clean_json_response_no_braces_fallback() {
+        let input = r#"```json
+plain text
+```"#
+        .to_string();
+        assert_eq!(clean_json_response(input), "plain text");
+    }
+
+    #[test]
+    fn clean_json_response_no_braces_no_code_block() {
+        let input = r#"just plain text"#.to_string();
+        assert_eq!(clean_json_response(input), "just plain text");
     }
 }
 

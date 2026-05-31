@@ -135,6 +135,7 @@ const Story: React.FC = () => {
   const sessionIdRef = useRef(sessionId);
   const sessionTitleRef = useRef(sessionTitle);
   const isSessionArchivedRef = useRef(isSessionArchived);
+  const selectedCharacterCardIdsRef = useRef(selectedCharacterCardIds);
 
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -158,6 +159,7 @@ const Story: React.FC = () => {
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   useEffect(() => { sessionTitleRef.current = sessionTitle; }, [sessionTitle]);
   useEffect(() => { isSessionArchivedRef.current = isSessionArchived; }, [isSessionArchived]);
+  useEffect(() => { selectedCharacterCardIdsRef.current = selectedCharacterCardIds; }, [selectedCharacterCardIds]);
 
   useEffect(() => {
     void refreshSessions();
@@ -632,7 +634,8 @@ const Story: React.FC = () => {
           selectedReferenceFiles: [],
           selectedOutlineFile: null,
           todos: [],
-          isArchived: isSessionArchivedRef.current
+          isArchived: isSessionArchivedRef.current,
+          characterCardIds: selectedCharacterCardIdsRef.current
         }
       });
       await refreshSessions();
@@ -1277,7 +1280,7 @@ const Story: React.FC = () => {
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
             <CompassOutlined style={{ fontSize: '56px', color: '#d97757', marginBottom: '16px', opacity: 0.9 }} />
             <h2 style={{ fontSize: '26px', fontWeight: 600, color: '#33312e', margin: '0 0 8px 0', letterSpacing: '-0.5px' }}>
-              故事冒险页
+              冒险页
             </h2>
             <p style={{ color: '#8c8882', fontSize: '15px', margin: 0 }}>
               选择世界设定与冒险角色，即刻启程展开独一无二的奇幻历险

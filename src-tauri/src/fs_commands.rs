@@ -127,3 +127,126 @@ pub fn create_untitled_item_cmd(target_dir: String, is_dir: bool) -> Result<Stri
         .to_string_lossy()
         .into_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn is_importable_text_file_md() {
+        assert!(is_importable_text_file(Path::new("test.md")));
+        assert!(is_importable_text_file(Path::new("test.txt")));
+        assert!(is_importable_text_file(Path::new("test.png")));
+        assert!(is_importable_text_file(Path::new("test.jpg")));
+        assert!(is_importable_text_file(Path::new("test.jpeg")));
+        assert!(is_importable_text_file(Path::new("test.gif")));
+        assert!(is_importable_text_file(Path::new("test.webp")));
+        assert!(is_importable_text_file(Path::new("test.bmp")));
+        assert!(is_importable_text_file(Path::new("test.svg")));
+    }
+
+    #[test]
+    fn is_importable_text_file_not_importable() {
+        assert!(!is_importable_text_file(Path::new("test.rs")));
+        assert!(!is_importable_text_file(Path::new("test.js")));
+        assert!(!is_importable_text_file(Path::new("test")));
+        assert!(!is_importable_text_file(Path::new("")));
+    }
+
+    #[test]
+    fn is_importable_text_file_case_insensitive() {
+        assert!(is_importable_text_file(Path::new("test.MD")));
+        assert!(is_importable_text_file(Path::new("test.PNG")));
+        assert!(is_importable_text_file(Path::new("test.JpG")));
+    }
+
+    #[test]
+    fn rename_item_cmd_success() {
+        let tmp = std::env::temp_dir().join(format!("museai_test_rename_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
+        fs::create_dir_all(&tmp).unwrap();
+        let source = tmp.join("old.txt");
+        fs::write(&source, "content").unwrap();
+
+        let result = rename_item_cmd(source.to_string_lossy().into_owned(), "new.txt".to_string());
+        assert!(result.is_ok());
+        assert!(!source.exists());
+        assert!(tmp.join("new.txt").exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn rename_item_cmd_nonexistent() {
+        let result = rename_item_cmd("/nonexistent/path/file.txt".to_string(), "new.txt".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rename_item_cmd_duplicate_name() {
+        let tmp = std::env::temp_dir().join(format!("museai_test_rename_dup_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
+        fs::create_dir_all(&tmp).unwrap();
+        fs::write(tmp.join("a.txt"), "a").unwrap();
+        fs::write(tmp.join("b.txt"), "b").unwrap();
+
+        let result = rename_item_cmd(tmp.join("a.txt").to_string_lossy().into_owned(), "b.txt".to_string());
+        assert!(result.is_err());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn move_item_cmd_success() {
+        let tmp = std::env::temp_dir().join(format!("museai_test_move_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
+        let src_dir = tmp.join("src");
+        let dest_dir = tmp.join("dest");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dest_dir).unwrap();
+        let file = src_dir.join("file.txt");
+        fs::write(&file, "content").unwrap();
+
+        let result = move_item_cmd(file.to_string_lossy().into_owned(), dest_dir.to_string_lossy().into_owned());
+        assert!(result.is_ok());
+        assert!(!file.exists());
+        assert!(dest_dir.join("file.txt").exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn create_untitled_item_cmd_file() {
+        let tmp = std::env::temp_dir().join(format!("museai_test_untitled_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
+        fs::create_dir_all(&tmp).unwrap();
+
+        let name = create_untitled_item_cmd(tmp.to_string_lossy().into_owned(), false).unwrap();
+        assert_eq!(name, "未命名文件.md");
+        assert!(tmp.join("未命名文件.md").exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn create_untitled_item_cmd_dir() {
+        let tmp = std::env::temp_dir().join(format!("museai_test_untitled_dir_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
+        fs::create_dir_all(&tmp).unwrap();
+
+        let name = create_untitled_item_cmd(tmp.to_string_lossy().into_owned(), true).unwrap();
+        assert_eq!(name, "未命名文件夹");
+        assert!(tmp.join("未命名文件夹").is_dir());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn create_untitled_item_cmd_dedup() {
+        let tmp = std::env::temp_dir().join(format!("museai_test_untitled_dedup_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
+        fs::create_dir_all(&tmp).unwrap();
+        fs::write(tmp.join("未命名文件.md"), "").unwrap();
+
+        let name = create_untitled_item_cmd(tmp.to_string_lossy().into_owned(), false).unwrap();
+        assert_eq!(name, "未命名文件 (1).md");
+        assert!(tmp.join("未命名文件 (1).md").exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+}

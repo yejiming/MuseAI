@@ -22,6 +22,7 @@ pub use commands::fs::*;
 pub use commands::skills::*;
 pub use commands::versions::*;
 pub use commands::workspace::*;
+pub use models::{WritingStats, DailyActivity};
 pub use tools::*;
 
 use tauri::{AppHandle, Manager};
@@ -175,6 +176,7 @@ pub fn run() {
             import_workspace_item,
             delete_workspace_item,
             get_workspace_dir,
+            get_writing_stats,
             save_work_summary_result,
             load_work_summary_result,
             rename_item,
