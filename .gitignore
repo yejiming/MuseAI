@@ -48,6 +48,8 @@ Thumbs.db
 # AI
 .agent/
 .codex/
+.claude/
+.vscode/
 openspec/
 AGENTS.md
 DESIGN.md
