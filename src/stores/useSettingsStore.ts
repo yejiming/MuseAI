@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { createDiskStorage } from './diskStorage';
 
 
 
@@ -651,6 +652,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'museai-settings-storage',
+      storage: createJSONStorage(() => createDiskStorage('settings-store', 'museai-settings-storage')),
       version: 11,
       partialize: (state) => {
         const { worksDirectory: _, ...rest } = state;

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { createDiskStorage } from './diskStorage';
 import { Message, AgentSessionSummary, SessionContextCompaction } from './useAgentStore';
 import { PartnerItemFields } from './usePartnerStore';
 
@@ -94,6 +95,7 @@ export const usePartnerChatStore = create<PartnerChatState>()(
     }),
     {
       name: 'museai-partner-chat-storage',
+      storage: createJSONStorage(() => createDiskStorage('partner-chat-store', 'museai-partner-chat-storage')),
       partialize: (state) => ({
         selectedWorldBookId: state.selectedWorldBookId,
         selectedCharacterCardId: state.selectedCharacterCardId,

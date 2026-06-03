@@ -49,7 +49,8 @@ interface DeAiState {
   setIsRemoverVisible: (isVisible: boolean) => void;
 }
 
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { createDiskStorage } from './diskStorage';
 
 export const useDeAiStore = create<DeAiState>()(
   persist(
@@ -107,6 +108,7 @@ export const useDeAiStore = create<DeAiState>()(
     }),
     {
       name: 'museai-deai-storage',
+      storage: createJSONStorage(() => createDiskStorage('deai-store', 'museai-deai-storage')),
       partialize: (state) => ({
         selectedDetectorReferences: state.selectedDetectorReferences,
         carryOverHistoricalSuggestions: state.carryOverHistoricalSuggestions,

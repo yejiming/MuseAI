@@ -331,6 +331,62 @@ pub fn get_writing_stats(app: AppHandle) -> Result<models::WritingStats, String>
     })
 }
 
+pub fn load_app_state_path(base: &Path, name: &str) -> Result<String, String> {
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("非法的状态名称".to_string());
+    }
+    let path = base.join("MuseAI").join("config").join(format!("{}.json", name));
+    fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+pub fn save_app_state_path(base: &Path, name: &str, content: &str) -> Result<(), String> {
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("非法的状态名称".to_string());
+    }
+    let dir = base.join("MuseAI").join("config");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.json", name));
+    fs::write(path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn load_app_state(app: AppHandle, name: String) -> Result<String, String> {
+    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    load_app_state_path(&doc_dir, &name)
+}
+
+#[tauri::command]
+pub fn save_app_state(app: AppHandle, name: String, content: String) -> Result<(), String> {
+    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    save_app_state_path(&doc_dir, &name, &content)
+}
+
+pub fn migrate_agent_sessions_dir(old_dir: &Path, new_dir: &Path) -> Result<(), String> {
+    if !old_dir.exists() || new_dir.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(new_dir).map_err(|e| e.to_string())?;
+    for entry in fs::read_dir(old_dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.is_file() {
+            let dest = new_dir.join(entry.file_name());
+            fs::copy(&path, &dest).map_err(|e| e.to_string())?;
+            let _ = fs::remove_file(&path);
+        }
+    }
+    let _ = fs::remove_dir(old_dir);
+    Ok(())
+}
+
+pub fn migrate_agent_sessions(app: &AppHandle) -> Result<(), String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let old_dir = app_data_dir.join("agent-sessions");
+    let new_dir = doc_dir.join("MuseAI").join("agent-sessions");
+    migrate_agent_sessions_dir(&old_dir, &new_dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,5 +437,86 @@ mod tests {
         assert!(err.contains("作品目录"));
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_file(outside);
+    }
+
+    #[test]
+    fn save_app_state_creates_json_file() {
+        let root = temp_path("config");
+        let dir = root.join("MuseAI").join("config");
+
+        save_app_state_path(&root, "test-state", r#"{"key": "value"}"#).expect("save state");
+
+        let path = dir.join("test-state.json");
+        assert!(path.exists());
+        let content = fs::read_to_string(&path).expect("read state");
+        assert_eq!(content, r#"{"key": "value"}"#);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_app_state_reads_saved_content() {
+        let root = temp_path("config");
+        let dir = root.join("MuseAI").join("config");
+        fs::create_dir_all(&dir).expect("create config dir");
+        let path = dir.join("my-state.json");
+        fs::write(&path, r#"{"data": 1}"#).expect("write state");
+
+        let result = load_app_state_path(&root, "my-state");
+        assert_eq!(result.unwrap(), r#"{"data": 1}"#);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_app_state_rejects_invalid_name() {
+        let root = temp_path("config");
+        assert!(load_app_state_path(&root, "../etc/passwd").is_err());
+        assert!(load_app_state_path(&root, "foo/bar").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn migrate_agent_sessions_copies_files() {
+        let old_dir = temp_path("old-sessions");
+        let new_dir = temp_path("new-sessions");
+        fs::create_dir_all(&old_dir).expect("create old dir");
+        fs::write(old_dir.join("session-1.json"), r#"{"id": "1"}"#).expect("write session 1");
+        fs::write(old_dir.join("session-2.json"), r#"{"id": "2"}"#).expect("write session 2");
+
+        migrate_agent_sessions_dir(&old_dir, &new_dir).expect("migrate");
+
+        assert!(!old_dir.exists());
+        assert!(new_dir.join("session-1.json").exists());
+        assert!(new_dir.join("session-2.json").exists());
+        assert_eq!(
+            fs::read_to_string(new_dir.join("session-1.json")).unwrap(),
+            r#"{"id": "1"}"#
+        );
+        let _ = fs::remove_dir_all(new_dir);
+    }
+
+    #[test]
+    fn migrate_agent_sessions_skips_if_new_exists() {
+        let old_dir = temp_path("old-sessions-skip");
+        let new_dir = temp_path("new-sessions-skip");
+        fs::create_dir_all(&old_dir).expect("create old dir");
+        fs::create_dir_all(&new_dir).expect("create new dir");
+        fs::write(old_dir.join("session.json"), "{}").expect("write old");
+
+        migrate_agent_sessions_dir(&old_dir, &new_dir).expect("migrate");
+
+        // old dir should remain because new dir already existed
+        assert!(old_dir.exists());
+        let _ = fs::remove_dir_all(old_dir);
+        let _ = fs::remove_dir_all(new_dir);
+    }
+
+    #[test]
+    fn migrate_agent_sessions_skips_if_old_missing() {
+        let old_dir = temp_path("old-sessions-missing");
+        let new_dir = temp_path("new-sessions-missing");
+
+        migrate_agent_sessions_dir(&old_dir, &new_dir).expect("migrate");
+
+        assert!(!new_dir.exists());
     }
 }

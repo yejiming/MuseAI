@@ -108,7 +108,8 @@ interface AgentStoreState {
   createNewSession: () => void;
 }
 
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { createDiskStorage } from './diskStorage';
 
 export const useAgentStore = create<AgentStoreState>()(
   persist(
@@ -168,6 +169,7 @@ export const useAgentStore = create<AgentStoreState>()(
     }),
     {
       name: 'museai-agent-storage',
+      storage: createJSONStorage(() => createDiskStorage('agent-store', 'museai-agent-storage')),
       partialize: (state) => ({
         selectedReferenceFiles: state.selectedReferenceFiles,
         selectedOutlineFile: state.selectedOutlineFile,

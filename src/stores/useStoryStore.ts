@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { createDiskStorage } from './diskStorage';
 import { Message, AgentSessionSummary, SessionContextCompaction } from './useAgentStore';
 
 function createSessionId() {
@@ -102,6 +103,7 @@ export const useStoryStore = create<StoryState>()(
     }),
     {
       name: 'museai-story-storage',
+      storage: createJSONStorage(() => createDiskStorage('story-store', 'museai-story-storage')),
       partialize: (state) => ({
         selectedWorldBookId: state.selectedWorldBookId,
         selectedCharacterCardIds: state.selectedCharacterCardIds,

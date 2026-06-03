@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { createDiskStorage } from './diskStorage';
 import type { Key } from 'react';
 import type { Message } from './useAgentStore';
 
@@ -79,6 +80,7 @@ export const useWorksStore = create<WorksState>()(
     }),
     {
       name: 'museai-works-storage',
+      storage: createJSONStorage(() => createDiskStorage('works-store', 'museai-works-storage')),
       partialize: (state) => ({
         workSummarySelectedArticlePaths: state.workSummarySelectedArticlePaths,
         workSummaryResults: state.workSummaryResults,

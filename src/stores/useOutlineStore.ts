@@ -79,7 +79,8 @@ interface OutlineState {
   createNewSession: () => void;
 }
 
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { createDiskStorage } from './diskStorage';
 
 export const useOutlineStore = create<OutlineState>()(
   persist(
@@ -186,6 +187,7 @@ export const useOutlineStore = create<OutlineState>()(
     }),
     {
       name: 'museai-outline-storage',
+      storage: createJSONStorage(() => createDiskStorage('outline-store', 'museai-outline-storage')),
       partialize: (state) => ({
         creationSelectedReferenceFiles: state.creationSelectedReferenceFiles,
       }),

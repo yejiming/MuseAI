@@ -161,6 +161,7 @@ pub fn run() {
             {
                 let _ = app;
             }
+            let _ = migrate_agent_sessions(&app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -217,6 +218,8 @@ pub fn run() {
             generate_background_items,
             optimize_character_memories,
             test_llm_connection,
+            load_app_state,
+            save_app_state,
         ])
         .manage(ActiveStreams(Mutex::new(HashMap::new())))
         .build(tauri::generate_context!())

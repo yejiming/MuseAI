@@ -347,11 +347,8 @@ pub fn sanitize_session_id(id: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 pub fn agent_sessions_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("agent-sessions"))
+    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    Ok(doc_dir.join("MuseAI").join("agent-sessions"))
 }
 
 pub fn agent_session_path(app: &AppHandle, id: &str) -> Result<std::path::PathBuf, String> {

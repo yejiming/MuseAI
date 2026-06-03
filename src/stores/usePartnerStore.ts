@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import { createDiskStorage } from './diskStorage';
 
 export interface PartnerItemFields {
   // 世界书字段
@@ -445,6 +446,7 @@ export const usePartnerStore = create<PartnerState>()(
     }),
     {
       name: 'museai-partner-storage',
+      storage: createJSONStorage(() => createDiskStorage('partner-store', 'museai-partner-storage')),
     }
   )
 );
