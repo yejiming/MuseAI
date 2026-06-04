@@ -33,6 +33,7 @@ import {
   getRolePlayCharacterName,
   getStoryAllowedTools,
 } from './storyAgent';
+import { parseArchiveAnalysisResponse } from '../utils/archiveAnalysis';
 
 interface ChatStreamEvent {
   runId: string;
@@ -732,7 +733,7 @@ const Story: React.FC = () => {
     try {
       const filteredCards = selectedCards.filter(cc => tempSelectedCardIds.includes(cc.id));
       const promises = filteredCards.map(async (card) => {
-        const resultStr = await invoke<string>('analyze_character_memory', {
+        const resultStr = await invoke<string | Record<string, any>>('analyze_character_memory', {
           request: {
             modelInterface: settings.modelInterface,
             baseUrl: settings.llmBaseUrl,
@@ -742,13 +743,15 @@ const Story: React.FC = () => {
             maxOutputTokens: 4096,
             thinkingDepth: 'off',
             chatHistory: chatHistoryText,
+            targetCharacterName: card.name,
+            targetCharacterContent: card.content,
             currentUserRelationType: card.fields?.userRelationType || '',
             currentUserInteractionModel: card.fields?.userInteractionModel || '',
             currentUserRelationBottomLine: card.fields?.userRelationBottomLine || '',
             currentEvents: card.fields?.keyEvents || '暂无共同经历的关键事件。'
           }
         });
-        const analysis = JSON.parse(resultStr);
+        const analysis = parseArchiveAnalysisResponse(resultStr);
         return { cardId: card.id, analysis };
       });
 
@@ -859,7 +862,7 @@ const Story: React.FC = () => {
 
   return (
     <div className="agent-chat" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#faf9f5' }}>
-      
+
       {/* Archive Memory Modal */}
       <Modal
         title={
@@ -953,7 +956,7 @@ const Story: React.FC = () => {
           </div>
         ) : archiveAnalyses[selectedTargetCardId] ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            
+
             {/* Target Character Card Sync Selector */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#faf6f0', padding: '12px 16px', borderRadius: '8px', border: '1px solid #f2e8dc' }}>
               <strong style={{ color: '#33312e', fontSize: '14px' }}>选择要同步的角色卡：</strong>
@@ -981,9 +984,9 @@ const Story: React.FC = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#33312e', marginBottom: '6px' }}>本局冒险标题</div>
-                <Input 
-                  value={editedTitle} 
-                  onChange={(e) => setEditedTitle(e.target.value)} 
+                <Input
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
                   placeholder="冒险标题"
                   style={{ borderRadius: '6px', borderColor: '#eae6df' }}
                 />
@@ -991,9 +994,9 @@ const Story: React.FC = () => {
 
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#33312e', marginBottom: '6px' }}>更新后的与用户关系类型（{selectedCards.find(c => c.id === selectedTargetCardId)?.name}）</div>
-                <Input 
-                  value={editedRelationTypes[selectedTargetCardId] || ''} 
-                  onChange={(e) => setEditedRelationTypes(prev => ({ ...prev, [selectedTargetCardId]: e.target.value }))} 
+                <Input
+                  value={editedRelationTypes[selectedTargetCardId] || ''}
+                  onChange={(e) => setEditedRelationTypes(prev => ({ ...prev, [selectedTargetCardId]: e.target.value }))}
                   placeholder="与用户关系类型..."
                   style={{ borderRadius: '6px', borderColor: '#eae6df' }}
                 />
@@ -1001,9 +1004,9 @@ const Story: React.FC = () => {
 
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#33312e', marginBottom: '6px' }}>更新后的与用户相处模式（{selectedCards.find(c => c.id === selectedTargetCardId)?.name}）</div>
-                <Input.TextArea 
-                  value={editedRelationModels[selectedTargetCardId] || ''} 
-                  onChange={(e) => setEditedRelationModels(prev => ({ ...prev, [selectedTargetCardId]: e.target.value }))} 
+                <Input.TextArea
+                  value={editedRelationModels[selectedTargetCardId] || ''}
+                  onChange={(e) => setEditedRelationModels(prev => ({ ...prev, [selectedTargetCardId]: e.target.value }))}
                   autoSize={{ minRows: 2, maxRows: 4 }}
                   placeholder="与用户相处模式..."
                   style={{ borderRadius: '6px', borderColor: '#eae6df' }}
@@ -1012,9 +1015,9 @@ const Story: React.FC = () => {
 
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#33312e', marginBottom: '6px' }}>更新后的与用户关系底线（{selectedCards.find(c => c.id === selectedTargetCardId)?.name}）</div>
-                <Input.TextArea 
-                  value={editedRelationBottomLines[selectedTargetCardId] || ''} 
-                  onChange={(e) => setEditedRelationBottomLines(prev => ({ ...prev, [selectedTargetCardId]: e.target.value }))} 
+                <Input.TextArea
+                  value={editedRelationBottomLines[selectedTargetCardId] || ''}
+                  onChange={(e) => setEditedRelationBottomLines(prev => ({ ...prev, [selectedTargetCardId]: e.target.value }))}
                   autoSize={{ minRows: 2, maxRows: 4 }}
                   placeholder="与用户关系底线..."
                   style={{ borderRadius: '6px', borderColor: '#eae6df' }}
@@ -1023,9 +1026,9 @@ const Story: React.FC = () => {
 
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#33312e', marginBottom: '6px' }}>更新后的关键经历记录（{selectedCards.find(c => c.id === selectedTargetCardId)?.name}）</div>
-                <Input.TextArea 
-                  value={editedEventsMap[selectedTargetCardId] || ''} 
-                  onChange={(e) => setEditedEventsMap(prev => ({ ...prev, [selectedTargetCardId]: e.target.value }))} 
+                <Input.TextArea
+                  value={editedEventsMap[selectedTargetCardId] || ''}
+                  onChange={(e) => setEditedEventsMap(prev => ({ ...prev, [selectedTargetCardId]: e.target.value }))}
                   autoSize={{ minRows: 4, maxRows: 8 }}
                   style={{ borderRadius: '6px', borderColor: '#eae6df' }}
                 />
@@ -1046,7 +1049,7 @@ const Story: React.FC = () => {
             </span>
           </h3>
         </div>
-        
+
         <div className="agent-chat__header-actions">
           {selectedCards.length > 0 && (
             <Tooltip title={isSessionArchived ? "当前冒险记录已归档封存" : "封存本局冒险记忆并锁定会话"}>
@@ -1072,33 +1075,33 @@ const Story: React.FC = () => {
           <Tooltip title="重开新冒险">
             <Button type="text" icon={<ReloadOutlined />} onClick={createNewSession} />
           </Tooltip>
-          
+
           <Dropdown
             menu={{
               items: sessions.length > 0
                 ? sessions.map((session) => ({
-                    key: session.id,
-                    label: (
-                      <div className="agent-session-menu-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', minWidth: 200, padding: '4px 0' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', marginRight: 16 }}>
-                          <strong style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{session.title}</strong>
-                          <span style={{ fontSize: '11px', color: '#999', marginTop: 2 }}>
-                            {session.savedAt ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(session.savedAt)) : '未保存'}
-                          </span>
-                        </div>
-                        <Button
-                          type="text"
-                          danger
-                          size="small"
-                          icon={<DeleteOutlined />}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleDeleteSession(session.id);
-                          }}
-                        />
+                  key: session.id,
+                  label: (
+                    <div className="agent-session-menu-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', minWidth: 200, padding: '4px 0' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', marginRight: 16 }}>
+                        <strong style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{session.title}</strong>
+                        <span style={{ fontSize: '11px', color: '#999', marginTop: 2 }}>
+                          {session.savedAt ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(session.savedAt)) : '未保存'}
+                        </span>
                       </div>
-                    ),
-                  }))
+                      <Button
+                        type="text"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDeleteSession(session.id);
+                        }}
+                      />
+                    </div>
+                  ),
+                }))
                 : [{ key: 'empty', disabled: true, label: '暂无历史冒险' }],
               onClick: ({ key }) => {
                 if (key !== 'empty') void openSession(String(key));
@@ -1117,7 +1120,7 @@ const Story: React.FC = () => {
       {/* Main chat layout */}
       {hasMessages ? (
         <div ref={chatHistoryRef} className="agent-chat__history" style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
-          
+
           {/* Foldable System Prompt */}
           <div className="agent-message-row agent-message-row--system">
             <div className="agent-message-bubble agent-message-bubble--system">
@@ -1205,7 +1208,7 @@ const Story: React.FC = () => {
                         {(() => {
                           const parts = msg.content ? msg.content.split(/(\[\[(?:TOOL|THINKING):[^\]]+\]\])/) : [''];
                           const renderedToolIds = new Set<string>();
-                          
+
                           const renderedParts = parts.map((part, i) => {
                             const toolMatch = part.match(/^\[\[TOOL:([^\]]+)\]\]$/);
                             if (toolMatch) {
@@ -1371,7 +1374,7 @@ const Story: React.FC = () => {
                 <span>选择共同历险的角色卡 (可多选)</span>
                 <span style={{ fontSize: '12px', fontWeight: 400, color: '#d97757', cursor: 'pointer' }} onClick={() => selectItem(null, null)}>前往背景页创建人设 &gt;</span>
               </div>
-              
+
               {characterCards.length > 0 ? (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                   {characterCards.map((cc) => {
@@ -1491,7 +1494,7 @@ const Story: React.FC = () => {
             position: 'relative',
             paddingTop: '40px' // Leave space for Segment Tabs
           }}>
-            
+
             {/* Input Action Segment Controller */}
             <div style={{
               position: 'absolute',
@@ -1501,8 +1504,8 @@ const Story: React.FC = () => {
               display: 'flex',
               gap: '6px'
             }}>
-              <Radio.Group 
-                value={inputMode} 
+              <Radio.Group
+                value={inputMode}
                 onChange={(e) => setInputMode(e.target.value)}
                 size="small"
                 buttonStyle="solid"
@@ -1545,9 +1548,9 @@ const Story: React.FC = () => {
               }
               value={input}
             />
-            
+
             <div className="agent-composer__actions" style={{ position: 'absolute', bottom: '12px', left: '16px', right: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
-              
+
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '12px', color: '#8c8882' }}>
                   当前模式：
@@ -1556,7 +1559,7 @@ const Story: React.FC = () => {
                   </Tag>
                 </span>
               </div>
-              
+
               <div className="agent-send-cluster" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <Tooltip color="#fff" placement="topRight" title={contextTooltip} overlayInnerStyle={{ width: 'max-content', maxWidth: 320, padding: '8px 12px', border: '1px solid #eae6df' }}>
                   <button
@@ -1568,7 +1571,7 @@ const Story: React.FC = () => {
                     <span>{contextPercent}%</span>
                   </button>
                 </Tooltip>
-                
+
                 <Tooltip title={isStreaming ? '停止' : isSessionArchived ? '当前故事已归档' : '提交行动'}>
                   <Button
                     className="de-ai-agent-run-button"

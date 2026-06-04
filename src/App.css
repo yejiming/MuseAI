@@ -13,17 +13,91 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-body, html {
+html {
   margin: 0;
   padding: 0;
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
+  width: 100%;
   overflow: hidden;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  position: fixed;
+  top: 0;
+  left: 0;
 }
 
 #root {
   height: 100%;
   width: 100%;
+}
+
+.mobile-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background-color: #faf9f5;
+  color: #33312e;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.mobile-shell__header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(50px + env(safe-area-inset-top, 0px));
+  padding-top: env(safe-area-inset-top, 0px);
+  background-color: #faf9f5;
+  border-bottom: 1px solid rgba(217, 119, 87, 0.1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+  color: #d97757;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.mobile-shell__content {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mobile-shell__nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  height: calc(60px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background-color: #faf9f5;
+  border-top: 1px solid rgba(217, 119, 87, 0.1);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.02);
+}
+
+@media (max-width: 767px) {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+    height: 100%;
+  }
+
+  body {
+    position: static;
+  }
 }
 
 a {

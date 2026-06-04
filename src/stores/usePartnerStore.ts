@@ -90,53 +90,71 @@ interface PartnerState {
   }) => void;
 }
 
+const formatFieldLine = (label: string, value?: string) => {
+  const trimmed = (value || '').trim();
+  return trimmed ? `- **${label}**：${trimmed}` : '';
+};
+
+
+
+const buildListSection = (title: string, items: { label: string; value?: string }[]) => {
+  const lines = items.map(i => formatFieldLine(i.label, i.value)).filter(Boolean);
+  if (lines.length === 0) return '';
+  return `## ${title}\n${lines.join('\n')}\n\n`;
+};
+
 export const compileItemToMarkdown = (name: string, type: 'world_book' | 'character_card', fields: PartnerItemFields): string => {
   if (type === 'world_book') {
-    return `# ${name}\n\n` +
-      `## 核心设定\n` +
-      `- **主题**：${fields.theme || ''}\n` +
-      `- **时代**：${fields.era || ''}\n` +
-      `- **科技水平**：${fields.techLevel || ''}\n` +
-      `- **魔法水平**：${fields.magicLevel || ''}\n\n` +
-      `## 地理格局\n${fields.geography || ''}\n\n` +
-      `## 关键场景\n${fields.keyScenes || ''}\n\n` +
-      `## 文化特色\n${fields.culturalFeatures || ''}\n\n` +
-      `## 历史事件\n${fields.history || ''}\n\n` +
-      `## 核心矛盾\n${fields.conflict || ''}`;
+    const core = buildListSection('核心设定', [
+      { label: '主题', value: fields.theme },
+      { label: '时代', value: fields.era },
+      { label: '科技水平', value: fields.techLevel },
+      { label: '魔法水平', value: fields.magicLevel },
+    ]);
+    const geography = (fields.geography || '').trim() ? `## 地理格局\n${fields.geography}\n\n` : '';
+    const keyScenes = (fields.keyScenes || '').trim() ? `## 关键场景\n${fields.keyScenes}\n\n` : '';
+    const cultural = (fields.culturalFeatures || '').trim() ? `## 文化特色\n${fields.culturalFeatures}\n\n` : '';
+    const history = (fields.history || '').trim() ? `## 历史事件\n${fields.history}\n\n` : '';
+    const conflict = (fields.conflict || '').trim() ? `## 核心矛盾\n${fields.conflict}\n\n` : '';
+    return `# ${name}\n\n${core}${geography}${keyScenes}${cultural}${history}${conflict}`.trim() + '\n';
   } else {
     const tagsStr = (fields.identityTags || []).map(t => `\`${t}\``).join(' ');
-    return `# 角色卡：${name}\n\n` +
-      `## 基础信息\n` +
-      `- **姓名**：${name}\n` +
-      `- **年龄**：${fields.age || ''}\n` +
-      `- **性别**：${fields.gender || ''}\n` +
-      `- **种族**：${fields.race || ''}\n` +
-      `- **出生地**：${fields.birthplace || ''}\n` +
-      `- **职业**：${fields.occupation || ''}\n` +
-      `- **社会阶层**：${fields.socialClass || ''}\n\n` +
-      `## 身份标签\n${tagsStr || '无'}\n\n` +
-      `## 外貌气质\n` +
-      `- **身高体型**：${fields.heightBuild || ''}\n` +
-      `- **标志性特征**：${fields.iconicFeatures || ''}\n` +
-      `- **衣着风格**：${fields.clothingStyle || ''}\n` +
-      `- **整体气质**：${fields.overallVibe || ''}\n\n` +
-      `## 性格特征\n` +
-      `- **外在性格**：${fields.externalPersonality || ''}\n` +
-      `- **内在性格**：${fields.internalPersonality || ''}\n` +
-      `- **核心欲望**：${fields.coreDesire || ''}\n` +
-      `- **恐惧和弱点**：${fields.fearWeakness || ''}\n` +
-      `- **道德观念**：${fields.moralValues || ''}\n` +
-      `- **怪癖**：${fields.quirk || ''}\n\n` +
-      `## 技能专长\n${fields.skills || ''}\n\n` +
-      `## 背景故事\n${fields.backgroundStory || ''}\n\n` +
-      `## 人际关系\n${fields.relationships || ''}\n\n` +
-      `## 说话方式\n${fields.speakingStyle || ''}\n\n` +
-      `## 典型反应\n${fields.typicalReactions || ''}\n\n` +
-      `## 角色记忆\n` +
-      `- **与用户关系类型**：${fields.userRelationType || ''}\n` +
-      `- **与用户相处模式**：${fields.userInteractionModel || ''}\n` +
-      `- **与用户关系底线**：${fields.userRelationBottomLine || ''}\n\n` +
-      `## 关键事件\n${fields.keyEvents || ''}`;
+    const basic = buildListSection('基础信息', [
+      { label: '姓名', value: name },
+      { label: '年龄', value: fields.age },
+      { label: '性别', value: fields.gender },
+      { label: '种族', value: fields.race },
+      { label: '出生地', value: fields.birthplace },
+      { label: '职业', value: fields.occupation },
+      { label: '社会阶层', value: fields.socialClass },
+    ]);
+    const identity = tagsStr ? `## 身份标签\n${tagsStr}\n\n` : '';
+    const appearance = buildListSection('外貌气质', [
+      { label: '身高体型', value: fields.heightBuild },
+      { label: '标志性特征', value: fields.iconicFeatures },
+      { label: '衣着风格', value: fields.clothingStyle },
+      { label: '整体气质', value: fields.overallVibe },
+    ]);
+    const personality = buildListSection('性格特征', [
+      { label: '外在性格', value: fields.externalPersonality },
+      { label: '内在性格', value: fields.internalPersonality },
+      { label: '核心欲望', value: fields.coreDesire },
+      { label: '恐惧和弱点', value: fields.fearWeakness },
+      { label: '道德观念', value: fields.moralValues },
+      { label: '怪癖', value: fields.quirk },
+    ]);
+    const skills = (fields.skills || '').trim() ? `## 技能专长\n${fields.skills}\n\n` : '';
+    const background = (fields.backgroundStory || '').trim() ? `## 背景故事\n${fields.backgroundStory}\n\n` : '';
+    const relationships = (fields.relationships || '').trim() ? `## 人际关系\n${fields.relationships}\n\n` : '';
+    const speaking = (fields.speakingStyle || '').trim() ? `## 说话方式\n${fields.speakingStyle}\n\n` : '';
+    const reactions = (fields.typicalReactions || '').trim() ? `## 典型反应\n${fields.typicalReactions}\n\n` : '';
+    const memory = buildListSection('角色记忆', [
+      { label: '与用户关系类型', value: fields.userRelationType },
+      { label: '与用户相处模式', value: fields.userInteractionModel },
+      { label: '与用户关系底线', value: fields.userRelationBottomLine },
+    ]);
+    const events = (fields.keyEvents || '').trim() ? `## 关键事件\n${fields.keyEvents}\n\n` : '';
+    return `# 角色卡：${name}\n\n${basic}${identity}${appearance}${personality}${skills}${background}${relationships}${speaking}${reactions}${memory}${events}`.trim() + '\n';
   }
 };
 

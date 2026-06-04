@@ -6,7 +6,7 @@ use std::process::Command;
 use chrono::Local;
 use futures_util::{future::BoxFuture, StreamExt};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::commands::skills::discover_skills;
 use crate::llm::*;
@@ -527,8 +527,9 @@ fn emit_context_compacted(
     if !options.emit_events || options.parent_tool_call_id.is_some() {
         return;
     }
-    let _ = app.emit(
-        "agent-chat-stream",
+    crate::mobile_server::dispatch_stream_event(
+        app,
+        run_id,
         ChatStreamEvent {
             run_id: run_id.to_string(),
             event_type: "context_compacted".to_string(),
@@ -560,8 +561,9 @@ pub fn emit_chat_event(
             if event_type == "error" {
                 output_delta = format!("\n[Agent出错: {}]\n", message.clone().unwrap_or_default());
             }
-            let _ = app.emit(
-                "agent-chat-stream",
+            crate::mobile_server::dispatch_stream_event(
+                app,
+                run_id,
                 ChatStreamEvent {
                     run_id: run_id.to_string(),
                     event_type: "tool_output".to_string(),
@@ -579,8 +581,9 @@ pub fn emit_chat_event(
         return;
     }
 
-    let _ = app.emit(
-        "agent-chat-stream",
+    crate::mobile_server::dispatch_stream_event(
+        app,
+        run_id,
         ChatStreamEvent {
             run_id: run_id.to_string(),
             event_type: event_type.to_string(),
@@ -623,8 +626,9 @@ pub fn emit_tool_event(
         }
 
         if !delta.is_empty() {
-            let _ = app.emit(
-                "agent-chat-stream",
+            crate::mobile_server::dispatch_stream_event(
+                app,
+                run_id,
                 ChatStreamEvent {
                     run_id: run_id.to_string(),
                     event_type: "tool_output".to_string(),
@@ -642,8 +646,9 @@ pub fn emit_tool_event(
         return;
     }
 
-    let _ = app.emit(
-        "agent-chat-stream",
+    crate::mobile_server::dispatch_stream_event(
+        app,
+        run_id,
         ChatStreamEvent {
             run_id: run_id.to_string(),
             event_type: event_type.to_string(),
@@ -659,8 +664,9 @@ pub fn emit_tool_event(
     );
 }
 fn emit_todo_update(app: &AppHandle, run_id: &str, todos: Vec<AgentSessionTodo>) {
-    let _ = app.emit(
-        "agent-chat-stream",
+    crate::mobile_server::dispatch_stream_event(
+        app,
+        run_id,
         ChatStreamEvent {
             run_id: run_id.to_string(),
             event_type: String::from("todo_update"),

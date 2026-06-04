@@ -26,6 +26,7 @@ import { usePartnerStore } from '../stores/usePartnerStore';
 import { usePartnerChatStore } from '../stores/usePartnerChatStore';
 import { Message, AgentSessionSummary, AgentSessionRecord, SessionContextCompaction } from '../stores/useAgentStore';
 import { PartnerChatSettingsModal } from '../components/PartnerChatSettingsModal';
+import { parseArchiveAnalysisResponse } from '../utils/archiveAnalysis';
 
 interface ChatStreamEvent {
   runId: string;
@@ -64,6 +65,35 @@ const USER_INFO_LABELS: Record<string, string> = {
   typicalReactions: '典型反应'
 };
 
+const filterBlankMarkdownFields = (content: string): string => {
+  const lines = content.split('\n');
+
+  // 第一轮：移除值为空的列表项行
+  const afterListFilter = lines.filter(line => !/^\s*-\s*\*\*[^*]+\*\*：\s*$/.test(line));
+
+  // 第二轮：移除后面没有实质内容的空二级标题区块
+  const result: string[] = [];
+  let i = 0;
+  while (i < afterListFilter.length) {
+    const line = afterListFilter[i];
+    if (/^##\s/.test(line)) {
+      let j = i + 1;
+      while (j < afterListFilter.length && afterListFilter[j].trim() === '') {
+        j++;
+      }
+      // 如果后面直接是另一个标题或文件结尾，这个区块是空的，跳过
+      if (j >= afterListFilter.length || /^##\s/.test(afterListFilter[j]) || /^# /.test(afterListFilter[j])) {
+        i = j;
+        continue;
+      }
+    }
+    result.push(line);
+    i++;
+  }
+
+  return result.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+};
+
 const compileEffectiveSystemPrompt = (
   basePrompt: string,
   worldBookContent: string | null,
@@ -73,11 +103,11 @@ const compileEffectiveSystemPrompt = (
   let prompt = basePrompt.trim();
 
   if (worldBookContent && worldBookContent.trim()) {
-    prompt += `\n\n## 伴侣对话世界设定\n请严格遵守以下世界背景设定展开对话，不要脱离该设定范围：\n${worldBookContent.trim()}`;
+    prompt += `\n\n## 伴侣对话世界设定\n请严格遵守以下世界背景设定展开对话，不要脱离该设定范围：\n${filterBlankMarkdownFields(worldBookContent.trim())}`;
   }
 
   if (characterCardContent && characterCardContent.trim()) {
-    prompt += `\n\n## 你的角色人设设定（伴侣设定）\n你必须始终扮演此角色，语气、动作、口吻、心防与性格应与本卡高度一致：\n${characterCardContent.trim()}`;
+    prompt += `\n\n## 你的角色人设设定（伴侣设定）\n你必须始终扮演此角色，语气、动作、口吻、心防与性格应与本卡高度一致：\n${filterBlankMarkdownFields(characterCardContent.trim())}`;
   }
 
   const userFields = Object.entries(userInfo)
@@ -126,7 +156,7 @@ const Chat: React.FC = () => {
 
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const currentThinkingIdRef = useRef<string | null>(null);
-  
+
   const activeRunRef = useRef(activeRun);
   const messagesRef = useRef(messages);
   const sessionIdRef = useRef(sessionId);
@@ -170,7 +200,7 @@ const Chat: React.FC = () => {
       if (!isMounted) return;
       const activeRun = activeRunRef.current;
       const payload = event.payload;
-      
+
       if (!activeRun.runId || payload.runId !== activeRun.runId || !activeRun.messageId) {
         return;
       }
@@ -190,7 +220,7 @@ const Chat: React.FC = () => {
           if (msg.id !== activeRun.messageId) return msg;
           let newContent = msg.content;
           const newThinkingBlocks = [...(msg.thinkingBlocks ?? [])];
-          
+
           if (!currentThinkingIdRef.current) {
             currentThinkingIdRef.current = `thinking-${Date.now()}`;
             newContent += `\n\n[[THINKING:${currentThinkingIdRef.current}]]\n\n`;
@@ -205,11 +235,11 @@ const Chat: React.FC = () => {
             }
           }
 
-          return { 
-            ...msg, 
-            content: newContent, 
+          return {
+            ...msg,
+            content: newContent,
             thinkingBlocks: newThinkingBlocks,
-            thinking: `${msg.thinking ?? ''}${payload.delta}` 
+            thinking: `${msg.thinking ?? ''}${payload.delta}`
           };
         }));
         return;
@@ -639,7 +669,7 @@ const Chat: React.FC = () => {
       .join('\n\n');
 
     try {
-      const resultStr = await invoke<string>('analyze_character_memory', {
+      const resultStr = await invoke<string | Record<string, any>>('analyze_character_memory', {
         request: {
           modelInterface: settings.modelInterface,
           baseUrl: settings.llmBaseUrl,
@@ -649,6 +679,8 @@ const Chat: React.FC = () => {
           maxOutputTokens: 4096,
           thinkingDepth: 'off',
           chatHistory: chatHistoryText,
+          targetCharacterName: selectedCharacterCard.name,
+          targetCharacterContent: selectedCharacterCard.content,
           currentUserRelationType: selectedCharacterCard.fields?.userRelationType || '',
           currentUserInteractionModel: selectedCharacterCard.fields?.userInteractionModel || '',
           currentUserRelationBottomLine: selectedCharacterCard.fields?.userRelationBottomLine || '',
@@ -656,7 +688,7 @@ const Chat: React.FC = () => {
         }
       });
 
-      const analysis = JSON.parse(resultStr);
+      const analysis = parseArchiveAnalysisResponse(resultStr);
       setArchiveAnalysis(analysis);
       setEditedTitle(analysis.sessionTitle || sessionTitle || '未命名会话');
       setEditedRelationType(analysis.userRelationType || '');
@@ -686,7 +718,7 @@ const Chat: React.FC = () => {
 
       // 2. Set current session archive status to true
       setIsSessionArchived(true);
-      
+
       // 3. Set the new session title
       const finalTitle = editedTitle.trim() || '未命名会话';
       setSessionTitle(finalTitle);
@@ -761,7 +793,7 @@ const Chat: React.FC = () => {
 
   return (
     <div className="agent-chat" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#faf9f5' }}>
-      
+
       {/* Settings Modal */}
       <PartnerChatSettingsModal
         open={isSettingsOpen}
@@ -819,9 +851,9 @@ const Chat: React.FC = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#33312e', marginBottom: '6px' }}>本场聊天会话标题</div>
-                <Input 
-                  value={editedTitle} 
-                  onChange={(e) => setEditedTitle(e.target.value)} 
+                <Input
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
                   placeholder="请输入建议标题"
                   style={{ borderRadius: '6px', borderColor: '#eae6df' }}
                 />
@@ -829,9 +861,9 @@ const Chat: React.FC = () => {
 
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#33312e', marginBottom: '6px' }}>更新后的与用户关系类型</div>
-                <Input 
-                  value={editedRelationType} 
-                  onChange={(e) => setEditedRelationType(e.target.value)} 
+                <Input
+                  value={editedRelationType}
+                  onChange={(e) => setEditedRelationType(e.target.value)}
                   placeholder="与用户关系类型..."
                   style={{ borderRadius: '6px', borderColor: '#eae6df' }}
                 />
@@ -839,9 +871,9 @@ const Chat: React.FC = () => {
 
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#33312e', marginBottom: '6px' }}>更新后的与用户相处模式</div>
-                <Input.TextArea 
-                  value={editedRelationModel} 
-                  onChange={(e) => setEditedRelationModel(e.target.value)} 
+                <Input.TextArea
+                  value={editedRelationModel}
+                  onChange={(e) => setEditedRelationModel(e.target.value)}
                   autoSize={{ minRows: 2, maxRows: 4 }}
                   placeholder="与用户相处模式..."
                   style={{ borderRadius: '6px', borderColor: '#eae6df' }}
@@ -850,9 +882,9 @@ const Chat: React.FC = () => {
 
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#33312e', marginBottom: '6px' }}>更新后的与用户关系底线</div>
-                <Input.TextArea 
-                  value={editedRelationBottomLine} 
-                  onChange={(e) => setEditedRelationBottomLine(e.target.value)} 
+                <Input.TextArea
+                  value={editedRelationBottomLine}
+                  onChange={(e) => setEditedRelationBottomLine(e.target.value)}
                   autoSize={{ minRows: 2, maxRows: 4 }}
                   placeholder="与用户关系底线..."
                   style={{ borderRadius: '6px', borderColor: '#eae6df' }}
@@ -861,9 +893,9 @@ const Chat: React.FC = () => {
 
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#33312e', marginBottom: '6px' }}>更新后的关键事件记录</div>
-                <Input.TextArea 
-                  value={editedEvents} 
-                  onChange={(e) => setEditedEvents(e.target.value)} 
+                <Input.TextArea
+                  value={editedEvents}
+                  onChange={(e) => setEditedEvents(e.target.value)}
                   autoSize={{ minRows: 4, maxRows: 8 }}
                   placeholder="更新后的关键事件记录..."
                   style={{ borderRadius: '6px', borderColor: '#eae6df' }}
@@ -887,7 +919,7 @@ const Chat: React.FC = () => {
             )}
           </h3>
         </div>
-        
+
         <div className="agent-chat__header-actions">
           {selectedCharacterCard && (
             <Tooltip title={isSessionArchived ? "当前会话的记忆已封存到角色卡" : "封存本场对话记忆到角色卡并归档"}>
@@ -913,33 +945,33 @@ const Chat: React.FC = () => {
           <Tooltip title="清除当前上下文">
             <Button type="text" icon={<ReloadOutlined />} onClick={createNewSession} />
           </Tooltip>
-          
+
           <Dropdown
             menu={{
               items: sessions.length > 0
                 ? sessions.map((session) => ({
-                    key: session.id,
-                    label: (
-                      <div className="agent-session-menu-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', minWidth: 200, padding: '4px 0' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', marginRight: 16 }}>
-                          <strong style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{session.title}</strong>
-                          <span style={{ fontSize: '11px', color: '#999', marginTop: 2 }}>
-                            {session.savedAt ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(session.savedAt)) : '未保存'}
-                          </span>
-                        </div>
-                        <Button
-                          type="text"
-                          danger
-                          size="small"
-                          icon={<DeleteOutlined />}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleDeleteSession(session.id);
-                          }}
-                        />
+                  key: session.id,
+                  label: (
+                    <div className="agent-session-menu-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', minWidth: 200, padding: '4px 0' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', marginRight: 16 }}>
+                        <strong style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{session.title}</strong>
+                        <span style={{ fontSize: '11px', color: '#999', marginTop: 2 }}>
+                          {session.savedAt ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(session.savedAt)) : '未保存'}
+                        </span>
                       </div>
-                    ),
-                  }))
+                      <Button
+                        type="text"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDeleteSession(session.id);
+                        }}
+                      />
+                    </div>
+                  ),
+                }))
                 : [{ key: 'empty', disabled: true, label: '暂无历史聊天' }],
               onClick: ({ key }) => {
                 if (key !== 'empty') void openSession(String(key));
@@ -1043,7 +1075,7 @@ const Chat: React.FC = () => {
 
                         {(() => {
                           const parts = msg.content ? msg.content.split(/(\[\[(?:THINKING):[^\]]+\]\])/) : [''];
-                          
+
                           return parts.map((part, i) => {
                             const thinkingMatch = part.match(/^\[\[THINKING:([^\]]+)\]\]$/);
                             if (thinkingMatch) {
@@ -1192,13 +1224,13 @@ const Chat: React.FC = () => {
             placeholder={
               isSessionArchived
                 ? "当前会话的记忆已封存，无法继续发送消息"
-                : selectedCharacterCard 
-                  ? `与 ${selectedCharacterCard.name} 对话，按 Cmd/Ctrl + Enter 发送...` 
+                : selectedCharacterCard
+                  ? `与 ${selectedCharacterCard.name} 对话，按 Cmd/Ctrl + Enter 发送...`
                   : "请先点击左下角设置选择角色卡，然后开启对话..."
             }
             value={input}
           />
-          
+
           <div className="agent-composer__actions" style={{ position: 'absolute', bottom: '12px', left: '16px', right: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
             <Button
               aria-label="伴侣设置"
@@ -1213,7 +1245,7 @@ const Chat: React.FC = () => {
               }}
               title="伴侣设置"
             />
-            
+
             <div className="agent-send-cluster" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <Tooltip color="#fff" placement="topRight" title={contextTooltip} overlayInnerStyle={{ width: 'max-content', maxWidth: 320, padding: '8px 12px', border: '1px solid #eae6df' }}>
                 <button
@@ -1225,7 +1257,7 @@ const Chat: React.FC = () => {
                   <span>{contextPercent}%</span>
                 </button>
               </Tooltip>
-              
+
               <Tooltip title={isStreaming ? '停止' : isSessionArchived ? '当前会话已封存' : '发送'}>
                 <Button
                   className="de-ai-agent-run-button"

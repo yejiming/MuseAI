@@ -30,7 +30,7 @@ import {
   defaultStoryDynamicAgentPrompt,
 } from '../stores/useSettingsStore';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 const MODEL_PROVIDER_PRESETS = [
@@ -245,10 +245,17 @@ const Settings: React.FC = () => {
   const store = useSettingsStore();
   const [globalForm] = Form.useForm();
   const [addForm] = Form.useForm();
-  
+
   const [isAddModalVisible, setIsAddModalVisible] = React.useState(false);
   const [isTesting, setIsTesting] = React.useState(false);
   const [testResult, setTestResult] = React.useState<{ success: boolean; msg: string } | null>(null);
+  const [mobileStatus, setMobileStatus] = React.useState<{ isRunning: boolean; url: string | null; error: string | null } | null>(null);
+
+  React.useEffect(() => {
+    invoke('get_mobile_service_status')
+      .then((status: any) => setMobileStatus(status))
+      .catch((e) => console.error('Failed to get mobile service status:', e));
+  }, []);
 
   // Retrieve current active model configuration
   const currentModel = store.models?.find((m) => m.id === store.selectedModelId) || store.models?.[0];
@@ -299,7 +306,7 @@ const Settings: React.FC = () => {
       const values = await globalForm.validateFields();
       setIsTesting(true);
       setTestResult(null);
-      
+
       const result = await invoke<string>('test_llm_connection', {
         request: {
           modelInterface: values.modelInterface,
@@ -308,7 +315,7 @@ const Settings: React.FC = () => {
           model: values.llmModel,
         }
       });
-      
+
       setIsTesting(false);
       setTestResult({ success: true, msg: result });
       message.success('连接测试成功！');
@@ -362,6 +369,7 @@ const Settings: React.FC = () => {
           onClick={(e) => e.preventDefault()}
           items={[
             { key: 'model-config', href: '#model-config', title: '模型设置' },
+            { key: 'lan-config', href: '#lan-config', title: '局域网访问' },
           ]}
         />
         <Divider style={{ margin: '12px 16px 12px -8px', borderColor: '#eae6df', minWidth: 'auto', width: 'calc(100% - 8px)' }} />
@@ -392,7 +400,7 @@ const Settings: React.FC = () => {
       {/* 右侧核心内容区域 */}
       <div id="settings-scroll-container" style={{ flex: 1, padding: '40px 48px', overflowY: 'auto', paddingBottom: 120 }}>
         <div style={{ maxWidth: 800, margin: '0 auto' }}>
-          
+
           <Title level={2} style={{ fontWeight: 600, color: '#33312e', marginBottom: 40, letterSpacing: '-0.5px', fontFamily: '"Inter", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
             设置
           </Title>
@@ -403,7 +411,7 @@ const Settings: React.FC = () => {
               <SettingOutlined style={{ fontSize: '20px', color: '#d97757' }} />
               <Title level={4} style={{ color: '#33312e', margin: 0, fontWeight: 600, fontFamily: '"Inter", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>全局模型设置</Title>
             </div>
-            
+
             <Card
               style={{
                 backgroundColor: '#ffffff',
@@ -561,6 +569,65 @@ const Settings: React.FC = () => {
                   </Popconfirm>
                 </div>
               </Form>
+            </Card>
+          </section>
+
+          {/* 局域网访问 */}
+          <section id="lan-config" style={{ marginBottom: 48 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
+              <GlobalOutlined style={{ fontSize: '20px', color: '#d97757' }} />
+              <Title level={4} style={{ color: '#33312e', margin: 0, fontWeight: 600, fontFamily: '"Inter", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>局域网访问</Title>
+            </div>
+
+            <Card
+              style={{
+                backgroundColor: '#ffffff',
+                border: '1px solid #eae6df',
+                borderRadius: '12px',
+                boxShadow: '0 4px 20px rgba(217, 119, 87, 0.02)',
+              }}
+              styles={{ body: { padding: '24px' } }}
+            >
+              {mobileStatus ? (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+                  <div
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      backgroundColor: mobileStatus.isRunning ? '#52c41a' : '#f5222d',
+                      marginTop: 6,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: 600, color: '#33312e', fontSize: 14, display: 'block' }}>
+                      {mobileStatus.isRunning ? '服务已启动' : '服务未运行'}
+                    </Text>
+                    {mobileStatus.isRunning && mobileStatus.url && (
+                      <div style={{ marginTop: 6 }}>
+                        <Text style={{ fontSize: 13, color: '#8c857b', display: 'block', lineHeight: 1.5 }}>
+                          在同一个无线网络（WiFi）下，使用手机扫描或输入以下网址，即可直接访问您的智能伴侣、故事冒险和羁绊：
+                        </Text>
+                        <div style={{ marginTop: 8 }}>
+                          <Text copyable style={{ fontSize: 14, color: '#d97757', fontWeight: 600 }}>
+                            {mobileStatus.url}
+                          </Text>
+                        </div>
+                      </div>
+                    )}
+                    {mobileStatus.error && (
+                      <div style={{ marginTop: 6, color: '#f5222d', fontSize: 12 }}>
+                        服务启动出错：{mobileStatus.error}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: '#8c857b', fontSize: 14 }}>
+                  正在获取局域网服务状态...
+                </div>
+              )}
             </Card>
           </section>
 

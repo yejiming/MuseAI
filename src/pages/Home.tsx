@@ -71,7 +71,6 @@ const Home: React.FC = () => {
   const navigate = useNavigate();
   const [stats, setStats] = useState<WritingStats | null>(null);
   const [loading, setLoading] = useState(true);
-
   useEffect(() => {
     const loadStats = async () => {
       try {
@@ -265,6 +264,7 @@ const Home: React.FC = () => {
           )}
         </Card>
       </div>
+
 
       {/* 快捷入口卡片 */}
       <div>

@@ -31,19 +31,24 @@
 | `commands` | `src/commands/mod.rs`, `fs.rs`, `workspace.rs`, `versions.rs`, `skills.rs` | Tauri 命令按领域分组 |
 | `fs_commands` | `src/fs_commands.rs` | 隔离的底层文件操作（重命名、安全移动、空目录生成） |
 | `crawler` | `src/crawler.rs` | 网页爬取（番茄小说等） |
+| `mobile_server` | `src/mobile_server.rs` | 移动端局域网服务，包含 API 服务、SSE 串流桥接、静态资源托管和基于 Token 的安全鉴权 |
 
 ### 开发规范
 - Tauri 命令正确处理 `Result` 并序列化给前端。
 - `bash` 命令必须设超时、校验危险命令、限制局部路径。
 - 新增工具或命令时，在对应模块实现，并在 `lib.rs` 中注册。
+- `mobile_server` 需支持基于 UUID Token 及 HTTP Cookie 校验，静态资源通过 `AppHandle` 的 `asset_resolver()` 动态获取并按 MIME 类型托管，局域网连接须展示在“设置”页中。
+
 
 ## 5. 前端架构 (React)
 
 ### 5.1 页面 (`src/pages/`)
-`Home.tsx`, `Works.tsx`, `Examples.tsx`, `DeAi.tsx`, `Outline.tsx`, `Background.tsx`, `Chat.tsx`, `Story.tsx`, `Bond.tsx`, `Settings.tsx`
+- **桌面端页面**: `Home.tsx`, `Works.tsx`, `Examples.tsx`, `DeAi.tsx`, `Outline.tsx`, `Background.tsx`, `Chat.tsx`, `Story.tsx`, `Bond.tsx`, `Settings.tsx`
+- **移动端页面**: `MobileHome.tsx`, `MobileChat.tsx`, `MobileStory.tsx`, `MobileBond.tsx`
 
 ### 5.2 核心组件 (`src/components/`)
-`AgentChat.tsx`, `DeAiAgentChat.tsx`, `OutlineAssessmentAgentChat.tsx`, `OutlineCreationAgentChat.tsx`, `PartnerChatSettingsModal.tsx`, `WorkspaceDirectory.tsx`, `MarkdownEditor.tsx`, `ScoreDetailsModal.tsx`, `ScoreRadarChart.tsx`, `AppShell.tsx`
+- **公用/桌面端组件**: `AgentChat.tsx`, `DeAiAgentChat.tsx`, `OutlineAssessmentAgentChat.tsx`, `OutlineCreationAgentChat.tsx`, `PartnerChatSettingsModal.tsx`, `WorkspaceDirectory.tsx`, `MarkdownEditor.tsx`, `ScoreDetailsModal.tsx`, `ScoreRadarChart.tsx`, `AppShell.tsx`
+- **移动端外壳**: `MobileShell.tsx`
 
 ### 5.3 状态管理 (`src/stores/`)
 `useAgentStore.ts`, `useDeAiStore.ts`, `useOutlineStore.ts`, `usePartnerStore.ts`, `usePartnerChatStore.ts`, `useStoryStore.ts`, `useSettingsStore.ts`, `useWorksStore.ts`
@@ -52,6 +57,12 @@
 - 函数式组件与 Hooks。
 - 样式整合到 Ant Design `ConfigProvider` 和 `theme.ts`。
 - 对话框与编辑器支持 Markdown 渲染（实时高亮与流式显示）。
+
+### 5.5 跨平台适配与中转桥接 (`src/utils/runtime.ts`)
+- **环境检测**: `isTauriHost()` 判断是否运行于 Tauri 桌面环境，`isMobile()` 通过 UserAgent 和屏幕宽度检测是否运行于移动端浏览器。
+- **IPC/网络适配层 (`appInvoke`)**: 抹平环境差异。桌面端直接通过 Tauri `invoke` 调用原生命令，移动端拦截命令并转为向本地 Axum 局域网服务发送带有 `X-Mobile-Token` 头部/Cookie 的 HTTP API 请求。
+- **事件流监听 (`listenStream`)**: 双端统一的串流处理。桌面端通过 Tauri 事件系统 `listen` 全局事件，移动端建立 `EventSource` (SSE) 连接来接收大模型的流式字元（Delta）事件。
+
 
 ## 6. 工作区与目录结构
 
@@ -84,6 +95,8 @@
 - 文件操作隔离：限制在 `~/Documents/MuseAI/` 下。
 - 非破坏性修改：Copy-on-Write。
 - 工作区隔离：各模块 Agent 工作空间相互独立。
+- **移动端安全机制**: 移动端通过 Token 强鉴权。仅暴露无害的会话及配置读写（`settings-store`、`partner-store`、`partner-chat-store`、`story-store`），且后端拦截过滤 LLM 凭证（屏蔽 LLM API Key 的回传与输出），严禁移动端执行任意 Shell 命令或写出非会话相关的系统文件。
+
 
 ### 7.3 多 Agent 协同与上下文管理
 - **动态上下文组装**：Agent 提示词动态嵌入关联数据（范文、前置评分等）。

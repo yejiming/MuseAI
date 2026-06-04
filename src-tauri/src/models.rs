@@ -192,6 +192,8 @@ pub struct AnalyzeMemoryRequest {
     pub max_output_tokens: Option<u32>,
     pub thinking_depth: Option<String>,
     pub chat_history: String,
+    pub target_character_name: Option<String>,
+    pub target_character_content: Option<String>,
     pub current_user_relation_type: String,
     pub current_user_interaction_model: String,
     pub current_user_relation_bottom_line: String,

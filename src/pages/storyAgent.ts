@@ -52,6 +52,29 @@ export interface StoryModelMessage {
   thinkingBlocks?: ThinkingBlock[];
 }
 
+const filterBlankMarkdownFields = (content: string): string => {
+  const lines = content.split('\n');
+  const afterListFilter = lines.filter(line => !/^\s*-\s*\*\*[^*]+\*\*：\s*$/.test(line));
+  const result: string[] = [];
+  let i = 0;
+  while (i < afterListFilter.length) {
+    const line = afterListFilter[i];
+    if (/^##\s/.test(line)) {
+      let j = i + 1;
+      while (j < afterListFilter.length && afterListFilter[j].trim() === '') {
+        j++;
+      }
+      if (j >= afterListFilter.length || /^##\s/.test(afterListFilter[j]) || /^# /.test(afterListFilter[j])) {
+        i = j;
+        continue;
+      }
+    }
+    result.push(line);
+    i++;
+  }
+  return result.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+};
+
 export function compileStorySystemPrompt({
   basePrompt,
   worldBookContent,
@@ -62,7 +85,7 @@ export function compileStorySystemPrompt({
   let prompt = basePrompt.trim();
 
   if (worldBookContent && worldBookContent.trim()) {
-    prompt += `\n\n## 故事主世界背景设定\n请严格遵守以下世界背景设定展开叙事，不要脱离该设定范围：\n${worldBookContent.trim()}`;
+    prompt += `\n\n## 故事主世界背景设定\n请严格遵守以下世界背景设定展开叙事，不要脱离该设定范围：\n${filterBlankMarkdownFields(worldBookContent.trim())}`;
   }
 
   if (dynamicRoleLoadingEnabled) {
@@ -71,13 +94,13 @@ export function compileStorySystemPrompt({
       prompt += `\n\n## 本局可动态调用角色\n以下角色可以通过 role_play 工具按角色名动态生成角色本人回复。需要某个角色以自身人格说话时，必须调用 role_play 工具并传入角色名：\n${roleNames}`;
       prompt += `\n\n## 故事参与活跃角色设定（背景NPC设定）\n以下是本次冒险中参与互动的活跃NPC角色设定。即使开启动态加载，你也必须理解这些角色的存在、关系和行动边界；当需要角色本人说话时，再调用 role_play：`;
       characterCards.forEach((card, index) => {
-        prompt += `\n\n【NPC角色 ${index + 1}：${card.name}】\n${card.content.trim()}`;
+        prompt += `\n\n【NPC角色 ${index + 1}：${card.name}】\n${filterBlankMarkdownFields(card.content.trim())}`;
       });
     }
   } else if (characterCards.length > 0) {
     prompt += `\n\n## 故事参与活跃角色设定（背景NPC设定）\n以下是本次冒险中参与互动的活跃NPC角色设定，你扮演这些角色时，语气、言行举止与动作必须与人设高度一致：`;
     characterCards.forEach((card, index) => {
-      prompt += `\n\n【NPC角色 ${index + 1}：${card.name}】\n${card.content.trim()}`;
+      prompt += `\n\n【NPC角色 ${index + 1}：${card.name}】\n${filterBlankMarkdownFields(card.content.trim())}`;
     });
   }
 

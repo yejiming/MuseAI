@@ -1,5 +1,6 @@
 mod crawler;
 mod fs_commands;
+mod mobile_server;
 
 #[macro_use]
 mod agent;
@@ -173,6 +174,13 @@ pub fn run() {
                 let _ = app;
             }
             let _ = migrate_agent_sessions(&app.handle());
+            let app_handle = app.handle().clone();
+            // Register the concrete Wry AppHandle before starting the mobile server,
+            // so HTTP route handlers can call Tauri commands without unsafe transmute.
+            mobile_server::register_wry_handle(app_handle.clone());
+            tauri::async_runtime::spawn(async move {
+                let _ = mobile_server::start_server(app_handle).await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -231,6 +239,7 @@ pub fn run() {
             test_llm_connection,
             load_app_state,
             save_app_state,
+            mobile_server::get_mobile_service_status,
         ])
         .manage(ActiveStreams(Mutex::new(HashMap::new())))
         .build(tauri::generate_context!())
