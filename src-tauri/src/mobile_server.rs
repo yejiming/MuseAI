@@ -986,6 +986,7 @@ async fn analyze_session_memory<R: Runtime>(
         current_user_interaction_model: interaction_model,
         current_user_relation_bottom_line: relation_bottom_line,
         current_events: key_events,
+        system_prompt: None,
     };
 
     let result_str = crate::agent::sessions::analyze_character_memory(request)

@@ -506,7 +506,7 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.outlineCreation?.temperature ?? 0.7,
+          temperature: settings.agentConfigs?.outlineCreation?.temperature ?? 0.3,
           maxOutputTokens: 64,
           text: originalInput,
         },
@@ -559,9 +559,9 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.outlineCreation?.temperature ?? 0.7,
-          maxOutputTokens: settings.agentConfigs?.outlineCreation?.maxOutputTokens ?? 4096,
-          maxContextTokens: settings.agentConfigs?.outlineCreation?.maxContextTokens ?? 128000,
+          temperature: settings.agentConfigs?.outlineCreation?.temperature ?? 0.3,
+          maxOutputTokens: settings.agentConfigs?.outlineCreation?.maxOutputTokens ?? 32000,
+          maxContextTokens: settings.agentConfigs?.outlineCreation?.maxContextTokens ?? 200000,
           thinkingDepth: settings.agentConfigs?.outlineCreation?.thinkingDepth ?? 'off',
           systemPrompt: systemPrompt,
           workspacePath: outlineDir,
@@ -653,7 +653,7 @@ const OutlineCreationAgentChat: React.FC<AgentChatProps> = ({ onClose, title = '
     draft: input,
   });
   const contextUsed = contextStats.total;
-  const maxContext = settings.agentConfigs?.outlineCreation?.maxContextTokens ?? 128000;
+  const maxContext = settings.agentConfigs?.outlineCreation?.maxContextTokens ?? 200000;
   const contextPercent = maxContext > 0
     ? Math.min(100, Math.round((contextUsed / maxContext) * 100))
     : 0;

@@ -47,6 +47,8 @@ export interface SettingsState {
   backgroundCharacterCardPrompt: string;
   storyAgentPrompt: string;
   storyDynamicAgentPrompt: string;
+  chatArchivePrompt: string;
+  storyArchivePrompt: string;
 
   worksDirectory: string | null;
   agentConfigs: Record<string, AgentConfig>;
@@ -84,6 +86,10 @@ export interface SettingsState {
   resetStoryAgentPrompt: () => void;
   setStoryDynamicAgentPrompt: (prompt: string) => void;
   resetStoryDynamicAgentPrompt: () => void;
+  setChatArchivePrompt: (prompt: string) => void;
+  resetChatArchivePrompt: () => void;
+  setStoryArchivePrompt: (prompt: string) => void;
+  resetStoryArchivePrompt: () => void;
 
   setWorksDirectory: (dir: string | null) => void;
   setArticleType: (type: string[]) => void;
@@ -585,6 +591,10 @@ export const defaultStoryDynamicAgentPrompt = `你将在此扮演文字冒险中
 7. **适应输入模式**：用户输入可能是说话、行为或剧情推进。你要理解其语义，顺着它推进故事。
 8. **保持沉浸**：严禁提及“我是AI模型”“正在调用工具”“系统提示词”“这是一场游戏”等出戏表达。`;
 
+export const defaultChatArchivePrompt = `你是一个专门负责伴侣角色记忆管理的AI。你需要基于本次对话记录，以及原有的与用户关系设定（包括关系类型、相处模式、关系底线）和关键事件，来分析两者的改变，并输出本次会话的建议标题。请务必严格按照JSON格式返回。`;
+
+export const defaultStoryArchivePrompt = `你是一个专门负责伴侣角色记忆管理的AI。你需要基于本次冒险记录，以及原有的与用户关系设定（包括关系类型、相处模式、关系底线）和关键事件，来分析两者的改变，并输出本次会话的建议标题。请务必严格按照JSON格式返回。`;
+
 export const defaultAgentConfigs: Record<string, AgentConfig> = {
   writer: { temperature: 0.7, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'low' },
   workSummary: { temperature: 0.7, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'low' },
@@ -594,14 +604,16 @@ export const defaultAgentConfigs: Record<string, AgentConfig> = {
   outlineAssessment: { temperature: 0.7, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'low' },
   partnerChat: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' },
   reverseOutline: { concurrency: 5 },
-  reverseOutlineShort: { temperature: 0.3, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' },
-  reverseOutlineLongSummary: { temperature: 0.3, maxOutputTokens: 8192, maxContextTokens: 200000, thinkingDepth: 'off' },
-  reverseOutlineLongFinal: { temperature: 0.3, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' },
+  reverseOutlineShort: { temperature: 0, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' },
+  reverseOutlineLongSummary: { temperature: 0, maxOutputTokens: 8192, maxContextTokens: 200000, thinkingDepth: 'off' },
+  reverseOutlineLongFinal: { temperature: 0, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' },
   backgroundExtraction: { concurrency: 5 },
   backgroundWorldBook: { temperature: 0, maxOutputTokens: 8192, maxContextTokens: 128000, thinkingDepth: 'off' },
   backgroundCharacterCard: { temperature: 0, maxOutputTokens: 8192, maxContextTokens: 128000, thinkingDepth: 'off' },
   storyAgent: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' },
   storyDynamicAgent: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' },
+  chatArchive: { temperature: 0.3, maxOutputTokens: 32000, maxContextTokens: 128000, thinkingDepth: 'off' },
+  storyArchive: { temperature: 0.3, maxOutputTokens: 32000, maxContextTokens: 128000, thinkingDepth: 'off' },
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -641,6 +653,8 @@ export const useSettingsStore = create<SettingsState>()(
       backgroundCharacterCardPrompt: defaultBackgroundCharacterCardPrompt,
       storyAgentPrompt: defaultStoryAgentPrompt,
       storyDynamicAgentPrompt: defaultStoryDynamicAgentPrompt,
+      chatArchivePrompt: defaultChatArchivePrompt,
+      storyArchivePrompt: defaultStoryArchivePrompt,
 
 
       worksDirectory: null,
@@ -719,6 +733,13 @@ export const useSettingsStore = create<SettingsState>()(
 
       resetStoryDynamicAgentPrompt: () => set({ storyDynamicAgentPrompt: defaultStoryDynamicAgentPrompt }),
 
+      setChatArchivePrompt: (prompt) => set({ chatArchivePrompt: prompt }),
+
+      resetChatArchivePrompt: () => set({ chatArchivePrompt: defaultChatArchivePrompt }),
+
+      setStoryArchivePrompt: (prompt) => set({ storyArchivePrompt: prompt }),
+
+      resetStoryArchivePrompt: () => set({ storyArchivePrompt: defaultStoryArchivePrompt }),
 
 
       setWorksDirectory: (dir) => set({ worksDirectory: dir }),
@@ -802,7 +823,7 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'museai-settings-storage',
       storage: createJSONStorage(() => createDiskStorage('settings-store', 'museai-settings-storage')),
-      version: 13,
+      version: 15,
       partialize: (state) => {
         const { worksDirectory: _, ...rest } = state;
         return rest as SettingsState;
@@ -818,31 +839,48 @@ export const useSettingsStore = create<SettingsState>()(
           outlineAssessment: { temperature: 0.7, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'low' as const },
           partnerChat: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' as const },
           reverseOutline: { concurrency: 5 },
-          reverseOutlineShort: { temperature: 0.3, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' as const },
-          reverseOutlineLongSummary: { temperature: 0.3, maxOutputTokens: 8192, maxContextTokens: 200000, thinkingDepth: 'off' as const },
-          reverseOutlineLongFinal: { temperature: 0.3, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' as const },
+          reverseOutlineShort: { temperature: 0, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' as const },
+          reverseOutlineLongSummary: { temperature: 0, maxOutputTokens: 8192, maxContextTokens: 200000, thinkingDepth: 'off' as const },
+          reverseOutlineLongFinal: { temperature: 0, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' as const },
           backgroundExtraction: { concurrency: 5 },
           backgroundWorldBook: { temperature: 0, maxOutputTokens: 8192, maxContextTokens: 128000, thinkingDepth: 'off' as const },
           backgroundCharacterCard: { temperature: 0, maxOutputTokens: 8192, maxContextTokens: 128000, thinkingDepth: 'off' as const },
           storyAgent: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' as const },
           storyDynamicAgent: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' as const },
+          chatArchive: { temperature: 0.3, maxOutputTokens: 32000, maxContextTokens: 128000, thinkingDepth: 'off' as const },
+          storyArchive: { temperature: 0.3, maxOutputTokens: 32000, maxContextTokens: 128000, thinkingDepth: 'off' as const },
         };
         const migratedAgentConfigs = { ...defaultConfigs };
-        const oldGlobalTemp = typeof state.temperature === 'number' ? state.temperature : 0.7;
-        const oldGlobalMaxOutput = typeof state.maxOutputTokens === 'number' ? state.maxOutputTokens : 4096;
-        const oldGlobalMaxContext = typeof state.maxContextTokens === 'number' ? state.maxContextTokens : 128000;
-        const oldGlobalDepth = state.thinkingDepth || 'off';
 
         Object.keys(defaultConfigs).forEach((key) => {
           const k = key as keyof typeof defaultConfigs;
           migratedAgentConfigs[k] = {
-            temperature: oldGlobalTemp,
-            maxOutputTokens: oldGlobalMaxOutput,
-            maxContextTokens: oldGlobalMaxContext,
-            thinkingDepth: oldGlobalDepth as any,
+            ...defaultConfigs[k],
             ...state.agentConfigs?.[k]
           };
         });
+
+        if (version < 15) {
+          const legacyFallback = { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' };
+          Object.keys(defaultConfigs).forEach((key) => {
+            const k = key as keyof typeof defaultConfigs;
+            const def = defaultConfigs[k] as any;
+            const current = state.agentConfigs?.[k] || {};
+            const isFallback =
+              current.temperature === legacyFallback.temperature &&
+              current.maxOutputTokens === legacyFallback.maxOutputTokens &&
+              current.maxContextTokens === legacyFallback.maxContextTokens &&
+              current.thinkingDepth === legacyFallback.thinkingDepth;
+            const defIsFallback =
+              def.temperature === legacyFallback.temperature &&
+              def.maxOutputTokens === legacyFallback.maxOutputTokens &&
+              def.maxContextTokens === legacyFallback.maxContextTokens &&
+              def.thinkingDepth === legacyFallback.thinkingDepth;
+            if (isFallback && !defIsFallback) {
+              migratedAgentConfigs[k] = { ...def };
+            }
+          });
+        }
 
         const base = {
           ...state,
@@ -894,6 +932,12 @@ export const useSettingsStore = create<SettingsState>()(
           storyDynamicAgentPrompt: !state.storyDynamicAgentPrompt
             ? defaultStoryDynamicAgentPrompt
             : state.storyDynamicAgentPrompt,
+          chatArchivePrompt: !state.chatArchivePrompt
+            ? defaultChatArchivePrompt
+            : state.chatArchivePrompt,
+          storyArchivePrompt: !state.storyArchivePrompt
+            ? defaultStoryArchivePrompt
+            : state.storyArchivePrompt,
         };
 
         let finalState = base;

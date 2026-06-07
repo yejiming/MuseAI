@@ -402,7 +402,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.writer?.temperature ?? 0.7,
+          temperature: settings.agentConfigs?.writer?.temperature ?? 0.3,
           maxOutputTokens: 64,
           text: trimmed,
         },
@@ -447,9 +447,9 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.writer?.temperature ?? 0.7,
-          maxOutputTokens: settings.agentConfigs?.writer?.maxOutputTokens ?? 4096,
-          maxContextTokens: settings.agentConfigs?.writer?.maxContextTokens ?? 128000,
+          temperature: settings.agentConfigs?.writer?.temperature ?? 0.3,
+          maxOutputTokens: settings.agentConfigs?.writer?.maxOutputTokens ?? 32000,
+          maxContextTokens: settings.agentConfigs?.writer?.maxContextTokens ?? 200000,
           thinkingDepth: settings.agentConfigs?.writer?.thinkingDepth ?? 'off',
           systemPrompt: effectiveSystemPrompt,
           workspacePath: settings.worksDirectory,
@@ -589,7 +589,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     draft: input,
   });
   const contextUsed = contextStats.total;
-  const maxContext = settings.agentConfigs?.writer?.maxContextTokens ?? 128000;
+  const maxContext = settings.agentConfigs?.writer?.maxContextTokens ?? 200000;
   const contextPercent = maxContext > 0
     ? Math.min(100, Math.round((contextUsed / maxContext) * 100))
     : 0;

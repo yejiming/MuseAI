@@ -34,6 +34,8 @@ import {
   defaultBackgroundCharacterCardPrompt,
   defaultStoryAgentPrompt,
   defaultStoryDynamicAgentPrompt,
+  defaultChatArchivePrompt,
+  defaultStoryArchivePrompt,
 } from '../stores/useSettingsStore';
 
 const { Title, Text } = Typography;
@@ -98,9 +100,9 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
 
   React.useEffect(() => {
     form.setFieldsValue({
-      temperature: agentConfig.temperature ?? defaultConfig.temperature ?? 0.7,
-      maxOutputTokens: agentConfig.maxOutputTokens ?? defaultConfig.maxOutputTokens ?? 4096,
-      maxContextTokens: agentConfig.maxContextTokens ?? defaultConfig.maxContextTokens ?? 128000,
+      temperature: agentConfig.temperature ?? defaultConfig.temperature ?? 0.3,
+      maxOutputTokens: agentConfig.maxOutputTokens ?? defaultConfig.maxOutputTokens ?? 32000,
+      maxContextTokens: agentConfig.maxContextTokens ?? defaultConfig.maxContextTokens ?? 200000,
       thinkingDepth: agentConfig.thinkingDepth ?? defaultConfig.thinkingDepth ?? 'off',
       prompt: currentPrompt,
     });
@@ -121,9 +123,9 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
 
   const handleReset = () => {
     form.setFieldsValue({
-      temperature: defaultConfig.temperature ?? 0.7,
-      maxOutputTokens: defaultConfig.maxOutputTokens ?? 4096,
-      maxContextTokens: defaultConfig.maxContextTokens ?? 128000,
+      temperature: defaultConfig.temperature ?? 0.3,
+      maxOutputTokens: defaultConfig.maxOutputTokens ?? 32000,
+      maxContextTokens: defaultConfig.maxContextTokens ?? 200000,
       thinkingDepth: defaultConfig.thinkingDepth ?? 'off',
       prompt: defaultPrompt,
     });
@@ -1040,24 +1042,25 @@ const Settings: React.FC = () => {
               <Title level={4} style={{ color: '#33312e', margin: 0, fontWeight: 600, fontFamily: '"Inter", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>羁绊页设置</Title>
             </div>
 
-            <Card
-              style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #eae6df',
-                borderRadius: '12px',
-                boxShadow: '0 4px 20px rgba(217, 119, 87, 0.02)',
-                marginBottom: '24px',
-              }}
-              styles={{
-                body: {
-                  padding: '24px',
-                  textAlign: 'center',
-                  color: '#8c8882'
-                }
-              }}
-            >
-              羁绊页设置暂时留空
-            </Card>
+            <AgentSettingCard
+              title="聊天页-封存记忆 Agent"
+              agentId="chatArchive"
+              defaultPrompt={defaultChatArchivePrompt}
+              currentPrompt={store.chatArchivePrompt}
+              onSavePrompt={store.setChatArchivePrompt}
+              onResetPrompt={store.resetChatArchivePrompt}
+              helpText="此提示词用于聊天页点击「封存记忆」时，AI 分析整场对话并提炼关系设定变化、关键事件与建议会话标题。"
+            />
+
+            <AgentSettingCard
+              title="冒险页-封存记忆 Agent"
+              agentId="storyArchive"
+              defaultPrompt={defaultStoryArchivePrompt}
+              currentPrompt={store.storyArchivePrompt}
+              onSavePrompt={store.setStoryArchivePrompt}
+              onResetPrompt={store.resetStoryArchivePrompt}
+              helpText="此提示词用于冒险页点击「封存记忆」时，AI 分析整场冒险并提炼关系设定变化、关键事件与建议会话标题。"
+            />
           </section>
 
         </div>

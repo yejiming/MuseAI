@@ -711,7 +711,9 @@ fn build_analyze_memory_user_prompt(request: &AnalyzeMemoryRequest) -> String {
 #[tauri::command]
 pub async fn analyze_character_memory(request: AnalyzeMemoryRequest) -> Result<String, String> {
     let client = reqwest::Client::new();
-    let system_prompt = "你是一个专门负责伴侣角色记忆管理的AI。你需要基于本次对话记录，以及原有的与用户关系设定（包括关系类型、相处模式、关系底线）和关键事件，来分析两者的改变，并输出本次会话的建议标题。请务必严格按照JSON格式返回。";
+    let system_prompt = request.system_prompt.as_deref().unwrap_or(
+        "你是一个专门负责伴侣角色记忆管理的AI。你需要基于本次对话记录，以及原有的与用户关系设定（包括关系类型、相处模式、关系底线）和关键事件，来分析两者的改变，并输出本次会话的建议标题。请务必严格按照JSON格式返回。"
+    );
     let user_prompt = build_analyze_memory_user_prompt(&request);
 
     let max_tokens = request.max_output_tokens.unwrap_or(4096);
@@ -2454,23 +2456,32 @@ async fn call_reverse_outline_llm_stream(
 
             let mut stream = response.bytes_stream();
             let mut buffer = String::new();
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|e| format_reverse_outline_send_error("Anthropic", &endpoint, &e))?;
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
-                process_sse_buffer(&mut buffer, |data| {
-                    if let Some(crate::models::AnthropicStreamEvent::Text(delta)) =
-                        parse_anthropic_stream_event(data)
-                    {
-                        full_content.push_str(&delta);
-                        let _ = app.emit(
-                            "reverse-outline-stream",
-                            ReverseOutlineStreamEvent {
-                                run_id: run_id.to_string(),
-                                delta,
-                            },
-                        );
+            while let Some(chunk_result) = stream.next().await {
+                match chunk_result {
+                    Ok(chunk) => {
+                        buffer.push_str(&String::from_utf8_lossy(&chunk));
+                        process_sse_buffer(&mut buffer, |data| {
+                            if let Some(crate::models::AnthropicStreamEvent::Text(delta)) =
+                                parse_anthropic_stream_event(data)
+                            {
+                                full_content.push_str(&delta);
+                                let _ = app.emit(
+                                    "reverse-outline-stream",
+                                    ReverseOutlineStreamEvent {
+                                        run_id: run_id.to_string(),
+                                        delta,
+                                    },
+                                );
+                            }
+                        });
                     }
-                });
+                    Err(e) => {
+                        if !full_content.is_empty() {
+                            break;
+                        }
+                        return Err(format_reverse_outline_send_error("Anthropic", &endpoint, &e));
+                    }
+                }
             }
         }
         _ => {
@@ -2504,26 +2515,35 @@ async fn call_reverse_outline_llm_stream(
 
             let mut stream = response.bytes_stream();
             let mut buffer = String::new();
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|e| format_reverse_outline_send_error("OpenAI 兼容", &endpoint, &e))?;
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
-                process_sse_buffer(&mut buffer, |data| {
-                    if data == "[DONE]" {
-                        return;
+            while let Some(chunk_result) = stream.next().await {
+                match chunk_result {
+                    Ok(chunk) => {
+                        buffer.push_str(&String::from_utf8_lossy(&chunk));
+                        process_sse_buffer(&mut buffer, |data| {
+                            if data == "[DONE]" {
+                                return;
+                            }
+                            if let Some(event) = parse_openai_stream_event(data) {
+                                if let Some(delta) = event.content {
+                                    full_content.push_str(&delta);
+                                    let _ = app.emit(
+                                        "reverse-outline-stream",
+                                        ReverseOutlineStreamEvent {
+                                            run_id: run_id.to_string(),
+                                            delta,
+                                        },
+                                    );
+                                }
+                            }
+                        });
                     }
-                    if let Some(event) = parse_openai_stream_event(data) {
-                        if let Some(delta) = event.content {
-                            full_content.push_str(&delta);
-                            let _ = app.emit(
-                                "reverse-outline-stream",
-                                ReverseOutlineStreamEvent {
-                                    run_id: run_id.to_string(),
-                                    delta,
-                                },
-                            );
+                    Err(e) => {
+                        if !full_content.is_empty() {
+                            break;
                         }
+                        return Err(format_reverse_outline_send_error("OpenAI 兼容", &endpoint, &e));
                     }
-                });
+                }
             }
         }
     }
@@ -3530,6 +3550,7 @@ plain text
             current_user_interaction_model: "互相信任".to_string(),
             current_user_relation_bottom_line: "保持坦诚".to_string(),
             current_events: "暂无".to_string(),
+            system_prompt: None,
         };
 
         let prompt = build_analyze_memory_user_prompt(&request);

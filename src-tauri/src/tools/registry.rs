@@ -44,7 +44,21 @@ pub fn agent_tool_definitions() -> Vec<AgentToolDefinition> {
         },
         AgentToolDefinition {
             name: "bash",
-            description: r#"执行 shell 命令。返回 stdout、stderr 和退出码。
+            description: if cfg!(target_os = "windows") {
+                r#"执行 cmd.exe 命令。返回 stdout、stderr 和退出码。
+使用它来运行测试、安装包、git 操作等。
+工作目录在命令之间保持不变，但 shell 状态不会保持。
+重要：避免使用此工具运行命令，除非明确指示或在确认专用工具无法完成任务后。请优先使用专用工具，以提供更好的用户体验。
+文件搜索：使用 glob 工具（不要用 dir 或 find）
+内容搜索：使用 grep 工具（不要用 findstr 或 find）
+读取文件：使用 read 工具（不要用 type/more）
+编辑文件：使用 edit 工具（不要用 echo 拼接文件）
+写入文件：使用 write 工具（不要用 echo > 重定向）
+如果命令将创建新目录或文件，先运行 `dir` 验证父目录存在且位置正确。
+对于包含空格的文件路径，始终使用双引号（例如 cd "path with spaces\file.txt"）
+尽量使用绝对路径避免使用 `cd` 来保持当前工作目录。只有在用户明确要求时才使用 `cd`。"#
+            } else {
+                r#"执行 shell 命令。返回 stdout、stderr 和退出码。
 使用它来运行测试、安装包、git 操作等。
 工作目录在命令之间保持不变，但 shell 状态不会保持。shell 环境从用户的 profile（bash 或 zsh）初始化。
 重要：避免使用此工具运行命令，除非明确指示或在确认专用工具无法完成任务后。请优先使用专用工具，以提供更好的用户体验。
@@ -55,11 +69,12 @@ pub fn agent_tool_definitions() -> Vec<AgentToolDefinition> {
 写入文件：使用 write 工具（不要用 echo >/cat <<EOF）
 如果命令将创建新目录或文件，先运行 `ls` 验证父目录存在且位置正确。
 对于包含空格的文件路径，始终使用双引号（例如 cd "path with spaces/file.txt"）
-尽量使用绝对路径避免使用 `cd` 来保持当前工作目录。只有在用户明确要求时才使用 `cd`。"#,
+尽量使用绝对路径避免使用 `cd` 来保持当前工作目录。只有在用户明确要求时才使用 `cd`。"#
+            },
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "要执行的 shell 命令。" },
+                    "command": { "type": "string", "description": if cfg!(target_os = "windows") { "要执行的命令（cmd.exe）。" } else { "要执行的 shell 命令。" } },
                     "cwd": { "type": "string", "description": "命令执行目录，可选。" },
                     "timeout_secs": { "type": "integer", "description": "超时时间秒数，可选。" }
                 },

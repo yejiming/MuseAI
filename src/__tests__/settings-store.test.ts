@@ -55,19 +55,19 @@ describe('Settings store default exports', () => {
 
     expect(agentConfigs.reverseOutline.concurrency).toBe(5);
     expect(agentConfigs.reverseOutlineShort).toEqual({
-      temperature: 0.3,
+      temperature: 0,
       maxOutputTokens: 32000,
       maxContextTokens: 200000,
       thinkingDepth: 'off',
     });
     expect(agentConfigs.reverseOutlineLongSummary).toEqual({
-      temperature: 0.3,
+      temperature: 0,
       maxOutputTokens: 8192,
       maxContextTokens: 200000,
       thinkingDepth: 'off',
     });
     expect(agentConfigs.reverseOutlineLongFinal).toEqual({
-      temperature: 0.3,
+      temperature: 0,
       maxOutputTokens: 32000,
       maxContextTokens: 200000,
       thinkingDepth: 'off',

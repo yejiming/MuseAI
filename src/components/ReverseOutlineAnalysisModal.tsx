@@ -745,7 +745,7 @@ const ReverseOutlineAnalysisModal: React.FC<ReverseOutlineAnalysisModalProps> = 
     }
     return (
       <Space>
-        <Button onClick={closeModal}>取消</Button>
+        <Button onClick={closeModal} disabled={stage === 'running'}>取消</Button>
         <Button
           type="primary"
           loading={stage === 'running'}
@@ -766,6 +766,9 @@ const ReverseOutlineAnalysisModal: React.FC<ReverseOutlineAnalysisModalProps> = 
       width={820}
       destroyOnHidden
       footer={renderFooter()}
+      maskClosable={stage !== 'running'}
+      keyboard={stage !== 'running'}
+      closable={stage !== 'running'}
     >
       {stage === 'idle' && renderSelection()}
       {stage === 'running' && renderRunning()}

@@ -302,9 +302,9 @@ const Story: React.FC = () => {
   });
   const storyAgentConfigId = dynamicRoleLoadingEnabled ? 'storyDynamicAgent' : 'storyAgent';
   const storyAgentConfig = settings.agentConfigs?.[storyAgentConfigId] || {
-    temperature: 0.7,
-    maxOutputTokens: 4096,
-    maxContextTokens: 128000,
+    temperature: 0.3,
+    maxOutputTokens: 32000,
+    maxContextTokens: 200000,
     thinkingDepth: 'off',
   };
 
@@ -348,7 +348,7 @@ const Story: React.FC = () => {
         baseUrl: settings.llmBaseUrl,
         apiKey: settings.llmApiKey,
         model: settings.llmModel,
-        temperature: storyAgentConfig.temperature ?? 0.7,
+        temperature: storyAgentConfig.temperature ?? 0.3,
         maxOutputTokens: 64,
         text: formattedPlot,
       },
@@ -369,9 +369,9 @@ const Story: React.FC = () => {
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: storyAgentConfig.temperature ?? 0.7,
-          maxOutputTokens: storyAgentConfig.maxOutputTokens ?? 4096,
-          maxContextTokens: storyAgentConfig.maxContextTokens ?? 128000,
+          temperature: storyAgentConfig.temperature ?? 0.3,
+          maxOutputTokens: storyAgentConfig.maxOutputTokens ?? 32000,
+          maxContextTokens: storyAgentConfig.maxContextTokens ?? 200000,
           thinkingDepth: storyAgentConfig.thinkingDepth ?? 'off',
           systemPrompt: effectiveSystemPrompt,
           workspacePath: null,
@@ -441,9 +441,9 @@ const Story: React.FC = () => {
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: storyAgentConfig.temperature ?? 0.7,
-          maxOutputTokens: storyAgentConfig.maxOutputTokens ?? 4096,
-          maxContextTokens: storyAgentConfig.maxContextTokens ?? 128000,
+          temperature: storyAgentConfig.temperature ?? 0.3,
+          maxOutputTokens: storyAgentConfig.maxOutputTokens ?? 32000,
+          maxContextTokens: storyAgentConfig.maxContextTokens ?? 200000,
           thinkingDepth: storyAgentConfig.thinkingDepth ?? 'off',
           systemPrompt: effectiveSystemPrompt,
           workspacePath: null,
@@ -535,9 +535,9 @@ const Story: React.FC = () => {
             baseUrl: settings.llmBaseUrl,
             apiKey: settings.llmApiKey,
             model: settings.llmModel,
-            temperature: storyAgentConfig.temperature ?? 0.7,
-            maxOutputTokens: storyAgentConfig.maxOutputTokens ?? 4096,
-            maxContextTokens: storyAgentConfig.maxContextTokens ?? 128000,
+            temperature: storyAgentConfig.temperature ?? 0.3,
+            maxOutputTokens: storyAgentConfig.maxOutputTokens ?? 32000,
+            maxContextTokens: storyAgentConfig.maxContextTokens ?? 200000,
             thinkingDepth: storyAgentConfig.thinkingDepth ?? 'off',
             systemPrompt: effectiveSystemPrompt,
             workspacePath: null,
@@ -595,9 +595,9 @@ const Story: React.FC = () => {
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: storyAgentConfig.temperature ?? 0.7,
-          maxOutputTokens: storyAgentConfig.maxOutputTokens ?? 4096,
-          maxContextTokens: storyAgentConfig.maxContextTokens ?? 128000,
+          temperature: storyAgentConfig.temperature ?? 0.3,
+          maxOutputTokens: storyAgentConfig.maxOutputTokens ?? 32000,
+          maxContextTokens: storyAgentConfig.maxContextTokens ?? 200000,
           thinkingDepth: storyAgentConfig.thinkingDepth ?? 'off',
           systemPrompt: effectiveSystemPrompt,
           workspacePath: null,
@@ -731,6 +731,7 @@ const Story: React.FC = () => {
       .join('\n\n');
 
     try {
+      const archiveConfig = settings.agentConfigs?.storyArchive || {};
       const filteredCards = selectedCards.filter(cc => tempSelectedCardIds.includes(cc.id));
       const promises = filteredCards.map(async (card) => {
         const resultStr = await invoke<string | Record<string, any>>('analyze_character_memory', {
@@ -739,9 +740,10 @@ const Story: React.FC = () => {
             baseUrl: settings.llmBaseUrl,
             apiKey: settings.llmApiKey,
             model: settings.llmModel,
-            temperature: 0.7,
-            maxOutputTokens: 4096,
-            thinkingDepth: 'off',
+            temperature: archiveConfig.temperature ?? 0.3,
+            maxOutputTokens: archiveConfig.maxOutputTokens ?? 32000,
+            thinkingDepth: archiveConfig.thinkingDepth ?? 'off',
+            systemPrompt: settings.storyArchivePrompt || undefined,
             chatHistory: chatHistoryText,
             targetCharacterName: card.name,
             targetCharacterContent: card.content,
@@ -832,7 +834,7 @@ const Story: React.FC = () => {
 
   // Context Stats
   const contextStats = estimateContextUsage(effectiveSystemPrompt, messages, input);
-  const maxContext = storyAgentConfig.maxContextTokens ?? 128000;
+  const maxContext = storyAgentConfig.maxContextTokens ?? 200000;
   const contextPercent = maxContext > 0
     ? Math.min(100, Math.round((contextStats.total / maxContext) * 100))
     : 0;

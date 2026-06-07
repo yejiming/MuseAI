@@ -54,4 +54,5 @@ openspec/
 AGENTS.md
 DESIGN.md
 prompts.md
-PRODUCT.md.workbuddy/memory/
+PRODUCT.md
+.workbuddy/memory/

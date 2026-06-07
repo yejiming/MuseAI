@@ -364,7 +364,7 @@ const Chat: React.FC = () => {
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.partnerChat?.temperature ?? 0.7,
+          temperature: settings.agentConfigs?.partnerChat?.temperature ?? 0.3,
           maxOutputTokens: 64,
           text: trimmed,
         },
@@ -393,9 +393,9 @@ const Chat: React.FC = () => {
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.partnerChat?.temperature ?? 0.7,
-          maxOutputTokens: settings.agentConfigs?.partnerChat?.maxOutputTokens ?? 4096,
-          maxContextTokens: settings.agentConfigs?.partnerChat?.maxContextTokens ?? 128000,
+          temperature: settings.agentConfigs?.partnerChat?.temperature ?? 0.3,
+          maxOutputTokens: settings.agentConfigs?.partnerChat?.maxOutputTokens ?? 32000,
+          maxContextTokens: settings.agentConfigs?.partnerChat?.maxContextTokens ?? 200000,
           thinkingDepth: settings.agentConfigs?.partnerChat?.thinkingDepth ?? 'off',
           systemPrompt: effectiveSystemPrompt,
           workspacePath: null,
@@ -490,9 +490,9 @@ const Chat: React.FC = () => {
             baseUrl: settings.llmBaseUrl,
             apiKey: settings.llmApiKey,
             model: settings.llmModel,
-            temperature: settings.agentConfigs?.partnerChat?.temperature ?? 0.7,
-            maxOutputTokens: settings.agentConfigs?.partnerChat?.maxOutputTokens ?? 4096,
-            maxContextTokens: settings.agentConfigs?.partnerChat?.maxContextTokens ?? 128000,
+            temperature: settings.agentConfigs?.partnerChat?.temperature ?? 0.3,
+            maxOutputTokens: settings.agentConfigs?.partnerChat?.maxOutputTokens ?? 32000,
+            maxContextTokens: settings.agentConfigs?.partnerChat?.maxContextTokens ?? 200000,
             thinkingDepth: settings.agentConfigs?.partnerChat?.thinkingDepth ?? 'off',
             systemPrompt: effectiveSystemPrompt,
             workspacePath: null,
@@ -553,9 +553,9 @@ const Chat: React.FC = () => {
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.partnerChat?.temperature ?? 0.7,
-          maxOutputTokens: settings.agentConfigs?.partnerChat?.maxOutputTokens ?? 4096,
-          maxContextTokens: settings.agentConfigs?.partnerChat?.maxContextTokens ?? 128000,
+          temperature: settings.agentConfigs?.partnerChat?.temperature ?? 0.3,
+          maxOutputTokens: settings.agentConfigs?.partnerChat?.maxOutputTokens ?? 32000,
+          maxContextTokens: settings.agentConfigs?.partnerChat?.maxContextTokens ?? 200000,
           thinkingDepth: settings.agentConfigs?.partnerChat?.thinkingDepth ?? 'off',
           systemPrompt: effectiveSystemPrompt,
           workspacePath: null,
@@ -669,15 +669,17 @@ const Chat: React.FC = () => {
       .join('\n\n');
 
     try {
+      const archiveConfig = settings.agentConfigs?.chatArchive || {};
       const resultStr = await invoke<string | Record<string, any>>('analyze_character_memory', {
         request: {
           modelInterface: settings.modelInterface,
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: 0.7,
-          maxOutputTokens: 4096,
-          thinkingDepth: 'off',
+          temperature: archiveConfig.temperature ?? 0.3,
+          maxOutputTokens: archiveConfig.maxOutputTokens ?? 32000,
+          thinkingDepth: archiveConfig.thinkingDepth ?? 'off',
+          systemPrompt: settings.chatArchivePrompt || undefined,
           chatHistory: chatHistoryText,
           targetCharacterName: selectedCharacterCard.name,
           targetCharacterContent: selectedCharacterCard.content,
@@ -739,7 +741,7 @@ const Chat: React.FC = () => {
 
   // Context ring stats
   const contextStats = estimateContextUsage(effectiveSystemPrompt, messages, input);
-  const maxContext = settings.agentConfigs?.partnerChat?.maxContextTokens ?? 128000;
+  const maxContext = settings.agentConfigs?.partnerChat?.maxContextTokens ?? 200000;
   const contextPercent = maxContext > 0
     ? Math.min(100, Math.round((contextStats.total / maxContext) * 100))
     : 0;

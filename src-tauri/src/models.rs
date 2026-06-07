@@ -198,6 +198,7 @@ pub struct AnalyzeMemoryRequest {
     pub current_user_interaction_model: String,
     pub current_user_relation_bottom_line: String,
     pub current_events: String,
+    pub system_prompt: Option<String>,
 }
 
 #[derive(Clone, Deserialize)]

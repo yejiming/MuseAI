@@ -1393,17 +1393,20 @@ fn operating_system_info() -> String {
         }
     }
 
-    let release = Command::new("uname")
-        .arg("-r")
-        .output()
-        .ok()
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    match release {
-        Some(release) => format!("{} {}", std::env::consts::OS, release),
-        None => std::env::consts::OS.to_string(),
+    #[cfg(not(target_os = "windows"))]
+    {
+        let release = Command::new("uname")
+            .arg("-r")
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if let Some(release) = release {
+            return format!("{} {}", std::env::consts::OS, release);
+        }
     }
+    std::env::consts::OS.to_string()
 }
 pub fn build_workspace_context(request: &ChatStreamRequest) -> String {
     let mut lines = Vec::new();

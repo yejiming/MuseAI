@@ -452,7 +452,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.[agentId]?.temperature ?? 0.7,
+          temperature: settings.agentConfigs?.[agentId]?.temperature ?? 0.3,
           maxOutputTokens: 64,
           text: textToSend,
         },
@@ -474,9 +474,9 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
           model: settings.llmModel,
-          temperature: settings.agentConfigs?.[agentId]?.temperature ?? 0.7,
-          maxOutputTokens: settings.agentConfigs?.[agentId]?.maxOutputTokens ?? 4096,
-          maxContextTokens: settings.agentConfigs?.[agentId]?.maxContextTokens ?? 128000,
+          temperature: settings.agentConfigs?.[agentId]?.temperature ?? 0.3,
+          maxOutputTokens: settings.agentConfigs?.[agentId]?.maxOutputTokens ?? 32000,
+          maxContextTokens: settings.agentConfigs?.[agentId]?.maxContextTokens ?? 200000,
           thinkingDepth: settings.agentConfigs?.[agentId]?.thinkingDepth ?? 'off',
           systemPrompt: systemPrompt,
           workspacePath: settings.worksDirectory,
@@ -555,7 +555,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
     draft: input,
   });
   const contextUsed = contextStats.total;
-  const maxContext = settings.agentConfigs?.[agentId]?.maxContextTokens ?? 128000;
+  const maxContext = settings.agentConfigs?.[agentId]?.maxContextTokens ?? 200000;
   const contextPercent = maxContext > 0
     ? Math.min(100, Math.round((contextUsed / maxContext) * 100))
     : 0;

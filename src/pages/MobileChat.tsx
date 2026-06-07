@@ -261,9 +261,9 @@ const MobileChat: React.FC = () => {
           baseUrl: '', // Stripped, server-merged
           apiKey: '',  // Stripped, server-merged
           model: '',   // Stripped, server-merged
-          temperature: settings.agentConfigs?.partnerChat?.temperature ?? 0.7,
-          maxOutputTokens: settings.agentConfigs?.partnerChat?.maxOutputTokens ?? 4096,
-          maxContextTokens: settings.agentConfigs?.partnerChat?.maxContextTokens ?? 128000,
+          temperature: settings.agentConfigs?.partnerChat?.temperature ?? 0.3,
+          maxOutputTokens: settings.agentConfigs?.partnerChat?.maxOutputTokens ?? 32000,
+          maxContextTokens: settings.agentConfigs?.partnerChat?.maxContextTokens ?? 200000,
           thinkingDepth: settings.agentConfigs?.partnerChat?.thinkingDepth ?? 'off',
           systemPrompt,
           messages: modelMessages,
