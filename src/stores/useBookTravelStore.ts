@@ -27,20 +27,9 @@ export interface BookTravelUserCharacter {
   goal: string;
 }
 
-export interface BookTravelChoice {
-  id: string;
-  label: string;
-  effect: {
-    type: 'advance-beat' | 'change-scene';
-    targetBeatId?: string;
-    sceneSeed?: string;
-  };
-}
-
 export interface BookTravelBeat {
   id: string;
   content: string;
-  choices: BookTravelChoice[];
 }
 
 export interface BookTravelScene {
@@ -60,7 +49,6 @@ export interface BookTravelTurnSnapshot {
   classification: 'meta' | 'insert-beat' | 'change-scene';
   plannerOutput?: unknown;
   narrativeOutput: string;
-  choices?: BookTravelChoice[];
   stateSnapshot: unknown;
   createdSceneId?: string;
   createdBeatIds: string[];
@@ -141,6 +129,8 @@ interface BookTravelState extends BookTravelSnapshot {
   setCurrentBeatId: (beatId: string | null) => void;
   advanceBeat: (sceneId: string, beatId: string) => void;
   appendTurn: (turn: BookTravelTurnSnapshot) => void;
+  removeLastTurn: () => void;
+  removeLastBeatFromCurrentScene: () => void;
   updateSummaryMemory: (summaryMemory: string) => void;
   finishSession: (ending: BookTravelEnding) => void;
   saveAssembledMaterial: (material: BookTravelAssembledMaterialInput) => string;
@@ -236,6 +226,17 @@ export const useBookTravelStore = create<BookTravelState>()(
       setCurrentBeatId: (currentBeatId) => set({ currentBeatId }),
       advanceBeat: (currentSceneId, currentBeatId) => set({ currentSceneId, currentBeatId }),
       appendTurn: (turn) => set((state) => ({ turns: [...state.turns, turn] })),
+      removeLastTurn: () => set((state) => ({ turns: state.turns.slice(0, -1) })),
+      removeLastBeatFromCurrentScene: () => set((state) => {
+        const sceneIndex = state.scenes.findIndex((s) => s.id === state.currentSceneId);
+        if (sceneIndex === -1) return {};
+        const newScenes = [...state.scenes];
+        const scene = newScenes[sceneIndex];
+        const newBeats = scene.beats.slice(0, -1);
+        newScenes[sceneIndex] = { ...scene, beats: newBeats };
+        const newBeatId = newBeats.length > 0 ? newBeats[newBeats.length - 1].id : null;
+        return { scenes: newScenes, currentBeatId: newBeatId };
+      }),
       updateSummaryMemory: (summaryMemory) => set({ summaryMemory }),
       finishSession: (ending) => set({ ending, isCompleted: true }),
       saveAssembledMaterial: (input) => {

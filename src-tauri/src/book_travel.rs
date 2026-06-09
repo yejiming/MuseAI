@@ -110,34 +110,9 @@ pub struct BookTravelScenePlan {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct BookTravelChoice {
-    pub id: String,
-    pub label: String,
-    pub effect: BookTravelChoiceEffect,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase", tag = "type")]
-pub enum BookTravelChoiceEffect {
-    #[serde(rename = "advance-beat")]
-    AdvanceBeat {
-        #[serde(rename = "targetBeatId")]
-        target_beat_id: String,
-    },
-    #[serde(rename = "change-scene")]
-    ChangeScene {
-        #[serde(rename = "sceneSeed")]
-        scene_seed: Option<String>,
-    },
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct BookTravelBeat {
     pub id: String,
-    pub speaker: Option<String>,
     pub content: String,
-    pub choices: Vec<BookTravelChoice>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -150,7 +125,7 @@ pub struct BookTravelScene {
     pub time: Option<String>,
     pub location: Option<String>,
     pub active_characters: Vec<String>,
-    pub beats: Vec<BookTravelBeat>,
+    pub beat: BookTravelBeat,
     pub stable_memory_patch: Option<serde_json::Value>,
     pub volatile_memory_patch: Option<serde_json::Value>,
 }
@@ -292,11 +267,11 @@ pub fn build_scene_writer_call(
     let mut writer_request = request_for_role(request.clone(), BookTravelRole::SceneWriter);
     let writer_task = match flow {
         "insert-beat" => format!(
-            "写作流程：insert-beat。本轮只生成当前场景内的本地节拍，不得创建新场景。\n用户输入：{}",
+            "写作流程：insert-beat。本轮只生成当前场景内的 1 个新节拍，不得创建新场景，不得修改场景其他字段（title、time、location 等）。输出格式中 beat 字段为单个对象。\n用户输入：{}",
             user_input.trim()
         ),
         "change-scene" => format!(
-            "写作流程：change-scene。本轮生成一个新场景，包含入口节拍、节拍图、选择和局势提示。\n用户输入：{}",
+            "写作流程：change-scene。本轮生成一个新场景，包含完整的场景信息（id、title、summary、currentSituation、time、location、activeCharacters），beat 字段为单个入口节拍对象。不要预写后续步骤。\n用户输入：{}",
             user_input.trim()
         ),
         _ => return Err("未知的穿书写作流程".to_string()),
@@ -940,7 +915,6 @@ pub fn start_write_book_travel_change_scene_stream(
     app: AppHandle,
     request: BookTravelStructuredRequest,
     user_input: String,
-    allowed_speakers: Vec<String>,
     _state: tauri::State<'_, ActiveStreams>,
 ) -> Result<BookTravelStreamStarted, String> {
     let run_id = Uuid::new_v4().to_string();
@@ -1005,7 +979,6 @@ pub fn start_write_book_travel_insert_beat_stream(
     app: AppHandle,
     request: BookTravelStructuredRequest,
     user_input: String,
-    allowed_speakers: Vec<String>,
     _state: tauri::State<'_, ActiveStreams>,
 ) -> Result<BookTravelStreamStarted, String> {
     let run_id = Uuid::new_v4().to_string();
@@ -1109,17 +1082,15 @@ pub async fn judge_book_travel_ending(
 pub fn parse_and_repair_writer_scene(
     raw: &str,
     previous_valid_state: Value,
-    allowed_speakers: &[String],
 ) -> Result<BookTravelScene, String> {
     let scene = parse_book_travel_json::<BookTravelScene>(raw, previous_valid_state)?;
-    repair_scene_graph(scene, allowed_speakers)
+    repair_scene_graph(scene)
 }
 
 async fn run_scene_writer(
     request: BookTravelStructuredRequest,
     flow: &str,
     user_input: &str,
-    allowed_speakers: &[String],
 ) -> Result<BookTravelScene, String> {
     if request.api_key.trim().is_empty() {
         return Err("请先配置穿书模型 API Key".to_string());
@@ -1128,98 +1099,26 @@ async fn run_scene_writer(
     let writer_request = request_for_role(request, BookTravelRole::SceneWriter);
     let client = reqwest::Client::new();
     let raw = call_structured_llm(&client, &writer_request, &call).await?;
-    parse_and_repair_writer_scene(&raw, writer_request.previous_valid_state, allowed_speakers)
+    parse_and_repair_writer_scene(&raw, writer_request.previous_valid_state)
 }
 
 #[tauri::command]
 pub async fn write_book_travel_insert_beat(
     request: BookTravelStructuredRequest,
     user_input: String,
-    allowed_speakers: Vec<String>,
 ) -> Result<BookTravelScene, String> {
-    run_scene_writer(request, "insert-beat", &user_input, &allowed_speakers).await
+    run_scene_writer(request, "insert-beat", &user_input).await
 }
 
 #[tauri::command]
 pub async fn write_book_travel_change_scene(
     request: BookTravelStructuredRequest,
     user_input: String,
-    allowed_speakers: Vec<String>,
 ) -> Result<BookTravelScene, String> {
-    run_scene_writer(request, "change-scene", &user_input, &allowed_speakers).await
+    run_scene_writer(request, "change-scene", &user_input).await
 }
 
-pub fn repair_scene_graph(
-    mut scene: BookTravelScene,
-    allowed_speakers: &[String],
-) -> Result<BookTravelScene, String> {
-    let allowed: HashSet<&str> = allowed_speakers.iter().map(String::as_str).collect();
-    let mut seen_beat_ids = HashSet::new();
-
-    for (index, beat) in scene.beats.iter_mut().enumerate() {
-        let original_id = beat.id.clone();
-        if !seen_beat_ids.insert(original_id.clone()) {
-            let mut suffix = index + 1;
-            loop {
-                let candidate = format!("{}-{}", original_id, suffix);
-                if seen_beat_ids.insert(candidate.clone()) {
-                    beat.id = candidate;
-                    break;
-                }
-                suffix += 1;
-            }
-        }
-
-        if beat
-            .speaker
-            .as_deref()
-            .map(|speaker| !allowed.contains(speaker))
-            .unwrap_or(false)
-        {
-            beat.speaker = None;
-        }
-
-        let mut seen_choice_ids = HashSet::new();
-        for (choice_index, choice) in beat.choices.iter_mut().enumerate() {
-            let original_choice_id = choice.id.clone();
-            if !seen_choice_ids.insert(original_choice_id.clone()) {
-                let mut suffix = choice_index + 1;
-                loop {
-                    let candidate = format!("{}-{}", original_choice_id, suffix);
-                    if seen_choice_ids.insert(candidate.clone()) {
-                        choice.id = candidate;
-                        break;
-                    }
-                    suffix += 1;
-                }
-            }
-        }
-    }
-
-    let valid_beat_ids: HashSet<String> = scene.beats.iter().map(|beat| beat.id.clone()).collect();
-    for beat in scene.beats.iter_mut() {
-        for choice in beat.choices.iter_mut() {
-            let invalid_advance = match &choice.effect {
-                BookTravelChoiceEffect::AdvanceBeat { target_beat_id } => {
-                    target_beat_id == &beat.id || !valid_beat_ids.contains(target_beat_id)
-                }
-                BookTravelChoiceEffect::ChangeScene { .. } => false,
-            };
-
-            if invalid_advance {
-                choice.effect = BookTravelChoiceEffect::ChangeScene { scene_seed: None };
-            }
-        }
-
-        if beat.choices.is_empty() {
-            beat.choices.push(BookTravelChoice {
-                id: format!("{}-fallback-exit", beat.id),
-                label: "继续".to_string(),
-                effect: BookTravelChoiceEffect::ChangeScene { scene_seed: None },
-            });
-        }
-    }
-
+pub fn repair_scene_graph(mut scene: BookTravelScene) -> Result<BookTravelScene, String> {
     scene.stable_memory_patch = None;
     Ok(scene)
 }
@@ -1278,7 +1177,7 @@ mod tests {
     }
 
     #[test]
-    fn repairs_scene_graph_and_discards_stable_memory_patch() {
+    fn repairs_scene_graph_discards_stable_memory_patch() {
         let scene = BookTravelScene {
             id: "scene-1".to_string(),
             title: "破碎场景".to_string(),
@@ -1287,74 +1186,22 @@ mod tests {
             time: None,
             location: None,
             active_characters: vec![],
-            beats: vec![
-                BookTravelBeat {
-                    id: "beat-1".to_string(),
-                    speaker: Some("沈霜".to_string()),
-                    content: "第一段".to_string(),
-                    choices: vec![BookTravelChoice {
-                        id: "choice-1".to_string(),
-                        label: "继续".to_string(),
-                        effect: BookTravelChoiceEffect::AdvanceBeat {
-                            target_beat_id: "missing".to_string(),
-                        },
-                    }],
-                },
-                BookTravelBeat {
-                    id: "beat-1".to_string(),
-                    speaker: Some("陌生人".to_string()),
-                    content: "重复 ID".to_string(),
-                    choices: vec![],
-                },
-            ],
+            beat: BookTravelBeat {
+                id: "beat-1".to_string(),
+                content: "第一段".to_string(),
+            },
             stable_memory_patch: Some(serde_json::json!({"worldRules": ["被篡改"]})),
             volatile_memory_patch: Some(serde_json::json!({"clues": ["玉佩"]})),
         };
 
-        let repaired = repair_scene_graph(scene, &["沈霜".to_string(), "我".to_string()])
+        let repaired = repair_scene_graph(scene)
             .expect("repair should keep scene playable");
 
-        assert_ne!(repaired.beats[0].id, repaired.beats[1].id);
-        assert_eq!(repaired.beats[1].speaker, None);
         assert_eq!(repaired.stable_memory_patch, None);
-        assert!(matches!(
-            repaired.beats[0].choices[0].effect,
-            BookTravelChoiceEffect::ChangeScene { .. }
-        ));
         assert_eq!(
             repaired.volatile_memory_patch,
             Some(serde_json::json!({"clues": ["玉佩"]}))
         );
-    }
-
-    #[test]
-    fn adds_fallback_exit_when_scene_has_no_choices() {
-        let scene = BookTravelScene {
-            id: "scene-1".to_string(),
-            title: "无出口场景".to_string(),
-            summary: None,
-            current_situation: None,
-            time: None,
-            location: None,
-            active_characters: vec![],
-            beats: vec![BookTravelBeat {
-                id: "beat-1".to_string(),
-                speaker: Some("我".to_string()),
-                content: "无路可走".to_string(),
-                choices: vec![],
-            }],
-            stable_memory_patch: None,
-            volatile_memory_patch: None,
-        };
-
-        let repaired =
-            repair_scene_graph(scene, &["我".to_string()]).expect("repair should add exit");
-
-        assert_eq!(repaired.beats[0].choices[0].label, "继续");
-        assert!(matches!(
-            repaired.beats[0].choices[0].effect,
-            BookTravelChoiceEffect::ChangeScene { .. }
-        ));
     }
 
     #[test]
@@ -1554,20 +1401,10 @@ mod tests {
             "time":"夜",
             "location":"客栈外",
             "activeCharacters":["我","沈霜"],
-            "beats":[
-                {
-                    "id":"beat-1",
-                    "speaker":"沈霜",
-                    "content":"她压低声音。",
-                    "choices":[{"id":"choice-1","label":"追问","effect":{"type":"advance-beat","targetBeatId":"missing"}}]
-                },
-                {
-                    "id":"beat-1",
-                    "speaker":"陌生人",
-                    "content":"重复节拍。",
-                    "choices":[]
-                }
-            ],
+            "beat":{
+                "id":"beat-1",
+                "content":"她压低声音。"
+            },
             "stableMemoryPatch":{"worldRules":["被写手篡改"]},
             "volatileMemoryPatch":{"clues":["雨夜玉佩"]}
         }"#;
@@ -1575,17 +1412,10 @@ mod tests {
         let scene = parse_and_repair_writer_scene(
             raw_scene,
             serde_json::json!({}),
-            &["我".to_string(), "沈霜".to_string()],
         )
         .expect("writer scene should be repaired");
 
         assert_eq!(scene.stable_memory_patch, None);
-        assert_ne!(scene.beats[0].id, scene.beats[1].id);
-        assert_eq!(scene.beats[1].speaker, None);
-        assert!(matches!(
-            scene.beats[0].choices[0].effect,
-            BookTravelChoiceEffect::ChangeScene { .. }
-        ));
         assert_eq!(
             scene.volatile_memory_patch,
             Some(serde_json::json!({"clues": ["雨夜玉佩"]}))

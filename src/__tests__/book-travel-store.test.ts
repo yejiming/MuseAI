@@ -116,8 +116,8 @@ describe('useBookTravelStore', () => {
       summary: '主角醒来',
       currentSituation: '宾客散去',
       beats: [
-        { id: 'beat-1', content: '她睁开眼。', choices: [{ id: 'choice-1', label: '推门', effect: { type: 'advance-beat', targetBeatId: 'beat-2' } }] },
-        { id: 'beat-2', content: '门外无人。', choices: [] },
+        { id: 'beat-1', content: '她睁开眼。' },
+        { id: 'beat-2', content: '门外无人。' },
       ],
     });
     store.advanceBeat('scene-1', 'beat-2');

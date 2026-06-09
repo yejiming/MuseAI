@@ -135,8 +135,7 @@ const Story: React.FC = () => {
 
   // Book-travel stream states
   const [, setIsTransitioningScene] = useState(false);
-  const [startProgressOpen, setStartProgressOpen] = useState(false);
-  const [startProgressPhase, setStartProgressPhase] = useState<'planner' | 'writer' | 'done' | 'error' | 'cancelled'>('planner');
+  const [startProgressPhase, setStartProgressPhase] = useState<'planner' | 'writer' | 'done' | 'error' | 'cancelled'>('done');
   const [plannerOutput, setPlannerOutput] = useState('');
   const [writerOutput, setWriterOutput] = useState('');
   const [startProgressError, setStartProgressError] = useState('');
@@ -476,16 +475,15 @@ const Story: React.FC = () => {
   const mergeNewBeatIntoCurrentScene = (updatedScene: any) => {
     const currentScene = bookTravelStore.scenes.find((s) => s.id === bookTravelStore.currentSceneId);
     if (!currentScene) return;
-    const currentBeatIds = new Set(currentScene.beats.map((b) => b.id));
-    const newBeats = (updatedScene.beats || []).filter((b: any) => !currentBeatIds.has(b.id));
-    if (newBeats.length > 0) {
-      const newBeat = newBeats[newBeats.length - 1];
+    const newBeat = updatedScene.beat;
+    if (newBeat && newBeat.content) {
+      const existingIds = new Set(currentScene.beats.map((b) => b.id));
+      const beatId = existingIds.has(newBeat.id) ? `beat-${Date.now()}` : (newBeat.id || `beat-${Date.now()}`);
       bookTravelStore.addBeatToCurrentScene({
-        id: newBeat.id || `beat-${Date.now()}`,
+        id: beatId,
         content: newBeat.content || '',
-        choices: [],
       });
-      bookTravelStore.setCurrentBeatId(newBeat.id || `beat-${Date.now()}`);
+      bookTravelStore.setCurrentBeatId(beatId);
     }
     const patch = updatedScene.volatileMemoryPatch || updatedScene.volatile_memory_patch;
     if (patch && typeof patch === 'object') {
@@ -533,12 +531,85 @@ const Story: React.FC = () => {
       });
       return;
     }
+    if (['回顾剧情', '剧情回顾', '之前发生了什么'].some((t) => lower.includes(t))) {
+      const summary = bookTravelStore.summaryMemory;
+      const turns = bookTravelStore.turns;
+      Modal.info({
+        title: '剧情回顾',
+        width: 600,
+        content: (
+          <div style={{ lineHeight: 1.8, color: '#33312e', maxHeight: 480, overflowY: 'auto' }}>
+            {summary ? (
+              <div style={{ marginBottom: 16, padding: 12, background: '#faf9f5', borderRadius: 8 }}>
+                <strong>剧情摘要：</strong>
+                <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{String(summary)}</div>
+              </div>
+            ) : null}
+            {turns.length > 0 ? (
+              <div>
+                <strong>近期回合：</strong>
+                {turns.slice(-5).map((turn, idx) => (
+                  <div key={turn.id} style={{ marginTop: 8, padding: 8, background: '#faf9f5', borderRadius: 6 }}>
+                    <div style={{ fontSize: 12, color: '#8c8882', marginBottom: 4 }}>回合 {turns.length - 5 + idx + 1}</div>
+                    <div><strong>你：</strong>{turn.userInput}</div>
+                    <div style={{ marginTop: 4 }}><strong>剧情：</strong>{turn.narrativeOutput}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ color: '#8c8882' }}>暂无剧情记录</div>
+            )}
+          </div>
+        ),
+      });
+      return;
+    }
+    if (['结束游戏', '结束穿书', '退出穿书', 'game over'].some((t) => lower.includes(t))) {
+      Modal.confirm({
+        title: '结束穿书',
+        content: '确定要结束当前穿书冒险并触发结局判定吗？',
+        onOk: async () => {
+          try {
+            const { selectedOutline, selectedWorldBook, selectedCharacterCards, stableMemory, volatileMemory, assembledWorldModel, scenes, turns } = bookTravelStore;
+            if (!selectedOutline || !selectedWorldBook) {
+              message.error('素材缺失');
+              return;
+            }
+            const materials = {
+              outline: { id: selectedOutline.id, title: selectedOutline.title, content: selectedOutline.content },
+              worldBook: { id: selectedWorldBook.id, title: selectedWorldBook.title, content: selectedWorldBook.content },
+              characterCards: selectedCharacterCards.map((cc: any) => ({ id: cc.id, title: cc.title, content: cc.content })),
+            };
+            const judgeConfig = settings.agentConfigs?.bookTravelEndingJudge || {};
+            const judgeState = { stableMemory, volatileMemory, assembledWorldModel, currentState: bookTravelStore.currentState, summaryMemory: bookTravelStore.summaryMemory || '', recentScenes: scenes.slice(-3), recentTurns: turns.slice(-5) };
+            const judgeRequest = buildBookTravelRequest('ending-judge', settings.bookTravelEndingJudgePrompt, judgeConfig, materials, judgeState);
+            const endingJsonStr = await invoke<string>('judge_book_travel_ending', { request: judgeRequest });
+            let ending = cleanAndParseJSON(endingJsonStr);
+            bookTravelStore.finishSession(ending);
+            message.success('已达成穿书结局！');
+          } catch (err: any) {
+            message.error(`结局判定失败：${String(err)}`);
+          }
+        },
+      });
+      return;
+    }
+    if (['重试', '重来', '撤销', '回退', 'undo'].some((t) => lower.includes(t))) {
+      const turns = bookTravelStore.turns;
+      if (turns.length === 0) {
+        message.info('没有可回退的回合');
+        return;
+      }
+      bookTravelStore.removeLastTurn();
+      bookTravelStore.removeLastBeatFromCurrentScene();
+      message.success('已回退到上一回合');
+      return;
+    }
     message.info('元指令已接收');
   };
 
   const handleInsertBeatStream = async (userInput: string) => {
     setIsTransitioningScene(true);
-    setStartProgressOpen(true);
     setStartProgressPhase('writer');
     setPlannerOutput('');
     setWriterOutput('');
@@ -563,7 +634,7 @@ const Story: React.FC = () => {
       const sceneJsonStr = await runBookTravelStreamTask('start_write_book_travel_insert_beat_stream', writerRequest, { userInput, allowedSpeakers });
       let scene = cleanAndParseJSON(sceneJsonStr);
       mergeNewBeatIntoCurrentScene(scene);
-      const newBeat = scene.beats?.[scene.beats.length - 1];
+      const newBeat = scene.beat;
       bookTravelStore.appendTurn({ id: `turn-${Date.now()}`, userInput, classification: 'insert-beat' as const, narrativeOutput: newBeat?.content || '', stateSnapshot: bookTravelStore.currentState, createdBeatIds: [newBeat?.id || ''] });
       setStartProgressPhase('done');
     } catch (err: any) {
@@ -579,7 +650,6 @@ const Story: React.FC = () => {
 
   const handleChangeSceneStream = async (userInput: string) => {
     setIsTransitioningScene(true);
-    setStartProgressOpen(true);
     setStartProgressPhase('planner');
     setPlannerOutput('');
     setWriterOutput('');
@@ -612,6 +682,10 @@ const Story: React.FC = () => {
       let scene = cleanAndParseJSON(sceneJsonStr);
       const patch = scene.volatileMemoryPatch || scene.volatile_memory_patch;
       if (patch && typeof patch === 'object') bookTravelStore.updateVolatileMemory(patch);
+      const rawBeat = scene.beat;
+      const singleBeat = rawBeat
+        ? { id: rawBeat.id || `beat-${Date.now()}`, content: rawBeat.content || '' }
+        : { id: `beat-${Date.now()}`, content: '' };
       const repairedScene = {
         id: scene.id || `scene-${Date.now()}`,
         title: scene.title || `新场景-${scenes.length + 1}`,
@@ -620,10 +694,10 @@ const Story: React.FC = () => {
         time: scene.time || newCurrentState.time || '',
         location: scene.location || newCurrentState.location || '',
         activeCharacters: scene.activeCharacters || allowedCast,
-        beats: (scene.beats || []).map((beat: any, idx: number) => ({ id: beat.id || `beat-${idx + 1}`, content: beat.content || '', choices: [] })),
+        beats: [singleBeat],
       };
       bookTravelStore.addScene(repairedScene);
-      const newTurn = { id: `turn-${Date.now()}`, userInput, classification: 'change-scene' as const, plannerOutput: plan, narrativeOutput: repairedScene.beats[0]?.content || '', stateSnapshot: newCurrentState, createdSceneId: repairedScene.id, createdBeatIds: repairedScene.beats.map((b: any) => b.id) };
+      const newTurn = { id: `turn-${Date.now()}`, userInput, classification: 'change-scene' as const, plannerOutput: plan, narrativeOutput: singleBeat.content, stateSnapshot: newCurrentState, createdSceneId: repairedScene.id, createdBeatIds: [singleBeat.id] };
       bookTravelStore.appendTurn(newTurn);
       if (plan.endingStatus && plan.endingStatus !== 'none' && plan.endingStatus !== 'active') {
         const judgeConfig = settings.agentConfigs?.bookTravelEndingJudge || {};
@@ -671,7 +745,6 @@ const Story: React.FC = () => {
     }
 
     setIsTransitioningScene(true);
-    setStartProgressOpen(true);
     setStartProgressPhase('planner');
     setPlannerOutput('');
     setWriterOutput('');
@@ -721,7 +794,9 @@ const Story: React.FC = () => {
         time: scene.time || entryPoint.timeAndLocation,
         location: scene.location || entryPoint.timeAndLocation,
         activeCharacters: scene.activeCharacters || allowedCast,
-        beats: (scene.beats || []).map((beat: any, idx: number) => ({ id: beat.id || `beat-${idx + 1}`, content: beat.content || '', choices: [] })),
+        beats: scene.beat
+          ? [{ id: scene.beat.id || `beat-${Date.now()}`, content: scene.beat.content || '' }]
+          : [{ id: `beat-${Date.now()}`, content: '' }],
       };
 
       bookTravelStore.addScene(repairedScene);
@@ -1088,7 +1163,7 @@ const Story: React.FC = () => {
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="agent-chat" style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#faf9f5' }}>
+    <div className="agent-chat" style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#faf9f5' }}>
 
       {/* Archive Memory Modal */}
       <Modal
@@ -1265,105 +1340,23 @@ const Story: React.FC = () => {
         ) : null}
       </Modal>
 
-      {/* Book Travel Progress Modal */}
-      <Modal
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#33312e', fontSize: '16px', fontWeight: 600 }}>
-              <ExperimentOutlined style={{ color: '#d97757' }} />
-              <span>
-                {startProgressPhase === 'planner' && '正在规划下一场景...'}
-                {startProgressPhase === 'writer' && '正在书写场景...'}
-                {startProgressPhase === 'done' && '完成'}
-                {startProgressPhase === 'error' && '出错了'}
-                {startProgressPhase === 'cancelled' && '已中断'}
-              </span>
-            </div>
-            <span style={{ fontSize: 12, color: '#8c8882', fontFamily: 'monospace' }}>
-              {formatElapsed(startElapsedMs)}
-            </span>
-          </div>
-        }
-        open={startProgressOpen}
-        onCancel={handleCancelStart}
-        footer={
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            {startProgressPhase === 'error' || startProgressPhase === 'cancelled' || startProgressPhase === 'done' ? (
-              <Button onClick={() => setStartProgressOpen(false)}>关闭</Button>
-            ) : (
-              <Button onClick={handleCancelStart}>中断</Button>
-            )}
-          </div>
-        }
-        width={600}
-        closable={false}
-        maskClosable={false}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {(startProgressPhase === 'planner' || startProgressPhase === 'writer') && (
-            <div>
-              <div style={{ color: '#8c8882', fontSize: 13, marginBottom: 8 }}>
-                {startProgressPhase === 'planner' ? '剧情规划师正在分析你的行动...' : '场景写手正在生成新的剧情...'}
-              </div>
-              <div
-                style={{
-                  background: '#faf9f5',
-                  border: '1px solid #eae6df',
-                  borderRadius: 8,
-                  padding: 12,
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                  color: '#33312e',
-                  maxHeight: 320,
-                  overflowY: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {startProgressPhase === 'planner' ? plannerOutput : writerOutput}
-                <span style={{ display: 'inline-block', width: 2, height: 16, background: '#d97757', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />
-              </div>
-            </div>
-          )}
-          {startProgressPhase === 'done' && (
-            <div style={{ color: '#52c41a', fontSize: 14 }}>
-              场景生成完成！
-            </div>
-          )}
-          {startProgressPhase === 'error' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ color: '#ff4d4f', fontSize: 14 }}>
-                生成失败：{startProgressError}
-              </div>
-            </div>
-          )}
-          {startProgressPhase === 'cancelled' && (
-            <div style={{ color: '#8c8882', fontSize: 14 }}>
-              已中断生成
-            </div>
-          )}
-        </div>
-      </Modal>
-
       {/* Header */}
       <div className="agent-chat__header" style={{ borderBottom: '1px solid #eae6df', padding: '16px 24px' }}>
         <div className="agent-chat__title">
           <CompassOutlined style={{ color: '#d97757', fontSize: 18 }} />
           <h3 style={{ margin: 0, fontWeight: 600, color: '#33312e', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {sessionTitle}
-            <span style={{ fontSize: 12, color: '#8c8882', fontWeight: 400 }}>
-              {bookTravelStore.selectedMaterialId || bookTravelStore.scenes.length > 0 ? (
-                <Tag color="#d97757" style={{ marginLeft: 8, borderRadius: 4 }}>
-                  {bookTravelStore.scenes.length > 0
-                    ? `穿书中 · ${bookTravelStore.scenes.find((s) => s.id === bookTravelStore.currentSceneId)?.title || '场景'}`
-                    : '穿书准备中'}
-                </Tag>
-              ) : (
-                <>
-                  ({selectedWorldBook?.name || '无世界书'} · {selectedCards.length}个活跃角色{dynamicRoleLoadingEnabled ? ' · 动态加载' : ''})
-                </>
-              )}
-            </span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sessionTitle}</span>
+            {bookTravelStore.selectedMaterialId || bookTravelStore.scenes.length > 0 ? (
+              <Tag color="#d97757" style={{ marginLeft: 8, borderRadius: 4, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                {bookTravelStore.scenes.length > 0
+                  ? `穿书中 · ${bookTravelStore.scenes.find((s) => s.id === bookTravelStore.currentSceneId)?.title || '场景'}`
+                  : '穿书准备中'}
+              </Tag>
+            ) : (
+              <span style={{ fontSize: 12, color: '#8c8882', fontWeight: 400, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                ({selectedWorldBook?.name || '无世界书'} · {selectedCards.length}个活跃角色{dynamicRoleLoadingEnabled ? ' · 动态加载' : ''})
+              </span>
+            )}
           </h3>
         </div>
 
@@ -1434,38 +1427,96 @@ const Story: React.FC = () => {
         </div>
       </div>
 
-      {/* Main chat layout */}
-      {bookTravelStore.scenes.length > 0 ? (
-        <div ref={chatHistoryRef} className="agent-chat__history" style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
-          {bookTravelStore.turns.map((turn) => (
-            <div key={turn.id} style={{ marginBottom: 24 }}>
-              <div style={{ textAlign: 'right', marginBottom: 8 }}>
-                <div style={{ display: 'inline-block', background: '#d97757', color: '#fff', padding: '10px 14px', borderRadius: '12px 12px 2px 12px', maxWidth: '80%', fontSize: 14, lineHeight: 1.6 }}>
-                  {turn.userInput}
+      {/* Unified scrollable content area */}
+      <div ref={chatHistoryRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {bookTravelStore.scenes.length > 0 ? (
+          <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Turns history */}
+            {bookTravelStore.turns.map((turn) => (
+              <div key={turn.id} style={{ marginBottom: 24 }}>
+                <div style={{ textAlign: 'right', marginBottom: 8 }}>
+                  <div style={{ display: 'inline-block', background: '#d97757', color: '#fff', padding: '10px 14px', borderRadius: '12px 12px 2px 12px', maxWidth: '80%', fontSize: 14, lineHeight: 1.6 }}>
+                    {turn.userInput}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'left' }}>
+                  <div style={{ display: 'inline-block', background: '#fff', border: '1px solid #eae6df', padding: '12px 14px', borderRadius: '12px 12px 12px 2px', maxWidth: '80%', color: '#33312e', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                    {turn.narrativeOutput}
+                  </div>
                 </div>
               </div>
-              <div style={{ textAlign: 'left' }}>
-                <div style={{ display: 'inline-block', background: '#fff', border: '1px solid #eae6df', padding: '12px 14px', borderRadius: '12px 12px 12px 2px', maxWidth: '80%', color: '#33312e', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
-                  {turn.narrativeOutput}
+            ))}
+
+            {/* Current scene info */}
+            {!bookTravelStore.isCompleted && (() => {
+              const currentScene = bookTravelStore.scenes.find((s) => s.id === bookTravelStore.currentSceneId);
+              const currentBeat = currentScene?.beats.find((b) => b.id === bookTravelStore.currentBeatId) || currentScene?.beats[0];
+              const currentState = (bookTravelStore.currentState || {}) as Record<string, unknown>;
+              return currentScene && currentBeat ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {bookTravelStore.userCharacter && (
+                    <Tag color="#d97757" style={{ borderRadius: 4, margin: 0, width: 'fit-content' }}>
+                      扮演身份：{bookTravelStore.userCharacter.name}（{bookTravelStore.userCharacter.identity}）
+                    </Tag>
+                  )}
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: '#33312e' }}>{currentScene.title}</div>
+                    <div style={{ color: '#8c8882', fontSize: 12, marginTop: 4 }}>
+                      {[currentScene.time || String(currentState.time || ''), currentScene.location || String(currentState.location || ''), currentScene.currentSituation].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                  <div style={{ border: '1px solid #eae6df', borderRadius: 8, background: '#ffffff', padding: '12px 14px', color: '#33312e', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                    {currentBeat.content}
+                  </div>
+                </div>
+              ) : null;
+            })()}
+
+            {/* Streaming output placeholder */}
+            {(startProgressPhase === 'planner' || startProgressPhase === 'writer') && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px', background: '#f5f3ef', borderRadius: 12, border: '1px dashed #ddd8d0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8c8882', fontSize: 13 }}>
+                  <Spin size="small" />
+                  {startProgressPhase === 'planner' ? '🧠 剧情规划师正在分析你的行动...' : '✍️ 场景写手正在书写...'}
+                  <span style={{ fontSize: 12, color: '#b8b3ab', fontFamily: 'monospace', marginLeft: 'auto' }}>
+                    {formatElapsed(startElapsedMs)}
+                  </span>
+                </div>
+                <div style={{ color: '#5c5751', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {startProgressPhase === 'planner' ? plannerOutput : writerOutput}
+                  <span style={{ display: 'inline-block', width: 2, height: 14, background: '#d97757', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button size="small" onClick={handleCancelStart}>中断</Button>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        /* Book Travel Setup Wizard */
-        <div style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: '40px 24px',
-          maxWidth: '720px',
-          margin: '0 auto',
-          width: '100%',
-          overflowY: 'auto'
-        }}>
+            )}
+
+            {startProgressPhase === 'error' && (
+              <div style={{ padding: '12px 16px', background: '#fff2f0', borderRadius: 8, color: '#ff4d4f', fontSize: 14 }}>
+                生成失败：{startProgressError}
+              </div>
+            )}
+
+            {startProgressPhase === 'cancelled' && (
+              <div style={{ padding: '12px 16px', background: '#f5f5f5', borderRadius: 8, color: '#8c8882', fontSize: 14 }}>
+                已中断生成
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Book Travel Setup Wizard */
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: '40px 24px',
+            maxWidth: '720px',
+            margin: '0 auto',
+            width: '100%'
+          }}>
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
             <CompassOutlined style={{ fontSize: '56px', color: '#d97757', marginBottom: '16px', opacity: 0.9 }} />
             <h2 style={{ fontSize: '26px', fontWeight: 600, color: '#33312e', margin: '0 0 8px 0', letterSpacing: '-0.5px' }}>
@@ -1617,35 +1668,7 @@ const Story: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Book Travel Scene Info */}
-      {bookTravelStore.scenes.length > 0 && !bookTravelStore.isCompleted && (
-        <div style={{ borderTop: '1px solid #f0e7de', padding: '16px 24px', background: '#faf9f5' }}>
-          {(() => {
-            const currentScene = bookTravelStore.scenes.find((s) => s.id === bookTravelStore.currentSceneId);
-            const currentBeat = currentScene?.beats.find((b) => b.id === bookTravelStore.currentBeatId) || currentScene?.beats[0];
-            const currentState = (bookTravelStore.currentState || {}) as Record<string, unknown>;
-            return currentScene && currentBeat ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {bookTravelStore.userCharacter && (
-                  <Tag color="#d97757" style={{ borderRadius: 4, margin: 0, width: 'fit-content' }}>
-                    扮演身份：{bookTravelStore.userCharacter.name}（{bookTravelStore.userCharacter.identity}）
-                  </Tag>
-                )}
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 600, color: '#33312e' }}>{currentScene.title}</div>
-                  <div style={{ color: '#8c8882', fontSize: 12, marginTop: 4 }}>
-                    {[currentScene.time || String(currentState.time || ''), currentScene.location || String(currentState.location || ''), currentScene.currentSituation].filter(Boolean).join(' · ')}
-                  </div>
-                </div>
-                <div style={{ border: '1px solid #eae6df', borderRadius: 8, background: '#ffffff', padding: '12px 14px', color: '#33312e', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
-                  {currentBeat.content}
-                </div>
-              </div>
-            ) : null;
-          })()}
-        </div>
-      )}
+      </div>
 
       {/* Composer Input Area */}
       {(hasMessages || bookTravelStore.scenes.length > 0) && !bookTravelStore.isCompleted && (

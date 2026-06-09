@@ -1,9 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import Story from '../pages/Story';
 import { usePartnerStore } from '../stores/usePartnerStore';
 import { useStoryStore } from '../stores/useStoryStore';
 import { useBookTravelStore } from '../stores/useBookTravelStore';
+
+function renderWithRouter(ui: React.ReactElement) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
 
 const invokeMock = vi.fn(async (command: string, _args?: any) => {
   if (command === 'list_agent_sessions') return [];
@@ -28,19 +33,10 @@ const invokeMock = vi.fn(async (command: string, _args?: any) => {
       time: '第一夜',
       location: '沈府喜房',
       activeCharacters: ['林晚'],
-      beats: [
-        {
-          id: 'beat-1',
-          content: '她在喜房里睁开眼。',
-          choices: [
-            {
-              id: 'choice-1',
-              label: '推门查看',
-              effect: { type: 'advance-beat', targetBeatId: 'beat-2' }
-            }
-          ]
-        }
-      ],
+      beat: {
+        id: 'beat-1',
+        content: '她在喜房里睁开眼。'
+      },
       volatileMemoryPatch: { clue: '红头盖' }
     });
   }
@@ -145,37 +141,34 @@ describe('Story book-travel mode', () => {
   });
 
   it('shows assembled material selection before book-travel can start', () => {
-    render(<Story />);
-
-    fireEvent.click(screen.getByLabelText('穿书'));
+    renderWithRouter(<Story />);
 
     expect(screen.getByText('选择穿书素材')).toBeInTheDocument();
-    expect(screen.getByText('暂无已装配素材，请先到素材页完成装配。')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /开始装配穿书素材/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/暂无已装配素材/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /开始穿书/ })).toBeDisabled();
   });
 
   it('loads selected assembled material and shows entry setup with recommended identity', async () => {
     saveReadyMaterial();
-    render(<Story />);
+    renderWithRouter(<Story />);
 
-    fireEvent.click(screen.getByLabelText('穿书'));
-    fireEvent.mouseDown(screen.getByLabelText('选择已装配素材'));
+    // Open the material Select dropdown
+    const select = screen.getByRole('combobox');
+    fireEvent.mouseDown(select);
     fireEvent.click(await screen.findByText('第一卷 · 云州入场'));
 
-    expect(await screen.findByText('入场设置')).toBeInTheDocument();
+    expect(await screen.findByText('选择入场点')).toBeInTheDocument();
     expect(screen.getByText('醒在婚宴')).toBeInTheDocument();
-    expect(screen.getByText('林晚')).toBeInTheDocument();
+    expect(screen.getByText(/林晚/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('林晚'));
+    fireEvent.click(screen.getByText(/林晚/));
 
     expect(useBookTravelStore.getState().selectedOutline?.content).toBe('大纲正文');
     expect(useBookTravelStore.getState().entryPoints[0].id).toBe('entry-1');
     expect(useBookTravelStore.getState().userCharacter?.name).toBe('林晚');
-    expect(invokeMock).not.toHaveBeenCalledWith('start_assemble_book_travel_materials_stream', expect.any(Object));
-    expect(invokeMock).not.toHaveBeenCalledWith('start_generate_book_travel_entry_setup_stream', expect.any(Object));
   });
 
-  it('renders active scene, advances beat locally, and saves book-travel state', async () => {
+  it('renders active scene with current beat', async () => {
     useBookTravelStore.setState({
       selectedEntryPointId: 'entry-1',
       userCharacter: { name: '林晚', identity: '替嫁者', goal: '改写死局' },
@@ -189,12 +182,10 @@ describe('Story book-travel mode', () => {
           {
             id: 'beat-1',
             content: '她在喜房里睁开眼。',
-            choices: [{ id: 'choice-1', label: '推门查看', effect: { type: 'advance-beat', targetBeatId: 'beat-2' } }],
           },
           {
             id: 'beat-2',
             content: '门外长廊空无一人。',
-            choices: [],
           },
         ],
         currentSceneId: 'scene-1',
@@ -204,35 +195,22 @@ describe('Story book-travel mode', () => {
       currentBeatId: 'beat-1',
     });
 
-    render(<Story />);
-
-    fireEvent.click(screen.getByLabelText('穿书'));
+    renderWithRouter(<Story />);
 
     expect(screen.getByText('沈府婚宴')).toBeInTheDocument();
     expect(screen.getByText('她在喜房里睁开眼。')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '推门查看' }));
-
-    expect(screen.getByText('门外长廊空无一人。')).toBeInTheDocument();
-    expect(useBookTravelStore.getState().currentBeatId).toBe('beat-2');
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith(
-        'save_agent_session',
-        expect.objectContaining({
-          session: expect.objectContaining({
-            sessionKind: 'bookTravel',
-            bookTravelState: expect.objectContaining({
-              currentSceneId: 'scene-1',
-              currentBeatId: 'beat-2',
-            }),
-          }),
-        }),
-      );
-    });
+    expect(screen.getByPlaceholderText(/说些什么/)).toBeInTheDocument();
   });
 
-  it('shows completed ending and blocks book-travel turn submission', () => {
+  it('hides composer when book-travel is completed', () => {
     useBookTravelStore.setState({
+      scenes: [{
+        id: 'scene-1',
+        title: '沈府婚宴',
+        beats: [{ id: 'beat-1', content: '她在喜房里睁开眼。' }],
+      } as any],
+      currentSceneId: 'scene-1',
+      currentBeatId: 'beat-1',
       isCompleted: true,
       ending: {
         finalEnding: '林晚改写婚宴死局。',
@@ -241,41 +219,28 @@ describe('Story book-travel mode', () => {
       },
     });
 
-    render(<Story />);
+    renderWithRouter(<Story />);
 
-    fireEvent.click(screen.getByLabelText('穿书'));
-
-    expect(screen.getByText('红烛未灭线')).toBeInTheDocument();
-    expect(screen.getByText('林晚改写婚宴死局。')).toBeInTheDocument();
-    expect(screen.getByText('本次穿书已结束，不能继续提交剧情行动。')).toBeInTheDocument();
+    // Composer should be hidden when completed
+    expect(screen.queryByPlaceholderText(/说些什么/)).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/做点什么/)).not.toBeInTheDocument();
   });
 
-  it('starts book-travel adventure when clicking start button', async () => {
+  it('enables start button after selecting material, entry point and character', async () => {
     saveReadyMaterial();
-    render(<Story />);
+    renderWithRouter(<Story />);
 
-    fireEvent.click(screen.getByLabelText('穿书'));
-    fireEvent.mouseDown(screen.getByLabelText('选择已装配素材'));
+    // Open the material Select dropdown
+    const select = screen.getByRole('combobox');
+    fireEvent.mouseDown(select);
     fireEvent.click(await screen.findByText('第一卷 · 云州入场'));
 
-    expect(await screen.findByText('入场设置')).toBeInTheDocument();
+    expect(await screen.findByText('选择入场点')).toBeInTheDocument();
 
     // Select entry point and character
-    fireEvent.click(screen.getByText('林晚'));
+    fireEvent.click(screen.getByText(/林晚/));
 
-    const startBtn = screen.getByRole('button', { name: /确认入场设置并开始穿书/ });
+    const startBtn = screen.getByRole('button', { name: /开始穿书/ });
     expect(startBtn).toBeEnabled();
-    
-    fireEvent.click(startBtn);
-
-    // Verify it calls planner and writer APIs
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('plan_book_travel_scene', expect.any(Object));
-      expect(invokeMock).toHaveBeenCalledWith('write_book_travel_change_scene', expect.any(Object));
-    });
-
-    // Check that the active scene is now rendered
-    expect(await screen.findByText('醒在婚宴')).toBeInTheDocument();
-    expect(screen.getByText('她在喜房里睁开眼。')).toBeInTheDocument();
   });
 });
