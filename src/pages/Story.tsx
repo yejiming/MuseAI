@@ -140,6 +140,7 @@ const Story: React.FC = () => {
   const [writerOutput, setWriterOutput] = useState('');
   const [startProgressError, setStartProgressError] = useState('');
   const [startElapsedMs, setStartElapsedMs] = useState(0);
+  const [startProgressOpen, setStartProgressOpen] = useState(false);
   const startRunIdRef = useRef<string | null>(null);
   const startResolverRef = useRef<{ resolve: (content: string) => void; reject: (error: string) => void } | null>(null);
   const startCancelledRef = useRef(false);
@@ -149,6 +150,12 @@ const Story: React.FC = () => {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const extractPartialContent = (jsonStr: string): string | null => {
+    // Try to extract the content value from a potentially incomplete JSON string
+    const match = jsonStr.match(/"content"\s*:\s*"([^"]*)/);
+    return match ? match[1] : null;
   };
 
   const buildBookTravelRequest = (
@@ -611,7 +618,6 @@ const Story: React.FC = () => {
   const handleInsertBeatStream = async (userInput: string) => {
     setIsTransitioningScene(true);
     setStartProgressPhase('writer');
-    setPlannerOutput('');
     setWriterOutput('');
     setStartProgressError('');
     setStartElapsedMs(0);
@@ -650,9 +656,9 @@ const Story: React.FC = () => {
 
   const handleChangeSceneStream = async (userInput: string) => {
     setIsTransitioningScene(true);
+    setStartProgressOpen(true);
     setStartProgressPhase('planner');
     setPlannerOutput('');
-    setWriterOutput('');
     setStartProgressError('');
     setStartElapsedMs(0);
     startCancelledRef.current = false;
@@ -673,7 +679,9 @@ const Story: React.FC = () => {
       let plan = cleanAndParseJSON(plannerPlanStr);
       const newCurrentState = { ...(bookTravelStore.currentState || {}), ...(plan.stateChanges || plan.state_changes || {}) };
       bookTravelStore.setCurrentState(newCurrentState);
+      setStartProgressOpen(false);
       setStartProgressPhase('writer');
+      setWriterOutput('');
       const writerConfig = settings.agentConfigs?.bookTravelSceneWriter || {};
       const writerState = { stableMemory, volatileMemory, assembledWorldModel, currentState: newCurrentState, summaryMemory: bookTravelStore.summaryMemory || '', recentScenes: scenes.slice(-3), recentTurns: turns.slice(-5), writerInstructions: plan.writerInstructions || plan.writer_instructions || '' };
       const writerRequest = buildBookTravelRequest('scene-writer', settings.bookTravelSceneWriterPrompt, writerConfig, materials, writerState);
@@ -745,9 +753,9 @@ const Story: React.FC = () => {
     }
 
     setIsTransitioningScene(true);
+    setStartProgressOpen(true);
     setStartProgressPhase('planner');
     setPlannerOutput('');
-    setWriterOutput('');
     setStartProgressError('');
     setStartElapsedMs(0);
     startCancelledRef.current = false;
@@ -775,7 +783,9 @@ const Story: React.FC = () => {
       const newCurrentState = { ...(plannerState.currentState || {}), ...(plan.stateChanges || plan.state_changes || {}), time: entryPoint.timeAndLocation || plan.stateChanges?.time || plan.state_changes?.time || '', location: entryPoint.timeAndLocation || plan.stateChanges?.location || plan.state_changes?.location || '' };
       bookTravelStore.setCurrentState(newCurrentState);
 
+      setStartProgressOpen(false);
       setStartProgressPhase('writer');
+      setWriterOutput('');
       const writerConfig = settings.agentConfigs?.bookTravelSceneWriter || {};
       const writerState = { stableMemory, volatileMemory, assembledWorldModel, currentState: newCurrentState, summaryMemory: '', recentScenes: [], recentTurns: [], writerInstructions: plan.writerInstructions || plan.writer_instructions || '' };
       const writerRequest = buildBookTravelRequest('scene-writer', settings.bookTravelSceneWriterPrompt, writerConfig, materials, writerState);
@@ -800,6 +810,17 @@ const Story: React.FC = () => {
       };
 
       bookTravelStore.addScene(repairedScene);
+      const firstBeat = repairedScene.beats[0];
+      bookTravelStore.appendTurn({
+        id: `turn-${Date.now()}`,
+        userInput: plannerInput,
+        classification: 'change-scene' as const,
+        plannerOutput: plan,
+        narrativeOutput: firstBeat?.content || '',
+        stateSnapshot: newCurrentState,
+        createdSceneId: repairedScene.id,
+        createdBeatIds: [firstBeat?.id || ''],
+      });
       const autoTitle = `${selectedOutline.title}-${entryPoint.title}`;
       setSessionTitle(autoTitle);
       sessionTitleRef.current = autoTitle;
@@ -1340,6 +1361,68 @@ const Story: React.FC = () => {
         ) : null}
       </Modal>
 
+      {/* Book Travel Planner Progress Modal */}
+      <Modal
+        open={startProgressOpen}
+        onCancel={() => {
+          if (startProgressPhase === 'error' || startProgressPhase === 'cancelled') {
+            setStartProgressOpen(false);
+            setStartProgressPhase('done');
+          }
+        }}
+        closable={startProgressPhase === 'error' || startProgressPhase === 'cancelled'}
+        maskClosable={startProgressPhase === 'error' || startProgressPhase === 'cancelled'}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#33312e', fontSize: '18px', fontWeight: 600 }}>
+            <CompassOutlined style={{ color: '#d97757' }} />
+            <span>穿书任务进展</span>
+          </div>
+        }
+        width={680}
+        styles={{ body: { padding: '16px 24px' } }}
+        footer={
+          startProgressPhase === 'planner' ? (
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button size="small" onClick={handleCancelStart}>中断</Button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button onClick={() => { setStartProgressOpen(false); setStartProgressPhase('done'); }}>关闭</Button>
+            </div>
+          )
+        }
+      >
+        <div style={{ height: 400, overflowY: 'auto' }}>
+          {startProgressPhase === 'planner' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8c8882', fontSize: 13 }}>
+                <Spin size="small" />
+                🧠 剧情规划师正在分析你的行动...
+                <span style={{ fontSize: 12, color: '#b8b3ab', fontFamily: 'monospace', marginLeft: 'auto' }}>
+                  {formatElapsed(startElapsedMs)}
+                </span>
+              </div>
+              <div style={{ color: '#5c5751', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#f5f3ef', borderRadius: 8, padding: '12px 14px', border: '1px dashed #ddd8d0' }}>
+                {plannerOutput}
+                <span style={{ display: 'inline-block', width: 2, height: 14, background: '#d97757', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />
+              </div>
+            </div>
+          )}
+
+          {startProgressPhase === 'error' && (
+            <div style={{ padding: '12px 16px', background: '#fff2f0', borderRadius: 8, color: '#ff4d4f', fontSize: 14 }}>
+              生成失败：{startProgressError}
+            </div>
+          )}
+
+          {startProgressPhase === 'cancelled' && (
+            <div style={{ padding: '12px 16px', background: '#f5f5f5', borderRadius: 8, color: '#8c8882', fontSize: 14 }}>
+              已中断生成
+            </div>
+          )}
+        </div>
+      </Modal>
+
       {/* Header */}
       <div className="agent-chat__header" style={{ borderBottom: '1px solid #eae6df', padding: '16px 24px' }}>
         <div className="agent-chat__title">
@@ -1432,77 +1515,85 @@ const Story: React.FC = () => {
         {bookTravelStore.scenes.length > 0 ? (
           <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Turns history */}
-            {bookTravelStore.turns.map((turn) => (
-              <div key={turn.id} style={{ marginBottom: 24 }}>
-                <div style={{ textAlign: 'right', marginBottom: 8 }}>
-                  <div style={{ display: 'inline-block', background: '#d97757', color: '#fff', padding: '10px 14px', borderRadius: '12px 12px 2px 12px', maxWidth: '80%', fontSize: 14, lineHeight: 1.6 }}>
-                    {turn.userInput}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'left' }}>
-                  <div style={{ display: 'inline-block', background: '#fff', border: '1px solid #eae6df', padding: '12px 14px', borderRadius: '12px 12px 12px 2px', maxWidth: '80%', color: '#33312e', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
-                    {turn.narrativeOutput}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* Current scene info */}
-            {!bookTravelStore.isCompleted && (() => {
-              const currentScene = bookTravelStore.scenes.find((s) => s.id === bookTravelStore.currentSceneId);
-              const currentBeat = currentScene?.beats.find((b) => b.id === bookTravelStore.currentBeatId) || currentScene?.beats[0];
-              const currentState = (bookTravelStore.currentState || {}) as Record<string, unknown>;
-              return currentScene && currentBeat ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {bookTravelStore.userCharacter && (
-                    <Tag color="#d97757" style={{ borderRadius: 4, margin: 0, width: 'fit-content' }}>
-                      扮演身份：{bookTravelStore.userCharacter.name}（{bookTravelStore.userCharacter.identity}）
-                    </Tag>
-                  )}
-                  <div>
-                    <div style={{ fontSize: 16, fontWeight: 600, color: '#33312e' }}>{currentScene.title}</div>
-                    <div style={{ color: '#8c8882', fontSize: 12, marginTop: 4 }}>
-                      {[currentScene.time || String(currentState.time || ''), currentScene.location || String(currentState.location || ''), currentScene.currentSituation].filter(Boolean).join(' · ')}
+            {bookTravelStore.turns.map((turn) => {
+              const createdScene = turn.createdSceneId ? bookTravelStore.scenes.find((s) => s.id === turn.createdSceneId) : null;
+              return (
+                <div key={turn.id} style={{ marginBottom: 24 }}>
+                  <div style={{ textAlign: 'right', marginBottom: 8 }}>
+                    <div style={{ display: 'inline-block', background: '#d97757', color: '#fff', padding: '10px 14px', borderRadius: '12px 12px 2px 12px', maxWidth: '80%', fontSize: 14, lineHeight: 1.6 }}>
+                      {turn.userInput}
                     </div>
                   </div>
-                  <div style={{ border: '1px solid #eae6df', borderRadius: 8, background: '#ffffff', padding: '12px 14px', color: '#33312e', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
-                    {currentBeat.content}
+                  {createdScene && (
+                    <div style={{ marginBottom: 12, background: '#faf6f0', border: '1px solid #f2e8dc', borderRadius: 10, padding: '14px 16px' }}>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: '#33312e', marginBottom: 6 }}>{createdScene.title}</div>
+                      <div style={{ fontSize: 12, color: '#8c8882', marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+                        {createdScene.time && <span>时间：{createdScene.time}</span>}
+                        {createdScene.location && <span>地点：{createdScene.location}</span>}
+                      </div>
+                      {createdScene.summary && (
+                        <div style={{ fontSize: 12, color: '#8c8882', marginBottom: 8, fontStyle: 'italic' }}>
+                          {createdScene.summary}
+                        </div>
+                      )}
+                      {createdScene.currentSituation && (
+                        <div style={{ fontSize: 12, color: '#5c5751', marginBottom: 8, background: '#fff', padding: '8px 10px', borderRadius: 6 }}>
+                          <span style={{ color: '#d97757', fontWeight: 600 }}>当前局势：</span>{createdScene.currentSituation}
+                        </div>
+                      )}
+                      {createdScene.activeCharacters && createdScene.activeCharacters.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {createdScene.activeCharacters.map((name) => (
+                            <Tag key={name} color="#d97757" style={{ borderRadius: 4, margin: 0 }}>{name}</Tag>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ display: 'inline-block', background: '#fff', border: '1px solid #eae6df', padding: '12px 14px', borderRadius: '12px 12px 12px 2px', maxWidth: '80%', color: '#33312e', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                      {turn.narrativeOutput}
+                    </div>
                   </div>
                 </div>
-              ) : null;
-            })()}
+              );
+            })}
 
-            {/* Streaming output placeholder */}
-            {(startProgressPhase === 'planner' || startProgressPhase === 'writer') && (
+            {/* Streaming progress in message stream */}
+            {startProgressPhase === 'writer' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px', background: '#f5f3ef', borderRadius: 12, border: '1px dashed #ddd8d0' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8c8882', fontSize: 13 }}>
                   <Spin size="small" />
-                  {startProgressPhase === 'planner' ? '🧠 剧情规划师正在分析你的行动...' : '✍️ 场景写手正在书写...'}
+                  ✍️ 场景写手正在书写...
                   <span style={{ fontSize: 12, color: '#b8b3ab', fontFamily: 'monospace', marginLeft: 'auto' }}>
                     {formatElapsed(startElapsedMs)}
                   </span>
                 </div>
-                <div style={{ color: '#5c5751', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {startProgressPhase === 'planner' ? plannerOutput : writerOutput}
-                  <span style={{ display: 'inline-block', width: 2, height: 14, background: '#d97757', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />
-                </div>
+                {(() => {
+                  const partial = extractPartialContent(writerOutput);
+                  return partial !== null ? (
+                    <div style={{ color: '#5c5751', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fff', borderRadius: 8, padding: '12px 14px', border: '1px solid #eae6df' }}>
+                      {partial}
+                      <span style={{ display: 'inline-block', width: 2, height: 14, background: '#d97757', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />
+                    </div>
+                  ) : null;
+                })()}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <Button size="small" onClick={handleCancelStart}>中断</Button>
                 </div>
               </div>
             )}
-
             {startProgressPhase === 'error' && (
               <div style={{ padding: '12px 16px', background: '#fff2f0', borderRadius: 8, color: '#ff4d4f', fontSize: 14 }}>
                 生成失败：{startProgressError}
               </div>
             )}
-
             {startProgressPhase === 'cancelled' && (
               <div style={{ padding: '12px 16px', background: '#f5f5f5', borderRadius: 8, color: '#8c8882', fontSize: 14 }}>
                 已中断生成
               </div>
             )}
+
           </div>
         ) : (
           /* Book Travel Setup Wizard */
@@ -1517,157 +1608,193 @@ const Story: React.FC = () => {
             margin: '0 auto',
             width: '100%'
           }}>
-          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-            <CompassOutlined style={{ fontSize: '56px', color: '#d97757', marginBottom: '16px', opacity: 0.9 }} />
-            <h2 style={{ fontSize: '26px', fontWeight: 600, color: '#33312e', margin: '0 0 8px 0', letterSpacing: '-0.5px' }}>
-              穿书页
-            </h2>
-            <p style={{ color: '#8c8882', fontSize: '15px', margin: 0 }}>
-              选择穿书素材与入场点，进入小说世界展开独一无二的剧情体验
-            </p>
-          </div>
-
-          <div style={{
-            width: '100%',
-            background: '#ffffff',
-            border: '1px solid #eae6df',
-            borderRadius: '12px',
-            padding: '32px',
-            boxShadow: '0 4px 24px rgba(217, 119, 87, 0.02)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '24px'
-          }}>
-            {/* Select Assembled Material */}
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: '#33312e', marginBottom: '8px' }}>
-                选择穿书素材
-              </div>
-              {bookTravelStore.assembledMaterials.length === 0 ? (
-                <div style={{ color: '#8c8882', fontSize: '13px', textAlign: 'center', padding: '12px', border: '1px dashed #eae6df', borderRadius: '6px', background: '#faf9f5' }}>
-                  暂无已装配素材，请先前往<Button type="link" style={{ padding: 0, height: 'auto' }} onClick={() => navigate('/book-travel-materials')}>穿书素材页</Button>装配素材
-                </div>
-              ) : (
-                <Select
-                  placeholder="选择一个已装配素材"
-                  value={bookTravelStore.selectedMaterialId}
-                  onChange={(id) => bookTravelStore.loadAssembledMaterial(id)}
-                  style={{ width: '100%' }}
-                  options={bookTravelStore.assembledMaterials.map((m) => ({ value: m.id, label: m.title }))}
-                />
-              )}
+            <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+              <CompassOutlined style={{ fontSize: '56px', color: '#d97757', marginBottom: '16px', opacity: 0.9 }} />
+              <h2 style={{ fontSize: '26px', fontWeight: 600, color: '#33312e', margin: '0 0 8px 0', letterSpacing: '-0.5px' }}>
+                穿书页
+              </h2>
+              <p style={{ color: '#8c8882', fontSize: '15px', margin: 0 }}>
+                选择穿书素材与入场点，进入小说世界展开独一无二的剧情体验
+              </p>
             </div>
 
-            {/* Select Entry Point */}
-            {bookTravelStore.selectedMaterialId && bookTravelStore.entryPoints.length > 0 && (
+            <div style={{
+              width: '100%',
+              background: '#ffffff',
+              border: '1px solid #eae6df',
+              borderRadius: '12px',
+              padding: '32px',
+              boxShadow: '0 4px 24px rgba(217, 119, 87, 0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '24px'
+            }}>
+              {/* Select Assembled Material */}
               <div>
                 <div style={{ fontSize: '14px', fontWeight: 600, color: '#33312e', marginBottom: '8px' }}>
-                  选择入场点
+                  选择穿书素材
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {bookTravelStore.entryPoints.map((ep) => {
-                    const selected = bookTravelStore.selectedEntryPointId === ep.id;
-                    return (
-                      <div
-                        key={ep.id}
-                        onClick={() => bookTravelStore.setSelectedEntryPointId(ep.id)}
-                        style={{
-                          padding: '12px 14px',
-                          borderRadius: 8,
-                          border: selected ? '1px solid #d97757' : '1px solid #eae6df',
-                          background: selected ? '#fff7f2' : '#ffffff',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <div style={{ fontWeight: 600, color: selected ? '#d97757' : '#33312e', fontSize: 14 }}>{ep.title}</div>
-                        <div style={{ fontSize: 12, color: '#8c8882', marginTop: 4 }}>{ep.summary}</div>
-                        {ep.risk && <div style={{ fontSize: 12, color: '#ff4d4f', marginTop: 4 }}>风险：{ep.risk}</div>}
-                      </div>
-                    );
-                  })}
-                </div>
+                {bookTravelStore.assembledMaterials.length === 0 ? (
+                  <div style={{ color: '#8c8882', fontSize: '13px', textAlign: 'center', padding: '12px', border: '1px dashed #eae6df', borderRadius: '6px', background: '#faf9f5' }}>
+                    暂无已装配素材，请先前往<Button type="link" style={{ padding: 0, height: 'auto' }} onClick={() => navigate('/book-travel-materials')}>穿书素材页</Button>装配素材
+                  </div>
+                ) : (
+                  <Select
+                    placeholder="选择一个已装配素材"
+                    value={bookTravelStore.selectedMaterialId}
+                    onChange={(id) => bookTravelStore.loadAssembledMaterial(id)}
+                    style={{ width: '100%' }}
+                    options={bookTravelStore.assembledMaterials.map((m) => ({ value: m.id, label: m.title }))}
+                  />
+                )}
               </div>
-            )}
 
-            {/* Select User Character */}
-            {bookTravelStore.selectedEntryPointId && (
-              <div>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#33312e', marginBottom: '8px' }}>
-                  选择扮演身份
-                </div>
-                {bookTravelStore.recommendedUserCharacters.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
-                    {bookTravelStore.recommendedUserCharacters.map((uc) => {
-                      const selected = bookTravelStore.userCharacter?.name === uc.name;
+              {/* Select Entry Point */}
+              {bookTravelStore.selectedMaterialId && bookTravelStore.entryPoints.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#33312e', marginBottom: '8px' }}>
+                    选择入场点
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {bookTravelStore.entryPoints.map((ep) => {
+                      const selected = bookTravelStore.selectedEntryPointId === ep.id;
                       return (
-                        <Tag.CheckableTag
-                          key={uc.name}
-                          checked={selected}
-                          onChange={(checked) => {
-                            if (checked) bookTravelStore.setUserCharacter(uc);
-                          }}
+                        <div
+                          key={ep.id}
+                          onClick={() => bookTravelStore.setSelectedEntryPointId(ep.id)}
                           style={{
-                            padding: '6px 14px',
-                            fontSize: '13px',
+                            padding: '12px 14px',
+                            borderRadius: 8,
                             border: selected ? '1px solid #d97757' : '1px solid #eae6df',
-                            borderRadius: '6px',
-                            backgroundColor: selected ? '#fff7f2' : '#faf9f5',
-                            color: selected ? '#d97757' : '#5c5751',
-                            margin: 0,
-                            cursor: 'pointer'
+                            background: selected ? '#fff7f2' : '#ffffff',
+                            cursor: 'pointer',
                           }}
                         >
-                          <UserOutlined style={{ marginRight: 6 }} />
-                          {uc.name}（{uc.identity}）
-                        </Tag.CheckableTag>
+                          <div style={{ fontWeight: 600, color: selected ? '#d97757' : '#33312e', fontSize: 14 }}>{ep.title}</div>
+                          <div style={{ fontSize: 12, color: '#8c8882', marginTop: 4 }}>{ep.summary}</div>
+                          {ep.risk && <div style={{ fontSize: 12, color: '#ff4d4f', marginTop: 4 }}>风险：{ep.risk}</div>}
+                        </div>
                       );
                     })}
                   </div>
-                )}
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <Input
-                    placeholder="姓名"
-                    value={bookTravelStore.userCharacter?.name || ''}
-                    onChange={(e) => bookTravelStore.setUserCharacter({ name: e.target.value, identity: bookTravelStore.userCharacter?.identity || '', goal: bookTravelStore.userCharacter?.goal || '' })}
-                    style={{ flex: 1 }}
-                  />
-                  <Input
-                    placeholder="身份"
-                    value={bookTravelStore.userCharacter?.identity || ''}
-                    onChange={(e) => bookTravelStore.setUserCharacter({ name: bookTravelStore.userCharacter?.name || '', identity: e.target.value, goal: bookTravelStore.userCharacter?.goal || '' })}
-                    style={{ flex: 1 }}
+                </div>
+              )}
+
+              {/* Select User Character */}
+              {bookTravelStore.selectedEntryPointId && (
+                <div>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#33312e', marginBottom: '8px' }}>
+                    选择扮演身份
+                  </div>
+                  {bookTravelStore.recommendedUserCharacters.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+                      {bookTravelStore.recommendedUserCharacters.map((uc) => {
+                        const selected = bookTravelStore.userCharacter?.name === uc.name;
+                        return (
+                          <Tag.CheckableTag
+                            key={uc.name}
+                            checked={selected}
+                            onChange={(checked) => {
+                              if (checked) bookTravelStore.setUserCharacter(uc);
+                            }}
+                            style={{
+                              padding: '6px 14px',
+                              fontSize: '13px',
+                              border: selected ? '1px solid #d97757' : '1px solid #eae6df',
+                              borderRadius: '6px',
+                              backgroundColor: selected ? '#fff7f2' : '#faf9f5',
+                              color: selected ? '#d97757' : '#5c5751',
+                              margin: 0,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <UserOutlined style={{ marginRight: 6 }} />
+                            {uc.name}（{uc.identity}）
+                          </Tag.CheckableTag>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <Input
+                      placeholder="姓名"
+                      value={bookTravelStore.userCharacter?.name || ''}
+                      onChange={(e) => bookTravelStore.setUserCharacter({ name: e.target.value, identity: bookTravelStore.userCharacter?.identity || '', goal: bookTravelStore.userCharacter?.goal || '' })}
+                      style={{ flex: 1 }}
+                    />
+                    <Input
+                      placeholder="身份"
+                      value={bookTravelStore.userCharacter?.identity || ''}
+                      onChange={(e) => bookTravelStore.setUserCharacter({ name: bookTravelStore.userCharacter?.name || '', identity: e.target.value, goal: bookTravelStore.userCharacter?.goal || '' })}
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                  <Input.TextArea
+                    placeholder="目标（可选）"
+                    value={bookTravelStore.userCharacter?.goal || ''}
+                    onChange={(e) => bookTravelStore.setUserCharacter({ name: bookTravelStore.userCharacter?.name || '', identity: bookTravelStore.userCharacter?.identity || '', goal: e.target.value })}
+                    autoSize={{ minRows: 2, maxRows: 4 }}
+                    style={{ marginTop: 8 }}
                   />
                 </div>
-                <Input.TextArea
-                  placeholder="目标（可选）"
-                  value={bookTravelStore.userCharacter?.goal || ''}
-                  onChange={(e) => bookTravelStore.setUserCharacter({ name: bookTravelStore.userCharacter?.name || '', identity: bookTravelStore.userCharacter?.identity || '', goal: e.target.value })}
-                  autoSize={{ minRows: 2, maxRows: 4 }}
-                  style={{ marginTop: 8 }}
-                />
+              )}
+
+              {/* Start Button */}
+              <Button
+                type="primary"
+                size="large"
+                icon={<PlayCircleOutlined />}
+                onClick={startBookTravelAdventure}
+                disabled={!bookTravelStore.selectedMaterialId || !bookTravelStore.selectedEntryPointId || !bookTravelStore.userCharacter?.name?.trim()}
+                style={{
+                  backgroundColor: (bookTravelStore.selectedMaterialId && bookTravelStore.selectedEntryPointId && bookTravelStore.userCharacter?.name?.trim()) ? '#d97757' : undefined,
+                  borderColor: (bookTravelStore.selectedMaterialId && bookTravelStore.selectedEntryPointId && bookTravelStore.userCharacter?.name?.trim()) ? '#d97757' : undefined,
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  marginTop: '12px'
+                }}
+              >
+                开始穿书
+              </Button>
+            </div>
+
+            {/* Streaming progress in setup wizard */}
+            {startProgressPhase === 'writer' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px', background: '#f5f3ef', borderRadius: 12, border: '1px dashed #ddd8d0', marginTop: 16, width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8c8882', fontSize: 13 }}>
+                  <Spin size="small" />
+                  ✍️ 场景写手正在书写...
+                  <span style={{ fontSize: 12, color: '#b8b3ab', fontFamily: 'monospace', marginLeft: 'auto' }}>
+                    {formatElapsed(startElapsedMs)}
+                  </span>
+                </div>
+                {(() => {
+                  const partial = extractPartialContent(writerOutput);
+                  return partial !== null ? (
+                    <div style={{ color: '#5c5751', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fff', borderRadius: 8, padding: '12px 14px', border: '1px solid #eae6df' }}>
+                      {partial}
+                      <span style={{ display: 'inline-block', width: 2, height: 14, background: '#d97757', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />
+                    </div>
+                  ) : null;
+                })()}
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button size="small" onClick={handleCancelStart}>中断</Button>
+                </div>
+              </div>
+            )}
+            {startProgressPhase === 'error' && (
+              <div style={{ padding: '12px 16px', background: '#fff2f0', borderRadius: 8, color: '#ff4d4f', fontSize: 14, marginTop: 16, width: '100%' }}>
+                生成失败：{startProgressError}
+              </div>
+            )}
+            {startProgressPhase === 'cancelled' && (
+              <div style={{ padding: '12px 16px', background: '#f5f5f5', borderRadius: 8, color: '#8c8882', fontSize: 14, marginTop: 16, width: '100%' }}>
+                已中断生成
               </div>
             )}
 
-            {/* Start Button */}
-            <Button
-              type="primary"
-              size="large"
-              icon={<PlayCircleOutlined />}
-              onClick={startBookTravelAdventure}
-              disabled={!bookTravelStore.selectedMaterialId || !bookTravelStore.selectedEntryPointId || !bookTravelStore.userCharacter?.name?.trim()}
-              style={{
-                backgroundColor: (bookTravelStore.selectedMaterialId && bookTravelStore.selectedEntryPointId && bookTravelStore.userCharacter?.name?.trim()) ? '#d97757' : undefined,
-                borderColor: (bookTravelStore.selectedMaterialId && bookTravelStore.selectedEntryPointId && bookTravelStore.userCharacter?.name?.trim()) ? '#d97757' : undefined,
-                borderRadius: '8px',
-                fontWeight: 600,
-                marginTop: '12px'
-              }}
-            >
-              开始穿书
-            </Button>
           </div>
-        </div>
-      )}
+        )}
       </div>
 
       {/* Composer Input Area */}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import Story from '../pages/Story';
@@ -193,6 +193,15 @@ describe('Story book-travel mode', () => {
       } as any],
       currentSceneId: 'scene-1',
       currentBeatId: 'beat-1',
+      turns: [{
+        id: 'turn-1',
+        userInput: '醒来',
+        classification: 'change-scene' as const,
+        narrativeOutput: '她在喜房里睁开眼。',
+        stateSnapshot: { time: '第一夜', location: '沈府' },
+        createdSceneId: 'scene-1',
+        createdBeatIds: ['beat-1'],
+      }],
     });
 
     renderWithRouter(<Story />);
