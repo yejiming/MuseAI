@@ -112,7 +112,7 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
       thinkingDepth: agentConfig.thinkingDepth ?? defaultConfig.thinkingDepth ?? 'off',
       prompt: currentPrompt,
     });
-  }, [agentConfig, currentPrompt, defaultConfig]);
+  }, [agentConfig, currentPrompt, defaultConfig, form]);
 
   const handleSave = (values: any) => {
     if (showModelControls) {
@@ -258,7 +258,7 @@ const ReverseOutlineConcurrencyCard: React.FC = () => {
 
   React.useEffect(() => {
     form.setFieldsValue({ concurrency });
-  }, [concurrency]);
+  }, [concurrency, form]);
 
   const handleSave = (values: { concurrency: number }) => {
     store.setAgentConfig('reverseOutline', {
@@ -324,7 +324,7 @@ const BackgroundConcurrencyCard: React.FC = () => {
 
   React.useEffect(() => {
     form.setFieldsValue({ concurrency });
-  }, [concurrency]);
+  }, [concurrency, form]);
 
   const handleSave = (values: { concurrency: number }) => {
     store.setAgentConfig('backgroundExtraction', {
@@ -415,7 +415,7 @@ const Settings: React.FC = () => {
       // Clear test result on model change
       setTestResult(null);
     }
-  }, [store.selectedModelId, currentModel]);
+  }, [store.selectedModelId, currentModel, globalForm]);
 
   const handleSaveGlobalConfig = (values: any) => {
     if (!store.selectedModelId) {
@@ -1114,7 +1114,7 @@ const Settings: React.FC = () => {
           {/* 穿书页设置区域 */}
           <section id="book-travel-config" style={{ marginBottom: 48 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
-              <CompassOutlined style={{ fontSize: '20px', color: '#d97757' }} />
+              <DeploymentUnitOutlined style={{ fontSize: '20px', color: '#d97757' }} />
               <Title level={4} style={{ color: '#33312e', margin: 0, fontWeight: 600, fontFamily: '"Inter", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>穿书页设置</Title>
             </div>
 

@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Empty, Form, Input, Modal, Select, Spin, Tag, Tabs, TreeSelect, message } from 'antd';
-import { BranchesOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, StopOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Empty, Form, Input, Modal, Select, Spin, Tag, Tabs, Tree, TreeSelect, message } from 'antd';
+import { BookOutlined, BranchesOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, StopOutlined, UserOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useBookTravelStore, BookTravelEntryPoint, BookTravelUserCharacter } from '../stores/useBookTravelStore';
 import { usePartnerStore } from '../stores/usePartnerStore';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { resolveOutlineMaterial, resolvePartnerMaterials } from '../utils/bookTravelMaterials';
+import { getCharacterCardIdsForWorldBook, groupCharacterCardsByWorldBook } from '../utils/characterCardGroups';
 
 interface FileTreeNode {
   title: string;
@@ -103,6 +104,13 @@ const parseJSON = (raw: string) => {
 };
 
 const TASK_TIMEOUT_MS = 600_000; // 600 seconds
+
+const formatElapsed = (ms: number) => {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+};
 
 /* ------------------------------------------------------------------ */
 /*  Editable JSON helpers                                               */
@@ -318,6 +326,40 @@ const BookTravelMaterials: React.FC = () => {
   const [selectedOutlinePath, setSelectedOutlinePath] = useState<string>();
   const [selectedWorldBookId, setSelectedWorldBookId] = useState<string>();
   const [selectedCharacterCardIds, setSelectedCharacterCardIds] = useState<string[]>([]);
+  const characterCardGroups = groupCharacterCardsByWorldBook(worldBooks, characterCards);
+  const characterCardIdSet = new Set(characterCards.map((card) => card.id));
+  const characterCardTreeData = characterCardGroups.map((group) => ({
+    key: group.key,
+    title: (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#8c8882', fontSize: 13 }}>
+        <BookOutlined style={{ color: group.worldBookId ? '#d97757' : '#c0bbb4' }} />
+        {group.title}
+      </span>
+    ),
+    selectable: false,
+    children: group.cards.map((card) => ({
+      key: card.id,
+      title: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#33312e', fontSize: 13 }}>
+          <UserOutlined style={{ color: '#8c8882' }} />
+          {card.name}
+        </span>
+      ),
+      isLeaf: true,
+    })),
+  }));
+  const handleWorldBookChange = (worldBookId: string) => {
+    setSelectedWorldBookId(worldBookId);
+    setSelectedCharacterCardIds(getCharacterCardIdsForWorldBook(worldBookId, characterCards));
+  };
+  const handleCharacterCardCheck = (checkedKeys: React.Key[] | { checked: React.Key[] }) => {
+    const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
+    setSelectedCharacterCardIds(keys.reduce<string[]>((ids, key) => {
+      const id = String(key);
+      if (characterCardIdSet.has(id)) ids.push(id);
+      return ids;
+    }, []));
+  };
 
   // Progress modal state
   const [progressOpen, setProgressOpen] = useState(false);
@@ -403,25 +445,28 @@ const BookTravelMaterials: React.FC = () => {
       const root = await invoke<string>('get_workspace_dir', { dirType: 'outline' });
       const readDir = async (path: string): Promise<FileTreeNode[]> => {
         const list = await invoke<any[]>('list_dir', { path });
-        const nodes: FileTreeNode[] = [];
-        for (const item of list) {
+        const nodes = (await Promise.all(list.map(async (item): Promise<FileTreeNode | null> => {
           if (item.is_dir) {
-            nodes.push({
+            return {
               title: item.name,
               value: item.path,
               key: item.path,
               selectable: false,
               children: await readDir(item.path),
-            });
+            };
           } else if (item.name.toLowerCase().endsWith('.md') || item.name.toLowerCase().endsWith('.txt')) {
-            nodes.push({
+            return {
               title: item.name,
               value: item.path,
               key: item.path,
               selectable: true,
-            });
+            };
           }
-        }
+          return null;
+        }))).reduce<FileTreeNode[]>((acc, node) => {
+          if (node) acc.push(node);
+          return acc;
+        }, []);
         return nodes.sort((a, b) => {
           if (a.selectable !== b.selectable) return a.selectable ? 1 : -1;
           return a.title.localeCompare(b.title, 'zh-CN');
@@ -634,13 +679,6 @@ const BookTravelMaterials: React.FC = () => {
     message.success('已保存素材详情');
   };
 
-  const formatElapsed = (ms: number) => {
-    const totalSeconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  };
-
   /* ---------------------------------------------------------------- */
   /*  Detail editing helpers                                            */
   /* ---------------------------------------------------------------- */
@@ -749,9 +787,9 @@ const BookTravelMaterials: React.FC = () => {
               </div>
             </div>
 
-            <label style={{ display: 'grid', gap: 6, color: '#33312e', fontWeight: 600 }}>
+            <label htmlFor="book-travel-material-title" style={{ display: 'grid', gap: 6, color: '#33312e', fontWeight: 600 }}>
               素材名称
-              <Input aria-label="素材名称" value={detailTitle} onChange={(event) => setDetailTitle(event.target.value)} />
+              <Input id="book-travel-material-title" aria-label="素材名称" value={detailTitle} onChange={(event) => setDetailTitle(event.target.value)} />
             </label>
 
             <Tabs
@@ -985,28 +1023,26 @@ const BookTravelMaterials: React.FC = () => {
               aria-label="选择穿书世界书"
               value={selectedWorldBookId}
               placeholder="请选择一个世界书"
-              onChange={setSelectedWorldBookId}
+              onChange={handleWorldBookChange}
               options={worldBooks.map((item) => ({ value: item.id, label: item.name }))}
             />
           </Form.Item>
           <Form.Item label="选择登场角色卡">
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-              {characterCards.map((card) => {
-                const checked = selectedCharacterCardIds.includes(card.id);
-                return (
-                  <Tag.CheckableTag
-                    key={card.id}
-                    checked={checked}
-                    onChange={(nextChecked) => setSelectedCharacterCardIds((ids) => (
-                      nextChecked ? [...ids, card.id] : ids.filter((id) => id !== card.id)
-                    ))}
-                    style={{ border: checked ? '1px solid #d97757' : '1px solid #eae6df', borderRadius: 6, padding: '6px 12px' }}
-                  >
-                    {card.name}
-                  </Tag.CheckableTag>
-                );
-              })}
-            </div>
+            {characterCards.length > 0 ? (
+              <div style={{ border: '1px solid #eae6df', borderRadius: 6, background: '#faf9f5', padding: '8px 4px' }}>
+                <Tree
+                  checkable
+                  defaultExpandAll
+                  selectable={false}
+                  checkedKeys={selectedCharacterCardIds}
+                  onCheck={handleCharacterCardCheck}
+                  treeData={characterCardTreeData}
+                  style={{ background: 'transparent' }}
+                />
+              </div>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无角色卡" />
+            )}
           </Form.Item>
         </Form>
       </Modal>

@@ -28,4 +28,12 @@ describe('Settings book-travel page configuration', () => {
     expect(content?.textContent?.indexOf('羁绊页设置')).toBeLessThan(content?.textContent?.indexOf('素材页设置') ?? -1);
     expect(content?.textContent?.indexOf('素材页设置')).toBeLessThan(content?.textContent?.indexOf('穿书页设置') ?? -1);
   });
+
+  it('uses the book-travel icon for the book-travel settings section', () => {
+    render(<Settings />);
+
+    const section = document.getElementById('book-travel-config');
+    expect(section?.querySelector('.anticon-deployment-unit')).toBeInTheDocument();
+    expect(section?.querySelector('.anticon-compass')).not.toBeInTheDocument();
+  });
 });

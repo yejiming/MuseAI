@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, Tooltip, Empty, Card, Tabs, Tag, Row, Col, Space, Radio, Modal, Spin, message, Tree, Progress } from 'antd';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Button, Input, Tooltip, Empty, Card, Tabs, Tag, Row, Col, Space, Radio, Modal, Spin, message, Tree, Progress, Select } from 'antd';
 import { 
   GlobalOutlined, 
   UserOutlined, 
@@ -30,6 +30,7 @@ import {
   runCharacterExtractionBatch,
   splitCharacterNames,
 } from '../utils/backgroundExtraction';
+import { UNASSIGNED_CHARACTER_CARD_GROUP_ID, groupCharacterCardsByWorldBook } from '../utils/characterCardGroups';
 
 const DIRECTORY_WIDTH = 280;
 const DEFAULT_BACKGROUND_CANCELLATION_SETTLE_MS = 15_000;
@@ -52,6 +53,7 @@ const Background: React.FC = () => {
     deleteItem,
     updateItemName,
     updateItemFields,
+    updateCharacterCardWorldBook,
     addCustomField,
     updateCustomField,
     removeCustomField
@@ -73,6 +75,7 @@ const Background: React.FC = () => {
   const [extractionStep, setExtractionStep] = useState<'setup' | 'review' | 'characters'>('setup');
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentTaskIdRef = useRef<string | null>(null);
+  const generatedWorldBookIdRef = useRef<string | null>(null);
   const [manualCharacterNames, setManualCharacterNames] = useState('');
   const [reviewWorldBookName, setReviewWorldBookName] = useState('');
   const [reviewWorldBookFieldsJson, setReviewWorldBookFieldsJson] = useState('');
@@ -89,7 +92,7 @@ const Background: React.FC = () => {
   const [articlesTree, setArticlesTree] = useState<FileTreeNode[]>([]);
   const [outlineTree, setOutlineTree] = useState<FileTreeNode[]>([]);
   const [referencesTree, setReferencesTree] = useState<FileTreeNode[]>([]);
-  const [flatFiles, setFlatFiles] = useState<string[]>([]);
+  const flatFilesRef = useRef<string[]>([]);
 
   // AI memory optimization states
   const [isMemModalOpen, setIsMemModalOpen] = useState(false);
@@ -102,44 +105,48 @@ const Background: React.FC = () => {
 
   const loadWorkspaceFiles = async () => {
     try {
-      const artRoot: string = await invoke('get_workspace_dir', { dirType: 'articles' });
-      const outRoot: string = await invoke('get_workspace_dir', { dirType: 'outline' });
-      const refRoot: string = await invoke('get_workspace_dir', { dirType: 'references' });
+      const [artRoot, outRoot, refRoot] = await Promise.all([
+        invoke<string>('get_workspace_dir', { dirType: 'articles' }),
+        invoke<string>('get_workspace_dir', { dirType: 'outline' }),
+        invoke<string>('get_workspace_dir', { dirType: 'references' }),
+      ]);
 
       let filesList: string[] = [];
 
       const fetchDirTree = async (path: string): Promise<FileTreeNode[]> => {
         const list: any[] = await invoke('list_dir', { path });
-        const nodes: FileTreeNode[] = [];
-
-        for (const item of list) {
+        const nodes = (await Promise.all(list.map(async (item): Promise<FileTreeNode | null> => {
           if (
             item.name === '.versions' || 
             item.name === '.work-summary-results' || 
             item.name === '.work-summary-results.json'
           ) {
-            continue;
+            return null;
           }
           if (item.is_dir) {
             const children = await fetchDirTree(item.path);
-            nodes.push({
+            return {
               title: item.name,
               key: item.path,
               isLeaf: false,
               children
-            });
+            };
           } else {
             const lower = item.name.toLowerCase();
             if (lower.endsWith('.md') || lower.endsWith('.txt')) {
-              nodes.push({
+              filesList.push(item.path);
+              return {
                 title: item.name,
                 key: item.path,
                 isLeaf: true
-              });
-              filesList.push(item.path);
+              };
             }
           }
-        }
+          return null;
+        }))).reduce<FileTreeNode[]>((acc, node) => {
+          if (node) acc.push(node);
+          return acc;
+        }, []);
 
         nodes.sort((a, b) => {
           if (a.isLeaf !== b.isLeaf) return a.isLeaf ? 1 : -1;
@@ -149,11 +156,13 @@ const Background: React.FC = () => {
         return nodes;
       };
 
-      const artNodes = await fetchDirTree(artRoot);
-      const outNodes = await fetchDirTree(outRoot);
-      const refNodes = await fetchDirTree(refRoot);
+      const [artNodes, outNodes, refNodes] = await Promise.all([
+        fetchDirTree(artRoot),
+        fetchDirTree(outRoot),
+        fetchDirTree(refRoot),
+      ]);
 
-      setFlatFiles(filesList);
+      flatFilesRef.current = filesList;
       setArticlesTree(artNodes);
       setOutlineTree(outNodes);
       setReferencesTree(refNodes);
@@ -174,11 +183,12 @@ const Background: React.FC = () => {
       setReviewWorldBookFieldsJson('');
       setReviewCharacterNames('');
       setCharacterStatuses([]);
+      generatedWorldBookIdRef.current = null;
     }
   }, [isAiModalOpen]);
 
   const readSelectedReferenceText = async () => {
-    const selectedFileOnlyPaths = selectedFilePaths.filter(path => flatFiles.includes(path));
+    const selectedFileOnlyPaths = selectedFilePaths.filter(path => flatFilesRef.current.includes(path));
     if (selectedFileOnlyPaths.length === 0) {
       message.warning('请至少选择一个参考文件');
       return null;
@@ -189,12 +199,12 @@ const Background: React.FC = () => {
       return null;
     }
 
-    let combinedText = '';
-    for (const path of selectedFileOnlyPaths) {
+    const fileSections = await Promise.all(selectedFileOnlyPaths.map(async (path) => {
       const fileContent: string = await invoke('read_file', { path });
       const fileName = path.split(/[\\/]/).pop() || '';
-      combinedText += `\n\n### 文件: ${fileName}\n${fileContent}`;
-    }
+      return `\n\n### 文件: ${fileName}\n${fileContent}`;
+    }));
+    const combinedText = fileSections.join('');
 
     if (combinedText.length > 100_000) {
       message.warning('选中文件总字数超过10万字，内容过长可能导致提取失败。建议先在大纲页使用"AI反向分析大纲"功能，再基于精简后的大纲提取设定。');
@@ -310,19 +320,32 @@ const Background: React.FC = () => {
       });
 
       setCharacterStatuses(results);
-      const successfulCards = results
-        .filter((item): item is CharacterExtractionItem<{ name: string; fields: PartnerItemFields }> & { result: { name: string; fields: PartnerItemFields } } => item.status === 'success' && !!item.result)
-        .map((item) => item.result);
+      const successfulCards: Array<{ name: string; fields: PartnerItemFields }> = [];
+      for (const item of results) {
+        if (item.status === 'success' && item.result) {
+          successfulCards.push(item.result);
+        }
+      }
 
       // 合并新的成功结果，避免重复导入
-      const existingNames = new Set(
-        characterStatuses
-          .filter((item) => item.status === 'success' && !!item.result)
-          .map((item) => item.result!.name)
-      );
+      const existingNames = new Set<string>();
+      for (const item of characterStatuses) {
+        if (item.status === 'success' && item.result) {
+          existingNames.add(item.result.name);
+        }
+      }
       const newCards = successfulCards.filter((card) => !existingNames.has(card.name));
       if (newCards.length > 0) {
-        importGeneratedItems({ worldBooks: [], characterCards: newCards });
+        const bindingWorldBookId = extractionMode === 'world_book_and_character_cards'
+          ? generatedWorldBookIdRef.current
+          : null;
+        importGeneratedItems({
+          worldBooks: [],
+          characterCards: newCards.map((card) => ({
+            ...card,
+            worldBookId: bindingWorldBookId,
+          })),
+        });
       }
 
       const pendingCount = results.filter((item) => item.status === 'pending').length;
@@ -351,6 +374,7 @@ const Background: React.FC = () => {
     if (!combinedText) return;
 
     if (extractionMode === 'character_cards_only') {
+      generatedWorldBookIdRef.current = null;
       await runCharacterExtraction(combinedText, undefined, 'new');
       return;
     }
@@ -422,7 +446,10 @@ const Background: React.FC = () => {
   const handleConfirmReview = async () => {
     try {
       const worldBook = currentWorldBookDraft();
-      importGeneratedItems({ worldBooks: [worldBook], characterCards: [] });
+      const importResult = importGeneratedItems({ worldBooks: [worldBook], characterCards: [] });
+      generatedWorldBookIdRef.current = extractionMode === 'world_book_and_character_cards'
+        ? importResult.worldBookIds[0] || null
+        : null;
 
       if (extractionMode === 'world_book_only') {
         message.success('世界书保存成功！');
@@ -536,8 +563,11 @@ const Background: React.FC = () => {
   // Tag input states for character card
   const [tagInputVisible, setTagInputVisible] = useState(false);
   const [tagInputValue, setTagInputValue] = useState('');
+  const [expandedCharacterGroupKeys, setExpandedCharacterGroupKeys] = useState<React.Key[]>([]);
   const tagInputRef = useRef<any>(null);
   const renameInputRef = useRef<any>(null);
+  const knownCharacterGroupKeysRef = useRef<string[]>([]);
+  const hasInitializedCharacterGroupsRef = useRef(false);
 
   // Focus rename input when editing starts
   useEffect(() => {
@@ -577,6 +607,30 @@ const Background: React.FC = () => {
   const selectedItem = selectedType === 'world_book' 
     ? worldBooks.find(b => b.id === selectedId) 
     : characterCards.find(c => c.id === selectedId);
+  const characterCardGroups = useMemo(
+    () => groupCharacterCardsByWorldBook(worldBooks, characterCards),
+    [worldBooks, characterCards],
+  );
+  const characterCardGroupKeys = useMemo(
+    () => characterCardGroups.map((group) => group.key),
+    [characterCardGroups],
+  );
+
+  useEffect(() => {
+    const previousGroupKeys = knownCharacterGroupKeysRef.current;
+    knownCharacterGroupKeysRef.current = characterCardGroupKeys;
+
+    setExpandedCharacterGroupKeys((previousKeys) => {
+      if (!hasInitializedCharacterGroupsRef.current) {
+        hasInitializedCharacterGroupsRef.current = true;
+        return characterCardGroupKeys;
+      }
+
+      const validKeys = previousKeys.filter((key) => characterCardGroupKeys.includes(String(key)));
+      const newKeys = characterCardGroupKeys.filter((key) => !previousGroupKeys.includes(key));
+      return [...validKeys, ...newKeys];
+    });
+  }, [characterCardGroupKeys]);
 
   // Sync editName when item name changes or new item is selected
   const handleFieldChange = (key: keyof PartnerItemFields, value: any) => {
@@ -669,7 +723,16 @@ const Background: React.FC = () => {
     return (
       <div
         key={item.id}
+        role="treeitem"
+        aria-selected={isSelected}
+        tabIndex={0}
         onClick={() => selectItem(item.id, item.type)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            selectItem(item.id, item.type);
+          }
+        }}
         onDoubleClick={(e) => handleStartRename(item, e)}
         style={{
           display: 'flex',
@@ -681,7 +744,7 @@ const Background: React.FC = () => {
           cursor: 'pointer',
           background: isSelected ? '#f2e8dc' : 'transparent',
           color: isSelected ? '#d97757' : '#33312e',
-          transition: 'all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1)',
+          transition: 'background-color 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), color 0.2s cubic-bezier(0.25, 0.8, 0.25, 1)',
           position: 'relative',
         }}
         className="directory-item-hover"
@@ -750,6 +813,104 @@ const Background: React.FC = () => {
       </div>
     );
   };
+
+  const renderCharacterCardTreeTitle = (item: PartnerItem) => {
+    const isSelected = selectedType === 'character_card' && selectedId === item.id;
+    const isEditing = editingId === item.id;
+
+    return (
+      <div
+        className={`character-tree-item ${isSelected ? 'is-selected' : ''}`}
+        onDoubleClick={(e) => handleStartRename(item, e)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          minHeight: 30,
+          padding: '4px 8px',
+          borderRadius: 6,
+          background: isSelected ? '#f2e8dc' : 'transparent',
+          color: isSelected ? '#d97757' : '#33312e',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0, gap: 8 }}>
+          <UserOutlined style={{ fontSize: 14, flexShrink: 0, color: isSelected ? '#d97757' : '#8c8882' }} />
+          {isEditing ? (
+            <Input
+              ref={renameInputRef}
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onBlur={() => handleSaveRename(item)}
+              onPressEnter={() => handleSaveRename(item)}
+              size="small"
+              style={{ height: 22, padding: '0 4px', fontSize: 13, borderColor: '#d97757' }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span style={{
+              fontSize: 13,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontWeight: isSelected ? 500 : 400,
+            }}>
+              {item.name}
+            </span>
+          )}
+        </div>
+
+        {!isEditing && (
+          <div className="directory-item-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Tooltip title="重命名" mouseEnterDelay={0.8}>
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined style={{ fontSize: 12 }} />}
+                onClick={(e) => handleStartRename(item, e)}
+                style={{ width: 20, height: 20, padding: 0, display: 'none' }}
+                className="action-btn"
+              />
+            </Tooltip>
+            <Tooltip title="删除" mouseEnterDelay={0.8}>
+              <Button
+                type="text"
+                danger
+                size="small"
+                icon={<DeleteOutlined style={{ fontSize: 12 }} />}
+                onClick={(e) => handleDeleteItem(item.id, item.type, e)}
+                style={{ width: 20, height: 20, padding: 0, display: 'none' }}
+                className="action-btn"
+              />
+            </Tooltip>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const toggleCharacterGroup = (groupKey: string) => {
+    setExpandedCharacterGroupKeys((keys) =>
+      keys.includes(groupKey) ? keys.filter((key) => key !== groupKey) : [...keys, groupKey]
+    );
+  };
+
+  const characterCardTreeData = characterCardGroups.map((group) => ({
+    key: group.key,
+    selectable: false,
+    title: (
+      <span
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#8c8882', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
+      >
+        <BookOutlined style={{ fontSize: 13, color: group.worldBookId ? '#d97757' : '#c0bbb4' }} />
+        {group.title}
+      </span>
+    ),
+    children: group.cards.map((card) => ({
+      key: card.id,
+      title: renderCharacterCardTreeTitle(card),
+      isLeaf: true,
+    })),
+  }));
 
   // Rendering World Book Config UI
   const renderWorldBookForm = (item: PartnerItem) => {
@@ -870,6 +1031,9 @@ const Background: React.FC = () => {
   // Rendering Character Card Config UI
   const renderCharacterCardForm = (item: PartnerItem) => {
     const fields = normalizePartnerFields(item.fields);
+    const ownerSelectValue = item.worldBookId && worldBooks.some((worldBook) => worldBook.id === item.worldBookId)
+      ? item.worldBookId
+      : UNASSIGNED_CHARACTER_CARD_GROUP_ID;
 
     const tabItems = [
       {
@@ -886,6 +1050,22 @@ const Background: React.FC = () => {
                     className="custom-form-input"
                     placeholder="请输入角色姓名"
                     onChange={(e) => updateItemName(item.id, item.type, e.target.value)}
+                  />
+                </Col>
+                <Col span={12}>
+                  <div className="input-label">归属世界书</div>
+                  <Select
+                    aria-label="归属世界书"
+                    value={ownerSelectValue}
+                    onChange={(value) => updateCharacterCardWorldBook(
+                      item.id,
+                      value === UNASSIGNED_CHARACTER_CARD_GROUP_ID ? null : value,
+                    )}
+                    options={[
+                      { value: UNASSIGNED_CHARACTER_CARD_GROUP_ID, label: '未归属' },
+                      ...worldBooks.map((worldBook) => ({ value: worldBook.id, label: worldBook.name })),
+                    ]}
+                    style={{ width: '100%' }}
                   />
                 </Col>
                 <Col span={6}>
@@ -1286,6 +1466,28 @@ const Background: React.FC = () => {
         .directory-item-hover:hover .action-btn {
           display: inline-flex !important;
         }
+        .character-tree-item:hover {
+          background-color: #faf6f0 !important;
+        }
+        .character-tree-item:hover .action-btn,
+        .character-tree-item.is-selected .action-btn {
+          display: inline-flex !important;
+        }
+        .character-card-tree .ant-tree-treenode {
+          padding: 0 8px 2px 8px !important;
+        }
+        .character-card-tree .ant-tree-node-content-wrapper {
+          flex: 1;
+          min-width: 0;
+          padding: 0 !important;
+          border-radius: 6px !important;
+        }
+        .character-card-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+          background: transparent !important;
+        }
+        .character-card-tree .ant-tree-switcher {
+          color: #c0bbb4;
+        }
         .directory-item-hover .action-btn:hover {
           background-color: rgba(0, 0, 0, 0.04) !important;
         }
@@ -1545,7 +1747,25 @@ const Background: React.FC = () => {
                   暂无角色卡
                 </div>
               ) : (
-                characterCards.map(renderDirectoryItem)
+                <Tree
+                  className="character-card-tree"
+                  expandedKeys={expandedCharacterGroupKeys}
+                  onExpand={(keys) => setExpandedCharacterGroupKeys(keys)}
+                  selectedKeys={selectedType === 'character_card' && selectedId ? [selectedId] : []}
+                  onClick={(_, node) => {
+                    const nextKey = String(node.key);
+                    if (characterCardGroupKeys.includes(nextKey)) {
+                      toggleCharacterGroup(nextKey);
+                    }
+                  }}
+                  onSelect={(keys) => {
+                    const nextId = String(keys[0] || '');
+                    if (nextId) {
+                      selectItem(nextId, 'character_card');
+                    }
+                  }}
+                  treeData={characterCardTreeData}
+                />
               )}
             </div>
           </div>

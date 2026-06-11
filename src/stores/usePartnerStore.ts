@@ -80,6 +80,7 @@ export interface PartnerItem {
   type: 'world_book' | 'character_card';
   content: string;
   fields?: PartnerItemFields;
+  worldBookId?: string | null;
 }
 
 interface PartnerState {
@@ -94,13 +95,14 @@ interface PartnerState {
   updateItemName: (id: string, type: 'world_book' | 'character_card', name: string) => void;
   updateItemContent: (id: string, type: 'world_book' | 'character_card', content: string) => void;
   updateItemFields: (id: string, type: 'world_book' | 'character_card', fields: PartnerItemFields) => void;
+  updateCharacterCardWorldBook: (id: string, worldBookId: string | null) => void;
   addCustomField: (id: string, type: 'world_book' | 'character_card', moduleId: string) => void;
   updateCustomField: (id: string, type: 'world_book' | 'character_card', fieldId: string, updates: Partial<Pick<CustomField, 'label' | 'value'>>) => void;
   removeCustomField: (id: string, type: 'world_book' | 'character_card', fieldId: string) => void;
   importGeneratedItems: (items: {
     worldBooks: Array<{ name: string; fields: PartnerItemFields }>;
-    characterCards: Array<{ name: string; fields: PartnerItemFields }>;
-  }) => void;
+    characterCards: Array<{ name: string; fields: PartnerItemFields; worldBookId?: string | null }>;
+  }) => { worldBookIds: string[]; characterCardIds: string[] };
 }
 
 const MODULE_NAMES: Record<string, string> = {
@@ -326,6 +328,7 @@ const initialCharacterCards: PartnerItem[] = [
     id: 'cc-initial-1',
     name: '林逸 (主角)',
     type: 'character_card',
+    worldBookId: 'wb-initial-1',
     content: '',
     fields: {
       age: '18岁',
@@ -429,6 +432,7 @@ export const usePartnerStore = create<PartnerState>()(
           id: newId,
           name,
           type: 'character_card',
+          worldBookId: null,
           content,
           fields: defaultFields
         };
@@ -442,12 +446,21 @@ export const usePartnerStore = create<PartnerState>()(
       selectItem: (selectedId, selectedType) => set({ selectedId, selectedType }),
 
       deleteItem: (id, type) => set((state) => {
-        const isSelected = state.selectedId === id;
+        const isSelected = (
+          (type === 'world_book' && state.selectedType === 'world_book' && state.selectedId === id) ||
+          (type === 'character_card' && state.selectedType === 'character_card' && state.selectedId === id)
+        );
         let newSelectedId = state.selectedId;
         let newSelectedType = state.selectedType;
 
-        const nextWorldBooks = state.worldBooks.filter((item) => item.id !== id);
-        const nextCharacterCards = state.characterCards.filter((item) => item.id !== id);
+        const nextWorldBooks = type === 'world_book'
+          ? state.worldBooks.filter((item) => item.id !== id)
+          : state.worldBooks;
+        const nextCharacterCards = type === 'world_book'
+          ? state.characterCards.map((item) => (
+            item.worldBookId === id ? { ...item, worldBookId: null } : item
+          ))
+          : state.characterCards.filter((item) => item.id !== id);
 
         if (isSelected) {
           if (type === 'world_book' && nextWorldBooks.length > 0) {
@@ -556,6 +569,17 @@ export const usePartnerStore = create<PartnerState>()(
         }
       }),
 
+      updateCharacterCardWorldBook: (id, worldBookId) => set((state) => {
+        const nextWorldBookId = worldBookId && state.worldBooks.some((item) => item.id === worldBookId)
+          ? worldBookId
+          : null;
+        return {
+          characterCards: state.characterCards.map((item) => (
+            item.id === id ? { ...item, worldBookId: nextWorldBookId } : item
+          )),
+        };
+      }),
+
       addCustomField: (id, type, moduleId) => set((state) => {
         const newField: CustomField = {
           id: `cf-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -623,10 +647,16 @@ export const usePartnerStore = create<PartnerState>()(
         return { characterCards: updateItems(state.characterCards) };
       }),
 
-      importGeneratedItems: (items) => set((state) => {
+      importGeneratedItems: (items) => {
         const time = Date.now();
-        const newWorldBooks: PartnerItem[] = (items.worldBooks || []).map((wb, index) => {
-          const id = `wb-ai-${time}-${index}`;
+        const worldBookInputs = items.worldBooks || [];
+        const characterCardInputs = items.characterCards || [];
+        const worldBookIds = worldBookInputs.map((_, index) => `wb-ai-${time}-${index}`);
+        const characterCardIds = characterCardInputs.map((_, index) => `cc-ai-${time}-${index}`);
+
+        set((state) => {
+        const newWorldBooks: PartnerItem[] = worldBookInputs.map((wb, index) => {
+          const id = worldBookIds[index];
           const fields = normalizePartnerFields(wb.fields);
           return {
             id,
@@ -637,13 +667,16 @@ export const usePartnerStore = create<PartnerState>()(
           };
         });
 
-        const newCharacterCards: PartnerItem[] = (items.characterCards || []).map((cc, index) => {
-          const id = `cc-ai-${time}-${index}`;
+        const validWorldBookIds = new Set([...state.worldBooks, ...newWorldBooks].map((item) => item.id));
+        const newCharacterCards: PartnerItem[] = characterCardInputs.map((cc, index) => {
+          const id = characterCardIds[index];
           const fields = normalizePartnerFields(cc.fields);
+          const worldBookId = cc.worldBookId && validWorldBookIds.has(cc.worldBookId) ? cc.worldBookId : null;
           return {
             id,
             name: cc.name || '未命名角色卡',
             type: 'character_card',
+            worldBookId,
             content: compileItemToMarkdown(cc.name || '未命名角色卡', 'character_card', fields),
             fields
           };
@@ -669,7 +702,10 @@ export const usePartnerStore = create<PartnerState>()(
           selectedId,
           selectedType
         };
-      }),
+        });
+
+        return { worldBookIds, characterCardIds };
+      },
     }),
     {
       name: 'museai-partner-storage',

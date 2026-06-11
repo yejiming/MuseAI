@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Button, Tooltip, Dropdown, Tag, Input, message, Modal, Spin, Select, Radio, Checkbox, Switch } from 'antd';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Tooltip, Dropdown, Tag, Input, message, Modal, Spin, Select, Radio, Checkbox, Switch, Tree } from 'antd';
 import {
+  BookOutlined,
   BulbOutlined,
   HistoryOutlined,
   ReloadOutlined,
@@ -37,6 +38,7 @@ import {
   getStoryAllowedTools,
 } from './storyAgent';
 import { parseArchiveAnalysisResponse } from '../utils/archiveAnalysis';
+import { getCharacterCardIdsForWorldBook, groupCharacterCardsByWorldBook } from '../utils/characterCardGroups';
 
 interface ChatStreamEvent {
   runId: string;
@@ -50,11 +52,51 @@ interface ChatStreamEvent {
   contextCompaction?: SessionContextCompaction;
 }
 
+const sessionDateFormatter = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+const BACKGROUND_LINK_BUTTON_STYLE: React.CSSProperties = {
+  fontSize: '12px',
+  fontWeight: 400,
+  color: '#d97757',
+  cursor: 'pointer',
+  border: 0,
+  background: 'transparent',
+  padding: 0,
+  fontFamily: 'inherit',
+  lineHeight: 'inherit',
+};
+const CHARACTER_GROUP_TITLE_BUTTON_STYLE: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  color: '#8c8882',
+  fontSize: 13,
+  cursor: 'pointer',
+  border: 0,
+  background: 'transparent',
+  padding: 0,
+  fontFamily: 'inherit',
+};
+
 const estimateContextUsage = (systemPrompt: string, messages: Message[], draft: string) => {
+  let userContent = draft;
+  let assistantContent = '';
+  for (const message of messages) {
+    if (message.role === 'user') {
+      userContent += message.content;
+    } else if (message.role === 'agent') {
+      assistantContent += message.content;
+    }
+  }
+
   const stats = {
     system: Math.max(0, Math.ceil(systemPrompt.length * 1.5)),
-    user: Math.max(0, Math.ceil(([draft, ...messages.filter(m => m.role === 'user').map(m => m.content)].join('')).length * 1.5)),
-    assistant: Math.max(0, Math.ceil((messages.filter(m => m.role === 'agent').map(m => m.content).join('')).length * 1.5))
+    user: Math.max(0, Math.ceil(userContent.length * 1.5)),
+    assistant: Math.max(0, Math.ceil(assistantContent.length * 1.5))
   };
   return {
     ...stats,
@@ -117,6 +159,7 @@ const Adventure: React.FC = () => {
 
   const [tempSelectedCardIds, setTempSelectedCardIds] = useState<string[]>([]);
   const [hasStartedAnalysis, setHasStartedAnalysis] = useState(false);
+  const [expandedCharacterGroupKeys, setExpandedCharacterGroupKeys] = useState<React.Key[]>([]);
 
 
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
@@ -282,6 +325,64 @@ const Adventure: React.FC = () => {
 
   const selectedWorldBook = worldBooks.find(wb => wb.id === selectedWorldBookId) || null;
   const selectedCards = characterCards.filter(cc => selectedCharacterCardIds.includes(cc.id));
+  const characterCardGroups = useMemo(
+    () => groupCharacterCardsByWorldBook(worldBooks, characterCards),
+    [worldBooks, characterCards],
+  );
+  const characterCardGroupKeys = useMemo(
+    () => characterCardGroups.map((group) => group.key),
+    [characterCardGroups],
+  );
+  const characterCardIdSet = new Set(characterCards.map((card) => card.id));
+  useEffect(() => {
+    setExpandedCharacterGroupKeys((keys) => keys.filter((key) => characterCardGroupKeys.includes(String(key))));
+  }, [characterCardGroupKeys]);
+
+  const toggleCharacterGroup = (groupKey: string) => {
+    setExpandedCharacterGroupKeys((keys) =>
+      keys.includes(groupKey) ? keys.filter((key) => key !== groupKey) : [...keys, groupKey]
+    );
+  };
+
+  const characterCardTreeData = characterCardGroups.map((group) => ({
+    key: group.key,
+    title: (
+      <button
+        type="button"
+        style={CHARACTER_GROUP_TITLE_BUTTON_STYLE}
+        onClick={(event) => {
+          event.stopPropagation();
+          toggleCharacterGroup(group.key);
+        }}
+      >
+        <BookOutlined style={{ color: group.worldBookId ? '#d97757' : '#c0bbb4' }} />
+        {group.title}
+      </button>
+    ),
+    selectable: false,
+    children: group.cards.map((card) => ({
+      key: card.id,
+      title: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#33312e' }}>
+          <UserOutlined style={{ color: '#8c8882' }} />
+          {card.name}
+        </span>
+      ),
+      isLeaf: true,
+    })),
+  }));
+  const handleWorldBookChange = (worldBookId: string) => {
+    setSelectedWorldBookId(worldBookId);
+    setSelectedCharacterCardIds(getCharacterCardIdsForWorldBook(worldBookId, characterCards));
+  };
+  const handleCharacterCardCheck = (checkedKeys: React.Key[] | { checked: React.Key[] }) => {
+    const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
+    setSelectedCharacterCardIds(keys.reduce<string[]>((ids, key) => {
+      const id = String(key);
+      if (characterCardIdSet.has(id)) ids.push(id);
+      return ids;
+    }, []));
+  };
   const storyAllowedTools = getStoryAllowedTools(dynamicRoleLoadingEnabled);
   const rolePlayContext = dynamicRoleLoadingEnabled ? {
     chatSystemPrompt: settings.partnerChatPrompt || '',
@@ -675,10 +776,12 @@ const Adventure: React.FC = () => {
     }
     setIsSavingConversation(true);
     try {
-      const chatHistoryText = messages
-        .filter(m => m.role === 'user' || m.role === 'agent')
-        .map(m => `${m.role === 'user' ? '我' : '故事旁白与NPC'}: ${m.content.replace(/\[\[THINKING:[^\]]+\]\]/g, '').trim()}`)
-        .join('\n\n');
+      const chatHistoryText = messages.reduce<string[]>((lines, m) => {
+        if (m.role === 'user' || m.role === 'agent') {
+          lines.push(`${m.role === 'user' ? '我' : '故事旁白与NPC'}: ${m.content.replace(/\[\[THINKING:[^\]]+\]\]/g, '').trim()}`);
+        }
+        return lines;
+      }, []).join('\n\n');
       const generatedTitle = await invoke<string>('summarize_text', {
         request: {
           modelInterface: settings.modelInterface,
@@ -760,15 +863,16 @@ const Adventure: React.FC = () => {
     setHasStartedAnalysis(true);
     setSelectedTargetCardId(tempSelectedCardIds[0]);
 
-    const chatHistoryText = messages
-      .filter(m => m.role === 'user' || m.role === 'agent')
-      .map(m => {
+    const chatHistoryText = messages.reduce<string[]>((lines, m) => {
+      if (m.role === 'user' || m.role === 'agent') {
         const sender = m.role === 'user' ? '我' : '故事旁白与NPC';
         const cleanContent = m.content.replace(/\[\[THINKING:[^\]]+\]\]/g, '').trim();
-        return `${sender}: ${cleanContent}`;
-      })
-      .filter(line => line.split(': ')[1] !== '')
-      .join('\n\n');
+        if (cleanContent !== '') {
+          lines.push(`${sender}: ${cleanContent}`);
+        }
+      }
+      return lines;
+    }, []).join('\n\n');
 
     try {
       const archiveConfig = settings.agentConfigs?.storyArchive || {};
@@ -979,7 +1083,7 @@ const Adventure: React.FC = () => {
                       borderRadius: '8px',
                       backgroundColor: isChecked ? '#fff7f2' : '#faf9f5',
                       color: isChecked ? '#d97757' : '#5c5751',
-                      transition: 'all 0.2s ease',
+                      transition: 'background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease',
                       cursor: 'pointer'
                     }}
                   >
@@ -1006,7 +1110,12 @@ const Adventure: React.FC = () => {
                 value={selectedTargetCardId}
                 onChange={handleTargetCardChange}
                 style={{ width: 220 }}
-                options={selectedCards.filter(c => tempSelectedCardIds.includes(c.id)).map(c => ({ value: c.id, label: c.name }))}
+                options={selectedCards.reduce<{ value: string; label: string }[]>((options, c) => {
+                  if (tempSelectedCardIds.includes(c.id)) {
+                    options.push({ value: c.id, label: c.name });
+                  }
+                  return options;
+                }, [])}
               />
             </div>
 
@@ -1149,7 +1258,7 @@ const Adventure: React.FC = () => {
                       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', marginRight: 16 }}>
                         <strong style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{session.title}</strong>
                         <span style={{ fontSize: '11px', color: '#999', marginTop: 2 }}>
-                          {session.savedAt ? new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(session.savedAt)) : '未保存'}
+                          {session.savedAt ? sessionDateFormatter.format(new Date(session.savedAt)) : '未保存'}
                         </span>
                       </div>
                       <Button
@@ -1423,9 +1532,10 @@ const Adventure: React.FC = () => {
                 选择冒险世界设定集 (世界书)
               </div>
               <Select
+                aria-label="选择冒险世界书"
                 placeholder="选择一个世界设定..."
                 value={selectedWorldBookId}
-                onChange={setSelectedWorldBookId}
+                onChange={handleWorldBookChange}
                 style={{ width: '100%' }}
                 options={worldBooks.map((wb) => ({ value: wb.id, label: wb.name }))}
               />
@@ -1435,39 +1545,33 @@ const Adventure: React.FC = () => {
             <div>
               <div style={{ fontSize: '14px', fontWeight: 600, color: '#33312e', marginBottom: '8px', display: 'flex', justifyContent: 'space-between' }}>
                 <span>选择共同历险的角色卡 (可多选)</span>
-                <span style={{ fontSize: '12px', fontWeight: 400, color: '#d97757', cursor: 'pointer' }} onClick={() => selectItem(null, null)}>前往背景页创建人设 &gt;</span>
+                <button
+                  type="button"
+                  style={BACKGROUND_LINK_BUTTON_STYLE}
+                  onClick={() => selectItem(null, null)}
+                >
+                  前往背景页创建人设 &gt;
+                </button>
               </div>
 
               {characterCards.length > 0 ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                  {characterCards.map((cc) => {
-                    const isChecked = selectedCharacterCardIds.includes(cc.id);
-                    return (
-                      <Tag.CheckableTag
-                        key={cc.id}
-                        checked={isChecked}
-                        onChange={(checked) => {
-                          const nextIds = checked
-                            ? [...selectedCharacterCardIds, cc.id]
-                            : selectedCharacterCardIds.filter(id => id !== cc.id);
-                          setSelectedCharacterCardIds(nextIds);
-                        }}
-                        style={{
-                          padding: '6px 14px',
-                          fontSize: '13px',
-                          border: isChecked ? '1px solid #d97757' : '1px solid #eae6df',
-                          borderRadius: '6px',
-                          backgroundColor: isChecked ? '#fff7f2' : '#faf9f5',
-                          color: isChecked ? '#d97757' : '#5c5751',
-                          margin: 0,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <UserOutlined style={{ marginRight: 6 }} />
-                        {cc.name}
-                      </Tag.CheckableTag>
-                    );
-                  })}
+                <div style={{ border: '1px solid #eae6df', borderRadius: 6, background: '#faf9f5', padding: '8px 4px' }}>
+                  <Tree
+                    checkable
+                    expandedKeys={expandedCharacterGroupKeys}
+                    onExpand={(keys) => setExpandedCharacterGroupKeys(keys)}
+                    selectable={false}
+                    onClick={(_, node) => {
+                      const nextKey = String(node.key);
+                      if (characterCardGroupKeys.includes(nextKey)) {
+                        toggleCharacterGroup(nextKey);
+                      }
+                    }}
+                    checkedKeys={selectedCharacterCardIds}
+                    onCheck={handleCharacterCardCheck}
+                    treeData={characterCardTreeData}
+                    style={{ background: 'transparent' }}
+                  />
                 </div>
               ) : (
                 <div style={{ color: '#8c8882', fontSize: '13px', textAlign: 'center', padding: '12px', border: '1px dashed #eae6df', borderRadius: '6px', background: '#faf9f5' }}>

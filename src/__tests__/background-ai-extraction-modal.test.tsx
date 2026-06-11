@@ -138,6 +138,11 @@ describe('Background AI extraction modal', () => {
       expect(usePartnerStore.getState().worldBooks).toHaveLength(1);
       expect(usePartnerStore.getState().characterCards).toHaveLength(2);
     });
+    const generatedWorldBookId = usePartnerStore.getState().worldBooks[0].id;
+    expect(usePartnerStore.getState().characterCards.map((card) => card.worldBookId)).toEqual([
+      generatedWorldBookId,
+      generatedWorldBookId,
+    ]);
     expect(invokeMock).toHaveBeenCalledWith(
       'generate_background_stage_one',
       expect.objectContaining({
@@ -324,7 +329,57 @@ describe('Background AI extraction modal', () => {
 
     const cards = usePartnerStore.getState().characterCards;
     expect(cards.map((card) => card.name)).toEqual(['林逸', '陆雪莹']);
+    expect(cards.map((card) => card.worldBookId)).toEqual([null, null]);
     expect(invokeMock).not.toHaveBeenCalledWith('generate_background_stage_one', expect.anything());
+  });
+
+  it('keeps the generated World Book binding when retrying failed full-extraction cards', async () => {
+    let attempt = 0;
+    invokeMock.mockImplementation(async (command: string, args?: any) => {
+      if (command === 'get_workspace_dir') return `/Users/test/Documents/MuseAI/${args.dirType}`;
+      if (command === 'list_dir') {
+        if (args.path.endsWith('/articles')) return [{ name: 'chapter.md', path: filePath, is_dir: false }];
+        return [];
+      }
+      if (command === 'read_file') return '参考正文';
+      if (command === 'generate_background_stage_one') {
+        return {
+          worldBooks: [{ name: '奥兰魔法大陆', fields: { theme: '魔法冒险' } }],
+          characterNames: ['失败角色'],
+        };
+      }
+      if (command === 'generate_background_character_card') {
+        attempt += 1;
+        if (attempt === 1) {
+          throw new Error('角色信息不足');
+        }
+        return {
+          name: args.request.characterName,
+          fields: { age: '18岁' },
+        };
+      }
+      return undefined;
+    });
+
+    await openModal();
+    await checkArticleFile();
+
+    fireEvent.click(screen.getByRole('button', { name: '开始智能提取' }));
+    expect(await screen.findByDisplayValue('奥兰魔法大陆')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认并生成角色卡' }));
+
+    expect(await screen.findByRole('button', { name: '重试失败角色' })).toBeInTheDocument();
+    expect(usePartnerStore.getState().characterCards).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: '重试失败角色' }));
+
+    await waitFor(() => {
+      expect(usePartnerStore.getState().characterCards).toHaveLength(1);
+    });
+    expect(usePartnerStore.getState().characterCards[0]).toEqual(expect.objectContaining({
+      name: '失败角色',
+      worldBookId: usePartnerStore.getState().worldBooks[0].id,
+    }));
   });
 
   it('lets users expand failed character cards to inspect failure details', async () => {

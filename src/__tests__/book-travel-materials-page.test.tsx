@@ -76,7 +76,10 @@ describe('BookTravelMaterials page', () => {
     useBookTravelStore.setState({ assembledMaterials: [], selectedMaterialId: null });
     usePartnerStore.setState({
       worldBooks: [{ id: 'wb-1', name: '云州世界书', type: 'world_book', content: '世界书正文', fields: {} }],
-      characterCards: [{ id: 'cc-1', name: '沈霜', type: 'character_card', content: '角色卡正文', fields: {} }],
+      characterCards: [
+        { id: 'cc-1', name: '沈霜', type: 'character_card', content: '角色卡正文', fields: {}, worldBookId: 'wb-1' },
+        { id: 'cc-2', name: '游侠', type: 'character_card', content: '游侠正文', fields: {}, worldBookId: null },
+      ],
       selectedId: null,
       selectedType: null,
     });
@@ -91,14 +94,47 @@ describe('BookTravelMaterials page', () => {
     fireEvent.mouseDown(screen.getByLabelText('选择穿书大纲'));
     fireEvent.click(await screen.findByText('第一卷.md'));
     fireEvent.mouseDown(screen.getByLabelText('选择穿书世界书'));
-    fireEvent.click(await screen.findByText('云州世界书'));
-    fireEvent.click(screen.getByText('沈霜'));
+    const worldBookOptions = await screen.findAllByText('云州世界书');
+    fireEvent.click(worldBookOptions[worldBookOptions.length - 1]);
+    const freeCardNode = screen.getByText('游侠').closest('.ant-tree-treenode') as HTMLElement;
+    fireEvent.click(freeCardNode.querySelector('.ant-tree-checkbox') as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: /开始装配/ }));
 
     expect((await screen.findAllByText('第一卷.md · 云州世界书')).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('tab', { name: /入场点/ }));
     expect(await screen.findAllByDisplayValue('小说开篇')).not.toHaveLength(0);
     expect(useBookTravelStore.getState().assembledMaterials[0].materials.outline.content).toBe('第一卷大纲正文');
+    expect(useBookTravelStore.getState().assembledMaterials[0].materials.characterCards.map((card) => card.title)).toEqual(['沈霜', '游侠']);
+  });
+
+  it('toggles all Character Cards in a directory from the material selector', async () => {
+    usePartnerStore.setState({
+      characterCards: [
+        { id: 'cc-1', name: '沈霜', type: 'character_card', content: '角色卡正文', fields: {}, worldBookId: 'wb-1' },
+        { id: 'cc-3', name: '顾临', type: 'character_card', content: '顾临正文', fields: {}, worldBookId: 'wb-1' },
+        { id: 'cc-2', name: '游侠', type: 'character_card', content: '游侠正文', fields: {}, worldBookId: null },
+      ],
+    });
+
+    render(<BookTravelMaterials />);
+
+    fireEvent.click(screen.getByRole('button', { name: /新增素材/ }));
+    expect(await screen.findByText('素材装配')).toBeInTheDocument();
+
+    const characterTree = document.querySelector('.ant-tree') as HTMLElement;
+    const groupNode = within(characterTree).getByText('云州世界书').closest('.ant-tree-treenode') as HTMLElement;
+    const firstCardNode = within(characterTree).getByText('沈霜').closest('.ant-tree-treenode') as HTMLElement;
+    const secondCardNode = within(characterTree).getByText('顾临').closest('.ant-tree-treenode') as HTMLElement;
+    const freeCardNode = within(characterTree).getByText('游侠').closest('.ant-tree-treenode') as HTMLElement;
+
+    fireEvent.click(groupNode.querySelector('.ant-tree-checkbox') as HTMLElement);
+    expect(firstCardNode.querySelector('.ant-tree-checkbox')).toHaveClass('ant-tree-checkbox-checked');
+    expect(secondCardNode.querySelector('.ant-tree-checkbox')).toHaveClass('ant-tree-checkbox-checked');
+    expect(freeCardNode.querySelector('.ant-tree-checkbox')).not.toHaveClass('ant-tree-checkbox-checked');
+
+    fireEvent.click(groupNode.querySelector('.ant-tree-checkbox') as HTMLElement);
+    expect(firstCardNode.querySelector('.ant-tree-checkbox')).not.toHaveClass('ant-tree-checkbox-checked');
+    expect(secondCardNode.querySelector('.ant-tree-checkbox')).not.toHaveClass('ant-tree-checkbox-checked');
   });
 
   it('allows editing the selected assembled material detail', async () => {

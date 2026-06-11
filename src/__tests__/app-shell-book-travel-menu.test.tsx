@@ -45,4 +45,22 @@ describe('AppShell book-travel desktop menu', () => {
     expect(storyIndex).toBeGreaterThan(materialIndex);
     expect(menuItems[bondIndex + 1]).toBe('DIVIDER');
   });
+
+  it('uses a distinct icon for the book-travel page menu item', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/story']}>
+        <Routes>
+          <Route path="/" element={<AppShell />}>
+            <Route path="story" element={<div>穿书内容</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const storyItem = Array.from(container.querySelectorAll('.ant-menu-item'))
+      .find((item) => item.textContent?.trim() === '穿书') as HTMLElement;
+
+    expect(storyItem.querySelector('.anticon-deployment-unit')).toBeInTheDocument();
+    expect(storyItem.querySelector('.anticon-compass')).not.toBeInTheDocument();
+  });
 });
