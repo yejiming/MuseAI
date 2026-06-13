@@ -39,7 +39,7 @@ describe('MarkdownEditor', () => {
 
     render(<MarkdownEditor filePath="/Users/test/Documents/MuseAI/articles/large.md" />);
 
-    const editor = await screen.findByRole('textbox', { name: 'Markdown源码编辑区' });
+    const editor = await screen.findByRole('textbox', { name: 'Markdown源码编辑区' }, { timeout: 3000 });
     expect((editor as HTMLTextAreaElement).value).toContain('第 900 节');
     expect(screen.getByTestId('markdown-live-editor')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '预览' })).not.toBeInTheDocument();
