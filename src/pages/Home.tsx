@@ -47,6 +47,29 @@ const companionModules = [
   { key: '/story', label: '穿书', icon: <CompassOutlined />, color: '#8b7355' },
 ];
 
+const HOME_STAT_ICON_STYLE: React.CSSProperties = {
+  width: 44,
+  height: 44,
+  borderRadius: 10,
+  background: '#f2e8dc',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: 20,
+  color: '#d97757',
+};
+
+const HOME_SECTION_LABEL_STYLE: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  color: '#8c857b',
+  textTransform: 'uppercase',
+  letterSpacing: 1,
+  display: 'block',
+  marginBottom: 16,
+  marginTop: 28,
+};
+
 function getGreeting(): string {
   const hour = new Date().getHours();
   if (hour < 6) return '夜深了';
@@ -147,19 +170,7 @@ const Home: React.FC = () => {
               <Row gutter={[48, 24]} style={{ marginBottom: 20 }}>
                 <Col>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div
-                      style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 10,
-                        background: '#f2e8dc',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 20,
-                        color: '#d97757',
-                      }}
-                    >
+                    <div style={HOME_STAT_ICON_STYLE}>
                       <FileTextOutlined />
                     </div>
                     <div>
@@ -172,19 +183,7 @@ const Home: React.FC = () => {
                 </Col>
                 <Col>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div
-                      style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 10,
-                        background: '#f2e8dc',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 20,
-                        color: '#d97757',
-                      }}
-                    >
+                    <div style={HOME_STAT_ICON_STYLE}>
                       <FontSizeOutlined />
                     </div>
                     <div>
@@ -197,19 +196,7 @@ const Home: React.FC = () => {
                 </Col>
                 <Col>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div
-                      style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 10,
-                        background: '#f2e8dc',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 20,
-                        color: '#d97757',
-                      }}
-                    >
+                    <div style={HOME_STAT_ICON_STYLE}>
                       <FireOutlined />
                     </div>
                     <div>
@@ -314,18 +301,7 @@ const Home: React.FC = () => {
           ))}
         </Row>
 
-        <Text
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: '#8c857b',
-            textTransform: 'uppercase',
-            letterSpacing: 1,
-            display: 'block',
-            marginBottom: 16,
-            marginTop: 28,
-          }}
-        >
+        <Text style={HOME_SECTION_LABEL_STYLE}>
           智能伴侣
         </Text>
         <Row gutter={[16, 16]}>

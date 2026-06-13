@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { Button, Tooltip, Tag, Input, message, Modal, Spin } from 'antd';
 import {
   BulbOutlined,
@@ -29,6 +29,8 @@ import { PartnerChatSettingsModal } from '../components/PartnerChatSettingsModal
 import { SessionHistoryModal } from '../components/SessionHistoryModal';
 import { parseArchiveAnalysisResponse } from '../utils/archiveAnalysis';
 import { createStableContentKey } from '../utils/renderKeys';
+import { useStateGroup } from '../utils/reducerState';
+import { ensureSessionId } from '../utils/sessionIds';
 
 interface ChatStreamEvent {
   runId: string;
@@ -40,6 +42,22 @@ interface ChatStreamEvent {
   toolStatus?: string;
   toolArguments?: string;
   contextCompaction?: SessionContextCompaction;
+}
+
+interface ChatUiState {
+  isSettingsOpen: boolean;
+  isHistoryOpen: boolean;
+  isArchiveModalOpen: boolean;
+  isAnalyzing: boolean;
+  isSavingConversation: boolean;
+  archiveAnalysis: any;
+  editedTitle: string;
+  editedRelationType: string;
+  editedRelationModel: string;
+  editedRelationBottomLine: string;
+  editedEvents: string;
+  editingMessageId: string | null;
+  editingContent: string;
 }
 
 const USER_INFO_LABELS: Record<string, string> = {
@@ -65,6 +83,29 @@ const USER_INFO_LABELS: Record<string, string> = {
   relationships: '人际关系',
   speakingStyle: '说话方式',
   typicalReactions: '典型反应'
+};
+
+const CHAT_EMPTY_STATE_STYLE: React.CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  justifyContent: 'center',
+  alignItems: 'center',
+  padding: '0 24px',
+  maxWidth: '800px',
+  margin: '0 auto',
+  width: '100%',
+};
+
+const CHAT_COMPOSER_ACTIONS_STYLE: React.CSSProperties = {
+  position: 'absolute',
+  bottom: '12px',
+  left: '16px',
+  right: '16px',
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  zIndex: 3,
 };
 
 const filterBlankMarkdownFields = (content: string): string => {
@@ -112,10 +153,13 @@ const compileEffectiveSystemPrompt = (
     prompt += `\n\n## 你的角色人设设定（伴侣设定）\n你必须始终扮演此角色，语气、动作、口吻、心防与性格应与本卡高度一致：\n${filterBlankMarkdownFields(characterCardContent.trim())}`;
   }
 
-  const userFields = Object.entries(userInfo)
-    .filter(([k, v]) => USER_INFO_LABELS[k] && typeof v === 'string' && v.trim() !== '')
-    .map(([k, v]) => `- **${USER_INFO_LABELS[k]}**：${v}`)
-    .join('\n');
+  const userFieldLines: string[] = [];
+  for (const [k, v] of Object.entries(userInfo)) {
+    if (USER_INFO_LABELS[k] && typeof v === 'string' && v.trim() !== '') {
+      userFieldLines.push(`- **${USER_INFO_LABELS[k]}**：${v}`);
+    }
+  }
+  const userFields = userFieldLines.join('\n');
 
   if (userFields) {
     prompt += `\n\n## 我（用户）的角色人设设定\n这是与你对话的用户人设背景，请记住并据此采取对应的人物关系态度和说话方式：\n${userFields}`;
@@ -125,10 +169,20 @@ const compileEffectiveSystemPrompt = (
 };
 
 const estimateContextUsage = (systemPrompt: string, messages: Message[], draft: string) => {
+  let userText = draft;
+  let assistantText = '';
+  for (const message of messages) {
+    if (message.role === 'user') {
+      userText += message.content;
+    }
+    if (message.role === 'agent') {
+      assistantText += message.content;
+    }
+  }
   const stats = {
     system: Math.max(0, Math.ceil(systemPrompt.length * 1.5)),
-    user: Math.max(0, Math.ceil(([draft, ...messages.filter(m => m.role === 'user').map(m => m.content)].join('')).length * 1.5)),
-    assistant: Math.max(0, Math.ceil((messages.filter(m => m.role === 'agent').map(m => m.content).join('')).length * 1.5))
+    user: Math.max(0, Math.ceil(userText.length * 1.5)),
+    assistant: Math.max(0, Math.ceil(assistantText.length * 1.5))
   };
   return {
     ...stats,
@@ -136,7 +190,7 @@ const estimateContextUsage = (systemPrompt: string, messages: Message[], draft: 
   };
 };
 
-const Chat: React.FC = () => {
+const useChatView = () => {
   const {
     messages, setMessages,
     input, setInput,
@@ -169,21 +223,96 @@ const Chat: React.FC = () => {
   const selectedCharacterCardIdRef = useRef(selectedCharacterCardId);
   const contextCompactionRef = useRef<SessionContextCompaction | null>(contextCompaction);
 
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isSavingConversation, setIsSavingConversation] = useState(false);
-  const [archiveAnalysis, setArchiveAnalysis] = useState<any>(null);
+  const [uiState, , setUiField] = useStateGroup<ChatUiState>({
+    isSettingsOpen: false,
+    isHistoryOpen: false,
+    isArchiveModalOpen: false,
+    isAnalyzing: false,
+    isSavingConversation: false,
+    archiveAnalysis: null,
+    editedTitle: '',
+    editedRelationType: '',
+    editedRelationModel: '',
+    editedRelationBottomLine: '',
+    editedEvents: '',
+    editingMessageId: null,
+    editingContent: '',
+  });
+  const {
+    isSettingsOpen,
+    isHistoryOpen,
+    isArchiveModalOpen,
+    isAnalyzing,
+    isSavingConversation,
+    archiveAnalysis,
+    editedTitle,
+    editedRelationType,
+    editedRelationModel,
+    editedRelationBottomLine,
+    editedEvents,
+    editingMessageId,
+    editingContent,
+  } = uiState;
+  const setIsSettingsOpen = (isSettingsOpen: boolean) => setUiField('isSettingsOpen', isSettingsOpen);
+  const setIsHistoryOpen = (isHistoryOpen: boolean) => setUiField('isHistoryOpen', isHistoryOpen);
+  const setIsArchiveModalOpen = (isArchiveModalOpen: boolean) => setUiField('isArchiveModalOpen', isArchiveModalOpen);
+  const setIsAnalyzing = (isAnalyzing: boolean) => setUiField('isAnalyzing', isAnalyzing);
+  const setIsSavingConversation = (isSavingConversation: boolean) => setUiField('isSavingConversation', isSavingConversation);
+  const setArchiveAnalysis = (archiveAnalysis: any) => setUiField('archiveAnalysis', archiveAnalysis);
+  const setEditedTitle = (editedTitle: string) => setUiField('editedTitle', editedTitle);
+  const setEditedRelationType = (editedRelationType: string) => setUiField('editedRelationType', editedRelationType);
+  const setEditedRelationModel = (editedRelationModel: string) => setUiField('editedRelationModel', editedRelationModel);
+  const setEditedRelationBottomLine = (editedRelationBottomLine: string) => setUiField('editedRelationBottomLine', editedRelationBottomLine);
+  const setEditedEvents = (editedEvents: string) => setUiField('editedEvents', editedEvents);
+  const setEditingMessageId = (editingMessageId: string | null) => setUiField('editingMessageId', editingMessageId);
+  const setEditingContent = (editingContent: string) => setUiField('editingContent', editingContent);
 
-  const [editedTitle, setEditedTitle] = useState('');
-  const [editedRelationType, setEditedRelationType] = useState('');
-  const [editedRelationModel, setEditedRelationModel] = useState('');
-  const [editedRelationBottomLine, setEditedRelationBottomLine] = useState('');
-  const [editedEvents, setEditedEvents] = useState('');
+  const refreshSessions = useCallback(async () => {
+    try {
+      const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'partner-session-' });
+      setSessions(summaries);
+    } catch (err) {
+      console.error('读取历史会话失败:', err);
+    }
+  }, [setSessions]);
 
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editingContent, setEditingContent] = useState('');
+  const ensureCurrentSessionId = useCallback(() => {
+    const nextSessionId = ensureSessionId(sessionIdRef.current, 'partner-session');
+    if (nextSessionId !== sessionIdRef.current) {
+      sessionIdRef.current = nextSessionId;
+      setSessionId(nextSessionId);
+    }
+    return nextSessionId;
+  }, [setSessionId]);
+
+  const saveCurrentSession = useCallback(async () => {
+    const userMessages = messagesRef.current.filter(m => m.role === 'user');
+    if (userMessages.length === 0) return false;
+    const currentSessionId = ensureCurrentSessionId();
+
+    try {
+      await invoke<AgentSessionSummary>('save_agent_session', {
+        session: {
+          id: currentSessionId,
+          title: sessionTitleRef.current,
+          savedAt: Date.now(),
+          messages: messagesRef.current,
+          selectedReferenceFiles: [],
+          selectedOutlineFile: null,
+          todos: [],
+          contextCompaction: contextCompactionRef.current,
+          isArchived: isSessionArchivedRef.current,
+          characterCardId: selectedCharacterCardIdRef.current,
+          selectedWorldBookId: selectedWorldBookIdRef.current
+        }
+      });
+      await refreshSessions();
+      return true;
+    } catch (err) {
+      console.error('保存会话失败:', err);
+      return false;
+    }
+  }, [ensureCurrentSessionId, refreshSessions]);
 
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -196,7 +325,7 @@ const Chat: React.FC = () => {
 
   useEffect(() => {
     void refreshSessions();
-  }, []);
+  }, [refreshSessions]);
 
   // Listen to stream events from tauri backend
   useEffect(() => {
@@ -301,7 +430,7 @@ const Chat: React.FC = () => {
       isMounted = false;
       if (unlistenFn) unlistenFn();
     };
-  }, []);
+  }, [setActiveRun, setContextCompaction, setIsStreaming, setMessages]);
 
   const scrollToBottomOnce = () => {
     window.requestAnimationFrame(() => {
@@ -558,41 +687,6 @@ const Chat: React.FC = () => {
     setExpandedBlocks((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const refreshSessions = async () => {
-    try {
-      const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'partner-session-' });
-      setSessions(summaries);
-    } catch (err) {
-      console.error('读取历史会话失败:', err);
-    }
-  };
-
-  const saveCurrentSession = async () => {
-    const userMessages = messagesRef.current.filter(m => m.role === 'user');
-    if (userMessages.length === 0) return;
-
-    try {
-      await invoke<AgentSessionSummary>('save_agent_session', {
-        session: {
-          id: sessionIdRef.current,
-          title: sessionTitleRef.current,
-          savedAt: Date.now(),
-          messages: messagesRef.current,
-          selectedReferenceFiles: [],
-          selectedOutlineFile: null,
-          todos: [],
-          contextCompaction: contextCompactionRef.current,
-          isArchived: isSessionArchivedRef.current,
-          characterCardId: selectedCharacterCardIdRef.current,
-          selectedWorldBookId: selectedWorldBookIdRef.current
-        }
-      });
-      await refreshSessions();
-    } catch (err) {
-      console.error('保存会话失败:', err);
-    }
-  };
-
   const handleSaveConversation = async () => {
     if (messages.length === 0 || isStreaming || isSessionArchived) {
       message.warning('当前无可保存的对话内容');
@@ -600,10 +694,13 @@ const Chat: React.FC = () => {
     }
     setIsSavingConversation(true);
     try {
-      const chatHistoryText = messages
-        .filter(m => m.role === 'user' || m.role === 'agent')
-        .map(m => `${m.role === 'user' ? '我' : '故事旁白与NPC'}: ${m.content.replace(/\[\[THINKING:[^\]]+\]\]/g, '').trim()}`)
-        .join('\n\n');
+      const chatHistoryLines: string[] = [];
+      for (const m of messages) {
+        if (m.role === 'user' || m.role === 'agent') {
+          chatHistoryLines.push(`${m.role === 'user' ? '我' : '故事旁白与NPC'}: ${m.content.replace(/\[\[THINKING:[^\]]+\]\]/g, '').trim()}`);
+        }
+      }
+      const chatHistoryText = chatHistoryLines.join('\n\n');
       const generatedTitle = await invoke<string>('summarize_text', {
         request: {
           modelInterface: settings.modelInterface,
@@ -617,7 +714,11 @@ const Chat: React.FC = () => {
       });
       sessionTitleRef.current = generatedTitle;
       setSessionTitle(generatedTitle);
-      await saveCurrentSession();
+      const saved = await saveCurrentSession();
+      if (!saved) {
+        message.error('保存对话失败，请稍后重试');
+        return;
+      }
       message.success('对话已保存');
     } catch (err) {
       console.error('保存对话失败:', err);
@@ -669,15 +770,18 @@ const Chat: React.FC = () => {
     setIsArchiveModalOpen(true);
     setArchiveAnalysis(null);
 
-    const chatHistoryText = messages
-      .filter(m => m.role === 'user' || m.role === 'agent')
-      .map(m => {
+    const chatHistoryLines: string[] = [];
+    for (const m of messages) {
+      if (m.role !== 'user' && m.role !== 'agent') {
+        continue;
+      }
         const sender = m.role === 'user' ? '我' : (selectedCharacterCard.name);
         const cleanContent = m.content.replace(/\[\[THINKING:[^\]]+\]\]/g, '').trim();
-        return `${sender}: ${cleanContent}`;
-      })
-      .filter(line => line.split(': ')[1] !== '')
-      .join('\n\n');
+      if (cleanContent !== '') {
+        chatHistoryLines.push(`${sender}: ${cleanContent}`);
+      }
+    }
+    const chatHistoryText = chatHistoryLines.join('\n\n');
 
     try {
       const archiveConfig = settings.agentConfigs?.chatArchive || {};
@@ -739,7 +843,10 @@ const Chat: React.FC = () => {
       isSessionArchivedRef.current = true;
 
       // 4. Save the archived session
-      await saveCurrentSession();
+      const saved = await saveCurrentSession();
+      if (!saved) {
+        throw new Error('保存归档会话失败');
+      }
 
       message.success('伴侣记忆封存成功！当前会话已锁定归档。');
       setIsArchiveModalOpen(false);
@@ -1178,18 +1285,7 @@ const Chat: React.FC = () => {
         </div>
       ) : (
         /* Empty/Home State - Center Input Box */
-        <div style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: '0 24px',
-          maxWidth: '800px',
-          margin: '0 auto',
-          width: '100%',
-          transition: 'all 0.5s ease'
-        }}>
+        <div style={CHAT_EMPTY_STATE_STYLE}>
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
             <MessageOutlined style={{ fontSize: '56px', color: '#d97757', marginBottom: '16px', opacity: 0.9 }} />
             <h2 style={{ fontSize: '26px', fontWeight: 600, color: '#33312e', margin: '0 0 8px 0', letterSpacing: '-0.5px' }}>
@@ -1218,8 +1314,7 @@ const Chat: React.FC = () => {
         width: '100%',
         maxWidth: hasMessages ? '100%' : '688px',
         margin: '0 auto',
-        boxSizing: 'border-box',
-        transition: 'all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1)'
+        boxSizing: 'border-box'
       }}>
         <div id="agent-composer-box" className="agent-composer__box" style={{
           boxShadow: hasMessages ? '0 2px 12px rgba(0, 0, 0, 0.04)' : '0 10px 30px rgba(217, 119, 87, 0.06)',
@@ -1250,7 +1345,7 @@ const Chat: React.FC = () => {
             value={input}
           />
 
-          <div className="agent-composer__actions" style={{ position: 'absolute', bottom: '12px', left: '16px', right: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
+          <div className="agent-composer__actions" style={CHAT_COMPOSER_ACTIONS_STYLE}>
             <Button
               aria-label="伴侣设置"
               icon={<SettingOutlined />}
@@ -1328,5 +1423,7 @@ function FoldBlock({
     </div>
   );
 }
+
+const Chat: React.FC = () => useChatView();
 
 export default Chat;

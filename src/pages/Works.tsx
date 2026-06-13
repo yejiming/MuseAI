@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import WorkspaceDirectory from '../components/WorkspaceDirectory';
 import MarkdownEditor from '../components/MarkdownEditor';
 import AgentChat from '../components/AgentChat';
@@ -9,6 +9,7 @@ import { Button, Cascader, Empty, Form, message, Modal, Popover, Progress, Tree 
 import { CheckCircleOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { ScoreDetailsModal } from '../components/ScoreDetailsModal';
+import { useStateGroup } from '../utils/reducerState';
 
 const MIN_FILE_TREE_WIDTH = 250;
 const MAX_FILE_TREE_WIDTH = 420;
@@ -24,6 +25,14 @@ interface FileNode {
   path: string;
   is_dir: boolean;
   children?: FileNode[];
+}
+
+interface WorksUiState {
+  isResizingFileTree: boolean;
+  isResizingAgent: boolean;
+  isSummarySettingsOpen: boolean;
+  scoreModalFile: string | null;
+  articleTree: FileNode[];
 }
 
 const ARTICLE_TYPE_OPTIONS = [
@@ -97,12 +106,40 @@ const normalizeSummaryScoreJson = (parsed: Record<string, unknown>, fields: stri
   return JSON.stringify(nextScore);
 };
 
+const collectArticleFiles = (nodes: FileNode[], keySet: Set<string>) => {
+  const selectedPaths: string[] = [];
+  const visit = (node: FileNode, selectedByParent: boolean) => {
+    const isSelected = selectedByParent || keySet.has(node.path);
+    if (!node.is_dir && isSelected) {
+      selectedPaths.push(node.path);
+      return;
+    }
+    node.children?.forEach((child) => visit(child, isSelected));
+  };
+  nodes.forEach((node) => visit(node, false));
+  return selectedPaths;
+};
+
 const Works: React.FC = () => {
-  const [isResizingFileTree, setIsResizingFileTree] = useState(false);
-  const [isResizingAgent, setIsResizingAgent] = useState(false);
-  const [isSummarySettingsOpen, setIsSummarySettingsOpen] = useState(false);
-  const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
-  const [articleTree, setArticleTree] = useState<FileNode[]>([]);
+  const [uiState, , setUiField] = useStateGroup<WorksUiState>({
+    isResizingFileTree: false,
+    isResizingAgent: false,
+    isSummarySettingsOpen: false,
+    scoreModalFile: null,
+    articleTree: [],
+  });
+  const {
+    isResizingFileTree,
+    isResizingAgent,
+    isSummarySettingsOpen,
+    scoreModalFile,
+    articleTree,
+  } = uiState;
+  const setIsResizingFileTree = useCallback((isResizingFileTree: boolean) => setUiField('isResizingFileTree', isResizingFileTree), [setUiField]);
+  const setIsResizingAgent = useCallback((isResizingAgent: boolean) => setUiField('isResizingAgent', isResizingAgent), [setUiField]);
+  const setIsSummarySettingsOpen = useCallback((isSummarySettingsOpen: boolean) => setUiField('isSummarySettingsOpen', isSummarySettingsOpen), [setUiField]);
+  const setScoreModalFile = useCallback((scoreModalFile: string | null) => setUiField('scoreModalFile', scoreModalFile), [setUiField]);
+  const setArticleTree = useCallback((articleTree: FileNode[]) => setUiField('articleTree', articleTree), [setUiField]);
   const runArticlePathsRef = useRef<string[]>([]);
 
   const fileTreeRef = useRef<HTMLDivElement>(null);
@@ -133,6 +170,7 @@ const Works: React.FC = () => {
 
   const scoreFields = useMemo(() => getScoreFields(settings.articleType), [settings.articleType]);
   const currentSummaryResult = selectedFile ? workSummaryResults[selectedFile] : null;
+  const isScoreModalOpen = Boolean(scoreModalFile && scoreModalFile === selectedFile && currentSummaryResult?.scoreJson);
   let parsedSummaryScore: any = null;
   let totalScore = 0;
   if (currentSummaryResult?.scoreJson) {
@@ -149,7 +187,7 @@ const Works: React.FC = () => {
     }
   }
 
-  const refreshCurrentSummaryResult = async (path: string | null) => {
+  const refreshCurrentSummaryResult = useCallback(async (path: string | null) => {
     if (!path) return;
     try {
       const scoreJson = await invoke<string | null>('load_work_summary_result', { articlePath: path });
@@ -159,9 +197,9 @@ const Works: React.FC = () => {
     } catch (e) {
       console.error('加载作品总结结果失败:', e);
     }
-  };
+  }, [setWorkSummaryResult]);
 
-  const loadArticleTree = async () => {
+  const loadArticleTree = useCallback(async () => {
     try {
       const root = await invoke<string>('get_workspace_dir', { dirType: 'articles' });
       const loadChildren = async (path: string): Promise<FileNode[]> => {
@@ -184,21 +222,7 @@ const Works: React.FC = () => {
       console.error(e);
       message.error('加载作品目录失败');
     }
-  };
-
-  const collectArticleFiles = (nodes: FileNode[], keySet: Set<string>) => {
-    const selectedPaths: string[] = [];
-    const visit = (node: FileNode, selectedByParent: boolean) => {
-      const isSelected = selectedByParent || keySet.has(node.path);
-      if (!node.is_dir && isSelected) {
-        selectedPaths.push(node.path);
-        return;
-      }
-      node.children?.forEach((child) => visit(child, isSelected));
-    };
-    nodes.forEach((node) => visit(node, false));
-    return selectedPaths;
-  };
+  }, [setArticleTree]);
 
   const mapArticleTree = (nodes: FileNode[]): any[] => nodes.map((node) => ({
     title: node.name,
@@ -216,7 +240,7 @@ const Works: React.FC = () => {
       const nextWidth = Math.min(Math.max(event.clientX - fileTreeLeft, MIN_FILE_TREE_WIDTH), MAX_FILE_TREE_WIDTH);
       setFileTreeWidth(nextWidth);
     };
-    const handleMouseUp = () => setIsResizingFileTree(false);
+    const handleMouseUp = () => setUiField('isResizingFileTree', false);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', handleMouseMove);
@@ -227,7 +251,7 @@ const Works: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizingFileTree]);
+  }, [isResizingFileTree, setFileTreeWidth, setUiField]);
 
   // Resize Agent
   useEffect(() => {
@@ -238,7 +262,7 @@ const Works: React.FC = () => {
       const nextWidth = Math.min(Math.max(windowWidth - event.clientX, MIN_AGENT_WIDTH), MAX_AGENT_WIDTH);
       setAgentWidth(nextWidth);
     };
-    const handleMouseUp = () => setIsResizingAgent(false);
+    const handleMouseUp = () => setUiField('isResizingAgent', false);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', handleMouseMove);
@@ -249,17 +273,28 @@ const Works: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizingAgent]);
+  }, [isResizingAgent, setAgentWidth, setUiField]);
 
   useEffect(() => {
     void refreshCurrentSummaryResult(selectedFile);
-  }, [selectedFile]);
+  }, [refreshCurrentSummaryResult, selectedFile]);
 
-  useEffect(() => {
-    if (isSummarySettingsOpen) {
-      void loadArticleTree();
-    }
-  }, [isSummarySettingsOpen]);
+  const openSummarySettings = useCallback(() => {
+    setIsSummarySettingsOpen(true);
+    void loadArticleTree();
+  }, [loadArticleTree, setIsSummarySettingsOpen]);
+
+  const workSummaryFooterLeft = useMemo(() => (
+    <Button
+      aria-label="作品总结设置"
+      className="de-ai-agent-settings-button"
+      icon={<SettingOutlined />}
+      onClick={openSummarySettings}
+      shape="circle"
+      title="作品总结设置"
+      type={workSummarySelectedArticlePaths.length > 0 ? 'primary' : 'default'}
+    />
+  ), [openSummarySettings, workSummarySelectedArticlePaths.length]);
 
   const buildWorkSummaryStart = () => {
     const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
@@ -295,9 +330,18 @@ const Works: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    setIsScoreModalOpen(false);
-  }, [selectedFile]);
+  const handleBeforeWorkSummaryStart = async () => {
+    if (workSummarySelectedArticlePaths.length === 0) {
+      message.warning('请先选择文章');
+      return undefined;
+    }
+    const start = buildWorkSummaryStart();
+    runArticlePathsRef.current = start.articlePaths;
+    return {
+      content: start.content,
+      allowedWritePaths: start.allowedWritePaths,
+    };
+  };
 
   const handleFileTreeSeparatorKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -314,255 +358,288 @@ const Works: React.FC = () => {
   };
 
   return (
-    <div style={{ height: '100%', width: '100%', overflowX: 'hidden', overflowY: 'hidden', background: '#faf9f5' }}>
-      <div style={{ display: 'flex', height: '100%', minWidth: fileTreeWidth + EDITOR_MIN_WIDTH + (isAgentVisible ? agentWidth : 0) }}>
-        {/* Left Column: File Explorer */}
-        <div ref={fileTreeRef} style={{
-          width: fileTreeWidth,
-          minWidth: fileTreeWidth,
-          position: 'relative',
-          borderRight: '1px solid rgba(0, 0, 0, 0.04)',
-          background: 'rgba(255, 255, 255, 0.3)'
-        }}>
-          <WorkspaceDirectory
-            title="作品目录"
-            dirType="articles"
-            selectedFile={selectedFile}
-            onSelectFile={setSelectedFile}
-          />
+    <WorksLayout
+      agentWidth={agentWidth}
+      articleTree={articleTree}
+      fileTreeRef={fileTreeRef}
+      fileTreeWidth={fileTreeWidth}
+      layoutState={{ isAgentVisible, isScoreModalOpen, isSummarySettingsOpen, isWorkSummaryOpen }}
+      parsedSummaryScore={parsedSummaryScore}
+      scoreFields={scoreFields}
+      selectedFile={selectedFile}
+      settings={settings}
+      totalScore={totalScore}
+      workSummaryFooterLeft={workSummaryFooterLeft}
+      workSummaryMessages={workSummaryMessages}
+      workSummaryPrompt={workSummaryPrompt}
+      workSummaryRun={workSummaryRun}
+      workSummaryRunning={workSummaryRunning}
+      workSummarySelectedArticlePaths={workSummarySelectedArticlePaths}
+      onAgentResizeKeyDown={handleAgentSeparatorKeyDown}
+      onBeforeWorkSummaryStart={handleBeforeWorkSummaryStart}
+      onCloseAgent={() => setIsAgentVisible(false)}
+      onCloseScoreModal={() => setScoreModalFile(null)}
+      onOpenAgent={() => setIsAgentVisible(true)}
+      onSelectArticleFiles={(keys) => setWorkSummarySelectedArticlePaths(collectArticleFiles(articleTree, new Set(keys.map(String))))}
+      onSelectFile={setSelectedFile}
+      onSetScoreModalFile={setScoreModalFile}
+      onSetSummaryMessages={setWorkSummaryMessages}
+      onSetSummaryRun={setWorkSummaryRun}
+      onSetSummaryRunning={setWorkSummaryRunning}
+      onStartAgentResize={() => setIsResizingAgent(true)}
+      onStartFileTreeResize={() => setIsResizingFileTree(true)}
+      onSummaryDone={handleSummaryDone}
+      onToggleSummary={() => setIsWorkSummaryOpen(!isWorkSummaryOpen)}
+      onToggleSummarySettings={setIsSummarySettingsOpen}
+      onTreeResizeKeyDown={handleFileTreeSeparatorKeyDown}
+      summaryTreeData={mapArticleTree(articleTree)}
+    />
+  );
+};
+
+interface WorksLayoutProps {
+  agentWidth: number;
+  articleTree: FileNode[];
+  fileTreeRef: React.RefObject<HTMLDivElement | null>;
+  fileTreeWidth: number;
+  layoutState: {
+    isAgentVisible: boolean;
+    isScoreModalOpen: boolean;
+    isSummarySettingsOpen: boolean;
+    isWorkSummaryOpen: boolean;
+  };
+  parsedSummaryScore: any;
+  scoreFields: string[];
+  selectedFile: string | null;
+  settings: any;
+  summaryTreeData: any[];
+  totalScore: number;
+  workSummaryFooterLeft: React.ReactNode;
+  workSummaryMessages: any;
+  workSummaryPrompt: string;
+  workSummaryRun: any;
+  workSummaryRunning: boolean;
+  workSummarySelectedArticlePaths: string[];
+  onAgentResizeKeyDown: (event: React.KeyboardEvent<HTMLElement>) => void;
+  onBeforeWorkSummaryStart: () => Promise<{ content: string; allowedWritePaths: string[] } | undefined>;
+  onCloseAgent: () => void;
+  onCloseScoreModal: () => void;
+  onOpenAgent: () => void;
+  onSelectArticleFiles: (keys: string[]) => void;
+  onSelectFile: (file: string | null) => void;
+  onSetScoreModalFile: (file: string | null) => void;
+  onSetSummaryMessages: any;
+  onSetSummaryRun: any;
+  onSetSummaryRunning: (running: boolean) => void;
+  onStartAgentResize: () => void;
+  onStartFileTreeResize: () => void;
+  onSummaryDone: (lastMessage: string) => Promise<string | undefined>;
+  onToggleSummary: () => void;
+  onToggleSummarySettings: (open: boolean) => void;
+  onTreeResizeKeyDown: (event: React.KeyboardEvent<HTMLElement>) => void;
+}
+
+const WorksLayout: React.FC<WorksLayoutProps> = ({
+  agentWidth,
+  fileTreeRef,
+  fileTreeWidth,
+  layoutState,
+  parsedSummaryScore,
+  scoreFields,
+  selectedFile,
+  settings,
+  summaryTreeData,
+  totalScore,
+  workSummaryFooterLeft,
+  workSummaryMessages,
+  workSummaryPrompt,
+  workSummaryRun,
+  workSummaryRunning,
+  workSummarySelectedArticlePaths,
+  onAgentResizeKeyDown,
+  onBeforeWorkSummaryStart,
+  onCloseAgent,
+  onCloseScoreModal,
+  onOpenAgent,
+  onSelectArticleFiles,
+  onSelectFile,
+  onSetScoreModalFile,
+  onSetSummaryMessages,
+  onSetSummaryRun,
+  onSetSummaryRunning,
+  onStartAgentResize,
+  onStartFileTreeResize,
+  onSummaryDone,
+  onToggleSummary,
+  onToggleSummarySettings,
+  onTreeResizeKeyDown,
+}) => {
+  const { isAgentVisible, isScoreModalOpen, isSummarySettingsOpen, isWorkSummaryOpen } = layoutState;
+
+  return (
+  <div style={{ height: '100%', width: '100%', overflowX: 'hidden', overflowY: 'hidden', background: '#faf9f5' }}>
+    <div style={{ display: 'flex', height: '100%', minWidth: fileTreeWidth + EDITOR_MIN_WIDTH + (isAgentVisible ? agentWidth : 0) }}>
+      <div ref={fileTreeRef} style={{ width: fileTreeWidth, minWidth: fileTreeWidth, position: 'relative', borderRight: '1px solid rgba(0, 0, 0, 0.04)', background: 'rgba(255, 255, 255, 0.3)' }}>
+        <WorkspaceDirectory title="作品目录" dirType="articles" selectedFile={selectedFile} onSelectFile={onSelectFile} />
+        <div
+          aria-label="调整文件树宽度"
+          aria-orientation="vertical"
+          role="separator"
+          tabIndex={0}
+          onMouseDown={onStartFileTreeResize}
+          onKeyDown={onTreeResizeKeyDown}
+          style={{ position: 'absolute', top: 0, right: -3, width: 6, height: '100%', cursor: 'col-resize', zIndex: 2 }}
+        />
+      </div>
+
+      <div style={{ flex: 1, minWidth: EDITOR_MIN_WIDTH, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        <div className="de-ai-editor-toolbar">
+          {selectedFile ? (
+            <div className="de-ai-editor-toolbar__primary">
+              <Button
+                type={isWorkSummaryOpen ? "default" : "primary"}
+                icon={<CheckCircleOutlined />}
+                onClick={onToggleSummary}
+                style={{
+                  background: isWorkSummaryOpen ? '#fff' : '#d97757',
+                  color: isWorkSummaryOpen ? '#333' : '#fff',
+                  border: isWorkSummaryOpen ? '1px solid #d9d9d9' : 'none',
+                  boxShadow: isWorkSummaryOpen ? 'none' : '0 4px 12px rgba(217, 119, 87, 0.2)'
+                }}
+              >
+                作品总结
+              </Button>
+            </div>
+          ) : <span />}
+
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flex: '1 1 auto', justifyContent: 'flex-end', minWidth: 0 }}>
+            {selectedFile && (
+              <>
+                <Popover
+                  placement="bottomRight"
+                  content={parsedSummaryScore ? (
+                    <div style={{ minWidth: 220 }}>
+                      {scoreFields.map((field) => (
+                        <div key={field} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span>{field}</span><span>{parsedSummaryScore[field] ?? 0}/20</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '8px 16px', color: '#999' }}>暂无作品评分</div>
+                  )}
+                >
+                  <button
+                    type="button"
+                    className="de-ai-score-pill"
+                    style={{ cursor: 'pointer', border: 0, background: 'transparent', padding: 0 }}
+                    aria-label={`作品评分${parsedSummaryScore ? totalScore : '暂无'}`}
+                    onClick={() => {
+                      if (parsedSummaryScore && selectedFile) onSetScoreModalFile(selectedFile);
+                    }}
+                  >
+                    <span className="de-ai-score-pill__label">作品分</span>
+                    <Progress
+                      type="circle"
+                      percent={parsedSummaryScore ? totalScore : 0}
+                      size={30}
+                      format={(p) => parsedSummaryScore ? p : '--'}
+                      status={parsedSummaryScore ? (totalScore > 80 ? 'success' : 'normal') : 'normal'}
+                      strokeColor={parsedSummaryScore ? undefined : "#e8e8e8"}
+                    />
+                  </button>
+                </Popover>
+                <ScoreDetailsModal
+                  isOpen={isScoreModalOpen}
+                  onClose={onCloseScoreModal}
+                  parsedAssessment={parsedSummaryScore}
+                  totalScore={totalScore}
+                  scoreFields={scoreFields}
+                  title="作品综合评分"
+                  chartTitle="作品多维评分"
+                />
+              </>
+            )}
+            {!isAgentVisible && (
+              <Button type="primary" icon={<RobotOutlined />} onClick={onOpenAgent} style={{ background: '#d97757', border: 'none', boxShadow: '0 4px 12px rgba(217, 119, 87, 0.2)', flexShrink: 0 }}>
+                打开 Agent
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+          <MarkdownEditor filePath={selectedFile} />
+        </div>
+
+        {isWorkSummaryOpen && (
+          <div style={{ height: 350, borderTop: '1px solid #e8e8e8', background: '#fff' }}>
+            <OutlineAssessmentAgentChat
+              title="作品总结 Agent"
+              agentId="workSummary"
+              workspaceDirType="articles"
+              systemPrompt={workSummaryPrompt}
+              allowedTools={['read', 'grep', 'glob', 'write']}
+              startContent={workSummarySelectedArticlePaths.length > 0 ? '开始作品总结' : ''}
+              startDisabled={workSummarySelectedArticlePaths.length === 0}
+              messages={workSummaryMessages}
+              setMessages={onSetSummaryMessages}
+              activeRun={workSummaryRun}
+              setActiveRun={onSetSummaryRun}
+              isRunning={workSummaryRunning}
+              onRunningChange={onSetSummaryRunning}
+              footerLeft={workSummaryFooterLeft}
+              onBeforeStart={onBeforeWorkSummaryStart}
+              onDone={onSummaryDone}
+            />
+          </div>
+        )}
+
+        <Modal title="作品总结 Agent 设置" open={isSummarySettingsOpen} okText="确定" cancelText="取消" width={640} onCancel={() => onToggleSummarySettings(false)} onOk={() => onToggleSummarySettings(false)} destroyOnClose>
+          <Form layout="vertical">
+            <Form.Item label="文章类型">
+              <Cascader value={settings.articleType} onChange={(val) => settings.setArticleType(val as string[])} options={ARTICLE_TYPE_OPTIONS} placeholder="请选择文章类型" style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item label="文章选择" style={{ marginBottom: 0 }}>
+              <div className="de-ai-reference-picker">
+                {summaryTreeData.length > 0 ? (
+                  <Tree
+                    blockNode
+                    checkable
+                    checkedKeys={workSummarySelectedArticlePaths}
+                    className="de-ai-reference-picker__tree"
+                    onCheck={(checkedKeys) => {
+                      const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
+                      onSelectArticleFiles(keys.map(String));
+                    }}
+                    selectable={false}
+                    treeData={summaryTreeData}
+                  />
+                ) : (
+                  <Empty description="作品目录暂无可选文章" />
+                )}
+              </div>
+            </Form.Item>
+          </Form>
+        </Modal>
+      </div>
+
+      {isAgentVisible && (
+        <div style={{ width: agentWidth, minWidth: agentWidth, position: 'relative', borderLeft: '1px solid rgba(0, 0, 0, 0.04)', background: '#fff' }}>
           <div
-            aria-label="调整文件树宽度"
+            aria-label="调整 Agent 宽度"
             aria-orientation="vertical"
             role="separator"
             tabIndex={0}
-            onMouseDown={() => setIsResizingFileTree(true)}
-            onKeyDown={handleFileTreeSeparatorKeyDown}
-            style={{
-              position: 'absolute',
-              top: 0,
-              right: -3,
-              width: 6,
-              height: '100%',
-              cursor: 'col-resize',
-              zIndex: 2,
-            }}
+            onMouseDown={onStartAgentResize}
+            onKeyDown={onAgentResizeKeyDown}
+            style={{ position: 'absolute', top: 0, left: -3, width: 6, height: '100%', cursor: 'col-resize', zIndex: 2 }}
           />
+          <AgentChat title="写文章Agent" onClose={onCloseAgent} />
         </div>
-
-        {/* Middle Column: Markdown Editor */}
-        <div style={{ flex: 1, minWidth: EDITOR_MIN_WIDTH, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-          <div className="de-ai-editor-toolbar">
-            {selectedFile ? (
-              <div className="de-ai-editor-toolbar__primary">
-                <Button
-                  type={isWorkSummaryOpen ? "default" : "primary"}
-                  icon={<CheckCircleOutlined />}
-                  onClick={() => setIsWorkSummaryOpen(!isWorkSummaryOpen)}
-                  style={{
-                    background: isWorkSummaryOpen ? '#fff' : '#d97757',
-                    color: isWorkSummaryOpen ? '#333' : '#fff',
-                    border: isWorkSummaryOpen ? '1px solid #d9d9d9' : 'none',
-                    boxShadow: isWorkSummaryOpen ? 'none' : '0 4px 12px rgba(217, 119, 87, 0.2)'
-                  }}
-                >
-                  作品总结
-                </Button>
-              </div>
-            ) : <span />}
-
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center', flex: '1 1 auto', justifyContent: 'flex-end', minWidth: 0 }}>
-              {selectedFile && (
-                <>
-                  <Popover
-                    placement="bottomRight"
-                    content={
-                      parsedSummaryScore ? (
-                        <div style={{ minWidth: 220 }}>
-                          {scoreFields.map((field) => (
-                            <div key={field} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                              <span>{field}</span><span>{parsedSummaryScore[field] ?? 0}/20</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div style={{ padding: '8px 16px', color: '#999' }}>暂无作品评分</div>
-                      )
-                    }
-                  >
-                    <button 
-                      type="button"
-                      className="de-ai-score-pill" 
-                      style={{ cursor: 'pointer', border: 0, background: 'transparent', padding: 0 }} 
-                      aria-label={`作品评分${parsedSummaryScore ? totalScore : '暂无'}`}
-                      onClick={() => {
-                        if (parsedSummaryScore) {
-                          setIsScoreModalOpen(true);
-                        }
-                      }}
-                    >
-                      <span className="de-ai-score-pill__label">作品分</span>
-                      <Progress 
-                        type="circle" 
-                        percent={parsedSummaryScore ? totalScore : 0} 
-                        size={30} 
-                        format={(p) => parsedSummaryScore ? p : '--'}
-                        status={parsedSummaryScore ? (totalScore > 80 ? 'success' : 'normal') : 'normal'}
-                        strokeColor={parsedSummaryScore ? undefined : "#e8e8e8"} 
-                      />
-                    </button>
-                  </Popover>
-                  <ScoreDetailsModal 
-                    isOpen={isScoreModalOpen} 
-                    onClose={() => setIsScoreModalOpen(false)} 
-                    parsedAssessment={parsedSummaryScore} 
-                    totalScore={totalScore} 
-                    scoreFields={scoreFields}
-                    title="作品综合评分"
-                    chartTitle="作品多维评分"
-                  />
-                </>
-              )}
-              {!isAgentVisible && (
-                <Button
-                  type="primary"
-                  icon={<RobotOutlined />}
-                  onClick={() => setIsAgentVisible(true)}
-                  style={{
-                    background: '#d97757',
-                    border: 'none',
-                    boxShadow: '0 4px 12px rgba(217, 119, 87, 0.2)',
-                    flexShrink: 0
-                  }}
-                >
-                  打开 Agent
-                </Button>
-              )}
-            </div>
-          </div>
-
-          <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-            <MarkdownEditor filePath={selectedFile} />
-          </div>
-
-          {isWorkSummaryOpen && (
-            <div style={{ height: 350, borderTop: '1px solid #e8e8e8', background: '#fff' }}>
-              <OutlineAssessmentAgentChat
-                title="作品总结 Agent"
-                agentId="workSummary"
-                workspaceDirType="articles"
-                systemPrompt={workSummaryPrompt}
-                allowedTools={['read', 'grep', 'glob', 'write']}
-                startContent={workSummarySelectedArticlePaths.length > 0 ? '开始作品总结' : ''}
-                startDisabled={workSummarySelectedArticlePaths.length === 0}
-                messages={workSummaryMessages}
-                setMessages={setWorkSummaryMessages}
-                activeRun={workSummaryRun}
-                setActiveRun={setWorkSummaryRun}
-                isRunning={workSummaryRunning}
-                onRunningChange={setWorkSummaryRunning}
-                footerLeft={(
-                  <Button
-                    aria-label="作品总结设置"
-                    className="de-ai-agent-settings-button"
-                    icon={<SettingOutlined />}
-                    onClick={() => setIsSummarySettingsOpen(true)}
-                    shape="circle"
-                    title="作品总结设置"
-                    type={workSummarySelectedArticlePaths.length > 0 ? 'primary' : 'default'}
-                  />
-                )}
-                onBeforeStart={async () => {
-                  if (workSummarySelectedArticlePaths.length === 0) {
-                    message.warning('请先选择文章');
-                    return undefined;
-                  }
-                  const start = buildWorkSummaryStart();
-                  runArticlePathsRef.current = start.articlePaths;
-                  return {
-                    content: start.content,
-                    allowedWritePaths: start.allowedWritePaths,
-                  };
-                }}
-                onDone={handleSummaryDone}
-              />
-            </div>
-          )}
-
-          <Modal
-            title="作品总结 Agent 设置"
-            open={isSummarySettingsOpen}
-            okText="确定"
-            cancelText="取消"
-            width={640}
-            onCancel={() => setIsSummarySettingsOpen(false)}
-            onOk={() => setIsSummarySettingsOpen(false)}
-            destroyOnClose
-          >
-            <Form layout="vertical">
-              <Form.Item label="文章类型">
-                <Cascader
-                  value={settings.articleType}
-                  onChange={(val) => settings.setArticleType(val as string[])}
-                  options={ARTICLE_TYPE_OPTIONS}
-                  placeholder="请选择文章类型"
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-              <Form.Item label="文章选择" style={{ marginBottom: 0 }}>
-                <div className="de-ai-reference-picker">
-                  {articleTree.length > 0 ? (
-                    <Tree
-                      blockNode
-                      checkable
-                      checkedKeys={workSummarySelectedArticlePaths}
-                      className="de-ai-reference-picker__tree"
-                      onCheck={(checkedKeys) => {
-                        const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
-                        setWorkSummarySelectedArticlePaths(collectArticleFiles(articleTree, new Set(keys.map(String))));
-                      }}
-                      selectable={false}
-                      treeData={mapArticleTree(articleTree)}
-                    />
-                  ) : (
-                    <Empty description="作品目录暂无可选文章" />
-                  )}
-                </div>
-              </Form.Item>
-            </Form>
-          </Modal>
-        </div>
-
-        {/* Right Column: Agent Chat */}
-        {isAgentVisible && (
-          <div style={{
-            width: agentWidth,
-            minWidth: agentWidth,
-            position: 'relative',
-            borderLeft: '1px solid rgba(0, 0, 0, 0.04)',
-            background: '#fff',
-          }}>
-            <div
-              aria-label="调整 Agent 宽度"
-              aria-orientation="vertical"
-              role="separator"
-              tabIndex={0}
-              onMouseDown={() => setIsResizingAgent(true)}
-              onKeyDown={handleAgentSeparatorKeyDown}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: -3,
-                width: 6,
-                height: '100%',
-                cursor: 'col-resize',
-                zIndex: 2,
-              }}
-            />
-            <AgentChat title="写文章Agent" onClose={() => setIsAgentVisible(false)} />
-          </div>
-        )}
-      </div>
+      )}
     </div>
+  </div>
   );
 };
 

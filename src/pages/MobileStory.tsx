@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Select, Button, Input, Modal, Spin, message, Radio, Switch, Checkbox } from 'antd';
 import {
   PlusOutlined,
@@ -20,6 +20,8 @@ import { useSettingsStore } from '../stores/useSettingsStore';
 import { appInvoke, listenStream } from '../utils/runtime';
 import { parseArchiveAnalysisResponse } from '../utils/archiveAnalysis';
 import { createStableContentKey, createStableToolKey } from '../utils/renderKeys';
+import { useStateGroup } from '../utils/reducerState';
+import { ensureSessionId } from '../utils/sessionIds';
 import {
   compileStorySystemPrompt,
   buildStoryModelMessages,
@@ -28,7 +30,58 @@ import {
 } from './storyAgent';
 import type { Message, AgentSessionSummary, AgentToolEntry } from '../stores/useAgentStore';
 
-const MobileStory: React.FC = () => {
+interface MobileStoryUiState {
+  isArchiveModalOpen: boolean;
+  isAnalyzing: boolean;
+  isSavingConversation: boolean;
+  archiveAnalyses: Record<string, any>;
+  hasStartedAnalysis: boolean;
+  tempSelectedCardIds: string[];
+  selectedTargetCardId: string;
+  editedTitle: string;
+  editedRelationTypes: Record<string, string>;
+  editedRelationModels: Record<string, string>;
+  editedRelationBottomLines: Record<string, string>;
+  editedEventsMap: Record<string, string>;
+}
+
+const MOBILE_STORY_COLLAPSIBLE_BUTTON_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+  fontSize: '12px',
+  cursor: 'pointer',
+  fontWeight: 600,
+  border: 'none',
+  background: 'transparent',
+  padding: 0,
+  font: 'inherit',
+  width: '100%',
+  textAlign: 'left',
+};
+
+const MOBILE_STORY_ACTIVE_COMPANIONS_BAR_STYLE: React.CSSProperties = {
+  padding: '6px 16px',
+  backgroundColor: '#fff',
+  borderBottom: '1px solid rgba(217, 119, 87, 0.05)',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+  fontSize: '11px',
+  color: '#8c8880',
+  flexShrink: 0,
+};
+
+const MOBILE_STORY_MESSAGE_BUBBLE_BASE_STYLE: React.CSSProperties = {
+  maxWidth: '90%',
+  borderRadius: '16px',
+  padding: '12px 16px',
+  boxShadow: '0 2px 10px rgba(0, 0, 0, 0.01)',
+  fontSize: '14px',
+  lineHeight: 1.6,
+};
+
+const useMobileStoryView = () => {
   const {
     messages,
     input,
@@ -43,6 +96,7 @@ const MobileStory: React.FC = () => {
     activeRun,
     isSessionArchived,
     initialPlot,
+    contextCompaction,
     dynamicRoleLoadingEnabled,
     setMessages,
     setInput,
@@ -65,25 +119,52 @@ const MobileStory: React.FC = () => {
   const { characterCards, worldBooks } = usePartnerStore();
   const settings = useSettingsStore();
 
-  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isSavingConversation, setIsSavingConversation] = useState(false);
-  const [archiveAnalyses, setArchiveAnalyses] = useState<Record<string, any>>({});
-  const [hasStartedAnalysis, setHasStartedAnalysis] = useState(false);
-  const [tempSelectedCardIds, setTempSelectedCardIds] = useState<string[]>([]);
-  const [selectedTargetCardId, setSelectedTargetCardId] = useState('');
-
-  // Archive fields
-  const [editedTitle, setEditedTitle] = useState('');
-  const [editedRelationTypes, setEditedRelationTypes] = useState<Record<string, string>>({});
-  const [editedRelationModels, setEditedRelationModels] = useState<Record<string, string>>({});
-  const [editedRelationBottomLines, setEditedRelationBottomLines] = useState<Record<string, string>>({});
-  const [editedEventsMap, setEditedEventsMap] = useState<Record<string, string>>({});
+  const [uiState, , setUiField] = useStateGroup<MobileStoryUiState>({
+    isArchiveModalOpen: false,
+    isAnalyzing: false,
+    isSavingConversation: false,
+    archiveAnalyses: {},
+    hasStartedAnalysis: false,
+    tempSelectedCardIds: [],
+    selectedTargetCardId: '',
+    editedTitle: '',
+    editedRelationTypes: {},
+    editedRelationModels: {},
+    editedRelationBottomLines: {},
+    editedEventsMap: {},
+  });
+  const {
+    isArchiveModalOpen,
+    isAnalyzing,
+    isSavingConversation,
+    archiveAnalyses,
+    hasStartedAnalysis,
+    tempSelectedCardIds,
+    selectedTargetCardId,
+    editedTitle,
+    editedRelationTypes,
+    editedRelationModels,
+    editedRelationBottomLines,
+    editedEventsMap,
+  } = uiState;
+  const setIsArchiveModalOpen = (isArchiveModalOpen: boolean) => setUiField('isArchiveModalOpen', isArchiveModalOpen);
+  const setIsAnalyzing = (isAnalyzing: boolean) => setUiField('isAnalyzing', isAnalyzing);
+  const setIsSavingConversation = (isSavingConversation: boolean) => setUiField('isSavingConversation', isSavingConversation);
+  const setArchiveAnalyses = (archiveAnalyses: Record<string, any>) => setUiField('archiveAnalyses', archiveAnalyses);
+  const setHasStartedAnalysis = (hasStartedAnalysis: boolean) => setUiField('hasStartedAnalysis', hasStartedAnalysis);
+  const setTempSelectedCardIds = (tempSelectedCardIds: React.SetStateAction<string[]>) => setUiField('tempSelectedCardIds', tempSelectedCardIds);
+  const setSelectedTargetCardId = (selectedTargetCardId: string) => setUiField('selectedTargetCardId', selectedTargetCardId);
+  const setEditedTitle = (editedTitle: string) => setUiField('editedTitle', editedTitle);
+  const setEditedRelationTypes = (editedRelationTypes: React.SetStateAction<Record<string, string>>) => setUiField('editedRelationTypes', editedRelationTypes);
+  const setEditedRelationModels = (editedRelationModels: React.SetStateAction<Record<string, string>>) => setUiField('editedRelationModels', editedRelationModels);
+  const setEditedRelationBottomLines = (editedRelationBottomLines: React.SetStateAction<Record<string, string>>) => setUiField('editedRelationBottomLines', editedRelationBottomLines);
+  const setEditedEventsMap = (editedEventsMap: React.SetStateAction<Record<string, string>>) => setUiField('editedEventsMap', editedEventsMap);
 
   const chatListRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<Message[]>(messages);
   const activeRunRef = useRef(activeRun);
+  const contextCompactionRef = useRef(contextCompaction);
   const currentThinkingIdRef = useRef<string | null>(null);
   const selectedCards = characterCards.filter(cc => selectedCharacterCardIds.includes(cc.id));
 
@@ -94,6 +175,10 @@ const MobileStory: React.FC = () => {
   useEffect(() => {
     activeRunRef.current = activeRun;
   }, [activeRun]);
+
+  useEffect(() => {
+    contextCompactionRef.current = contextCompaction;
+  }, [contextCompaction]);
 
   const scrollToBottom = () => {
     if (chatListRef.current) {
@@ -113,21 +198,25 @@ const MobileStory: React.FC = () => {
     appInvoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'story-session-' })
       .then((list) => setSessions(list))
       .catch((e) => console.error('加载故事列表失败:', e));
-  }, []);
+  }, [setSessions]);
 
   const saveCurrentSession = async (customMessages?: Message[]) => {
     const list = customMessages || messagesRef.current;
     if (list.length === 0) return false;
+    const currentSessionId = ensureSessionId(sessionId, 'story-session');
+    if (currentSessionId !== sessionId) {
+      setSessionId(currentSessionId);
+    }
     try {
       const record = {
-        id: sessionId,
+        id: currentSessionId,
         title: sessionTitle,
         messages: list,
         savedAt: Date.now(),
         selectedReferenceFiles: [],
         selectedOutlineFile: null,
         todos: [],
-        contextCompaction: null,
+        contextCompaction: contextCompactionRef.current,
         isArchived: isSessionArchived,
         characterCardIds: selectedCharacterCardIds,
         selectedWorldBookId,
@@ -152,16 +241,23 @@ const MobileStory: React.FC = () => {
     }
     setIsSavingConversation(true);
     try {
-      const chatHistoryText = messages
-        .filter(m => m.role === 'user' || m.role === 'agent')
-        .map(m => `${m.role === 'user' ? '我' : '故事旁白与NPC'}: ${m.content.replace(/\[\[THINKING:[^\]]+\]\]/g, '').trim()}`)
-        .join('\n\n');
+      const chatHistoryLines: string[] = [];
+      for (const m of messages) {
+        if (m.role === 'user' || m.role === 'agent') {
+          chatHistoryLines.push(`${m.role === 'user' ? '我' : '故事旁白与NPC'}: ${m.content.replace(/\[\[THINKING:[^\]]+\]\]/g, '').trim()}`);
+        }
+      }
+      const chatHistoryText = chatHistoryLines.join('\n\n');
       const res = await appInvoke<{ title: string }>('summarize_text', {
         request: { text: chatHistoryText }
       });
       const generatedTitle = res.title;
       setSessionTitle(generatedTitle);
-      await saveCurrentSession();
+      const saved = await saveCurrentSession();
+      if (!saved) {
+        message.error('保存对话失败，请稍后重试');
+        return;
+      }
       message.success('对话已保存');
     } catch (err) {
       console.error('保存对话失败:', err);
@@ -183,6 +279,9 @@ const MobileStory: React.FC = () => {
       setMessages(record.messages || []);
       setSelectedCharacterCardIds(record.characterCardIds ?? record.character_card_ids ?? []);
       setSelectedWorldBookId(record.selectedWorldBookId ?? record.selected_world_book_id ?? null);
+      const loadedContextCompaction = record.contextCompaction ?? record.context_compaction ?? null;
+      contextCompactionRef.current = loadedContextCompaction;
+      setContextCompaction(loadedContextCompaction);
       setIsSessionArchived(record.isArchived ?? record.is_archived ?? false);
       setDynamicRoleLoadingEnabled(record.dynamicRoleLoadingEnabled ?? record.dynamic_role_loading_enabled ?? false);
     } catch (e) {
@@ -239,6 +338,8 @@ const MobileStory: React.FC = () => {
     };
 
     const nextMessages = [userMsg, pendingAgentMsg];
+    contextCompactionRef.current = null;
+    setContextCompaction(null);
     setMessages(nextMessages);
     setIsStreaming(true);
 
@@ -298,6 +399,7 @@ const MobileStory: React.FC = () => {
           thinkingDepth: settings.agentConfigs?.storyAgent?.thinkingDepth ?? 'off',
           systemPrompt,
           messages: modelMessages,
+          contextCompaction: contextCompactionRef.current,
           allowedTools: getStoryAllowedTools(dynamicRoleLoadingEnabled),
           rolePlayContext,
         }
@@ -312,6 +414,7 @@ const MobileStory: React.FC = () => {
           if (payload.runId !== runId) return;
 
           if (payload.eventType === 'context_compacted' && payload.contextCompaction) {
+            contextCompactionRef.current = payload.contextCompaction;
             setContextCompaction(payload.contextCompaction);
             return;
           }
@@ -623,21 +726,7 @@ const MobileStory: React.FC = () => {
         <button
           type="button"
           onClick={() => toggleBlock(toolKey)}
-          style={{
-            fontSize: '12px',
-            color: '#8c8880',
-            cursor: 'pointer',
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            border: 'none',
-            background: 'transparent',
-            padding: 0,
-            font: 'inherit',
-            width: '100%',
-            textAlign: 'left',
-          }}
+          style={{ ...MOBILE_STORY_COLLAPSIBLE_BUTTON_STYLE, color: '#8c8880' }}
         >
           <InfoCircleOutlined />
           <span>系统工具调用：{tool.name} (点击{isExpanded ? '折叠' : '展开'})</span>
@@ -796,25 +885,15 @@ const MobileStory: React.FC = () => {
           /* Active Adventure Flow */
           <>
             {/* Active companions info bar */}
-            <div style={{
-              padding: '6px 16px',
-              backgroundColor: '#fff',
-              borderBottom: '1px solid rgba(217, 119, 87, 0.05)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '11px',
-              color: '#8c8880',
-              flexShrink: 0,
-            }}>
+            <div style={MOBILE_STORY_ACTIVE_COMPANIONS_BAR_STYLE}>
               <BookOutlined style={{ color: '#d97757' }} />
               <span>
-                参与角色：{
-                  characterCards
-                    .filter(c => selectedCharacterCardIds.includes(c.id))
-                    .map(c => c.name)
-                    .join('，')
-                }
+                参与角色：{characterCards.reduce<string[]>((names, c) => {
+                  if (selectedCharacterCardIds.includes(c.id)) {
+                    names.push(c.name);
+                  }
+                  return names;
+                }, []).join('，')}
               </span>
             </div>
 
@@ -842,15 +921,10 @@ const MobileStory: React.FC = () => {
                     }}
                   >
                     <div style={{
-                      maxWidth: '90%',
+                      ...MOBILE_STORY_MESSAGE_BUBBLE_BASE_STYLE,
                       backgroundColor: isUser ? '#d97757' : '#fff',
                       color: isUser ? '#fff' : '#33312e',
-                      borderRadius: '16px',
-                      padding: '12px 16px',
-                      boxShadow: '0 2px 10px rgba(0, 0, 0, 0.01)',
                       border: isUser ? 'none' : '1px solid rgba(217, 119, 87, 0.05)',
-                      fontSize: '14px',
-                      lineHeight: 1.6,
                     }}>
                       {isUser ? (
                         <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
@@ -892,21 +966,7 @@ const MobileStory: React.FC = () => {
                                     <button
                                       type="button"
                                       onClick={() => toggleBlock(`${msg.id}-${thinkingId}`)}
-                                      style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '6px',
-                                        fontSize: '12px',
-                                        color: '#d97757',
-                                        cursor: 'pointer',
-                                        fontWeight: 600,
-                                        border: 'none',
-                                        background: 'transparent',
-                                        padding: 0,
-                                        font: 'inherit',
-                                        width: '100%',
-                                        textAlign: 'left',
-                                      }}
+                                      style={{ ...MOBILE_STORY_COLLAPSIBLE_BUTTON_STYLE, color: '#d97757' }}
                                     >
                                       <BulbOutlined />
                                       <span>冒险思考过程 (点击{isExpanded ? '折叠' : '展开'})</span>
@@ -1114,9 +1174,12 @@ const MobileStory: React.FC = () => {
                 value={selectedTargetCardId}
                 onChange={setSelectedTargetCardId}
                 style={{ width: '100%' }}
-                options={selectedCards
-                  .filter(card => tempSelectedCardIds.includes(card.id))
-                  .map(card => ({ value: card.id, label: card.name }))}
+                options={selectedCards.reduce<{ value: string; label: string }[]>((options, card) => {
+                  if (tempSelectedCardIds.includes(card.id)) {
+                    options.push({ value: card.id, label: card.name });
+                  }
+                  return options;
+                }, [])}
               />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1182,5 +1245,7 @@ const MobileStory: React.FC = () => {
     </div>
   );
 };
+
+const MobileStory: React.FC = () => useMobileStoryView();
 
 export default MobileStory;

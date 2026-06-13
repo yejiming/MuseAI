@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Modal, Form, Select, Input, Collapse, Button, message } from 'antd';
 import { usePartnerStore } from '../stores/usePartnerStore';
 import { usePartnerChatStore } from '../stores/usePartnerChatStore';
@@ -25,23 +25,19 @@ export const PartnerChatSettingsModal: React.FC<PartnerChatSettingsModalProps> =
     setUserInfo
   } = usePartnerChatStore();
 
-  // Load initial values when modal opens
-  useEffect(() => {
-    if (open) {
-      // Validate selected IDs exist in store, reset if deleted
-      const validWorldBookId = worldBooks.some(wb => wb.id === selectedWorldBookId) ? selectedWorldBookId : null;
-      const validCharacterCardId = characterCards.some(cc => cc.id === selectedCharacterCardId) ? selectedCharacterCardId : null;
+  const syncFormValues = () => {
+    const validWorldBookId = worldBooks.some(wb => wb.id === selectedWorldBookId) ? selectedWorldBookId : null;
+    const validCharacterCardId = characterCards.some(cc => cc.id === selectedCharacterCardId) ? selectedCharacterCardId : null;
 
-      if (validWorldBookId !== selectedWorldBookId) setSelectedWorldBookId(validWorldBookId);
-      if (validCharacterCardId !== selectedCharacterCardId) setSelectedCharacterCardId(validCharacterCardId);
+    if (validWorldBookId !== selectedWorldBookId) setSelectedWorldBookId(validWorldBookId);
+    if (validCharacterCardId !== selectedCharacterCardId) setSelectedCharacterCardId(validCharacterCardId);
 
-      form.setFieldsValue({
-        worldBookId: validWorldBookId,
-        characterCardId: validCharacterCardId,
-        ...userInfo
-      });
-    }
-  }, [open, selectedWorldBookId, selectedCharacterCardId, userInfo, worldBooks, characterCards, form, setSelectedWorldBookId, setSelectedCharacterCardId]);
+    form.setFieldsValue({
+      worldBookId: validWorldBookId,
+      characterCardId: validCharacterCardId,
+      ...userInfo
+    });
+  };
 
   const handleSave = () => {
     const values = form.getFieldsValue();
@@ -95,6 +91,9 @@ export const PartnerChatSettingsModal: React.FC<PartnerChatSettingsModalProps> =
       }
       open={open}
       width={680}
+      afterOpenChange={(visible) => {
+        if (visible) syncFormValues();
+      }}
       onCancel={onCancel}
       onOk={handleSave}
       okText="确认保存"

@@ -2,6 +2,32 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MessageOutlined, FireOutlined, HeartOutlined, WifiOutlined } from '@ant-design/icons';
 
+const MOBILE_HOME_ENTRY_BUTTON_STYLE: React.CSSProperties = {
+  backgroundColor: '#fff',
+  borderRadius: '16px',
+  padding: '20px',
+  display: 'flex',
+  alignItems: 'center',
+  cursor: 'pointer',
+  boxShadow: '0 4px 20px rgba(217, 119, 87, 0.02)',
+  border: '1px solid rgba(217, 119, 87, 0.05)',
+  transition: 'transform 0.2s',
+  width: '100%',
+  font: 'inherit',
+  textAlign: 'left',
+};
+
+const MOBILE_HOME_ENTRY_ICON_STYLE: React.CSSProperties = {
+  width: '48px',
+  height: '48px',
+  borderRadius: '12px',
+  backgroundColor: 'rgba(217, 119, 87, 0.1)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  marginRight: '16px',
+};
+
 const MobileHome: React.FC = () => {
   const navigate = useNavigate();
 
@@ -39,31 +65,9 @@ const MobileHome: React.FC = () => {
         <button
           type="button"
           onClick={() => navigate('/chat')}
-          style={{
-            backgroundColor: '#fff',
-            borderRadius: '16px',
-            padding: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            cursor: 'pointer',
-            boxShadow: '0 4px 20px rgba(217, 119, 87, 0.02)',
-            border: '1px solid rgba(217, 119, 87, 0.05)',
-            transition: 'transform 0.2s',
-            width: '100%',
-            font: 'inherit',
-            textAlign: 'left',
-          }}
+          style={MOBILE_HOME_ENTRY_BUTTON_STYLE}
         >
-          <div style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '12px',
-            backgroundColor: 'rgba(217, 119, 87, 0.1)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginRight: '16px',
-          }}>
+          <div style={MOBILE_HOME_ENTRY_ICON_STYLE}>
             <MessageOutlined style={{ fontSize: '22px', color: '#d97757' }} />
           </div>
           <div style={{ flex: 1 }}>
@@ -76,31 +80,9 @@ const MobileHome: React.FC = () => {
         <button
           type="button"
           onClick={() => navigate('/story')}
-          style={{
-            backgroundColor: '#fff',
-            borderRadius: '16px',
-            padding: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            cursor: 'pointer',
-            boxShadow: '0 4px 20px rgba(217, 119, 87, 0.02)',
-            border: '1px solid rgba(217, 119, 87, 0.05)',
-            transition: 'transform 0.2s',
-            width: '100%',
-            font: 'inherit',
-            textAlign: 'left',
-          }}
+          style={MOBILE_HOME_ENTRY_BUTTON_STYLE}
         >
-          <div style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '12px',
-            backgroundColor: 'rgba(217, 119, 87, 0.1)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginRight: '16px',
-          }}>
+          <div style={MOBILE_HOME_ENTRY_ICON_STYLE}>
             <FireOutlined style={{ fontSize: '22px', color: '#d97757' }} />
           </div>
           <div style={{ flex: 1 }}>
@@ -113,31 +95,9 @@ const MobileHome: React.FC = () => {
         <button
           type="button"
           onClick={() => navigate('/bond')}
-          style={{
-            backgroundColor: '#fff',
-            borderRadius: '16px',
-            padding: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            cursor: 'pointer',
-            boxShadow: '0 4px 20px rgba(217, 119, 87, 0.02)',
-            border: '1px solid rgba(217, 119, 87, 0.05)',
-            transition: 'transform 0.2s',
-            width: '100%',
-            font: 'inherit',
-            textAlign: 'left',
-          }}
+          style={MOBILE_HOME_ENTRY_BUTTON_STYLE}
         >
-          <div style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '12px',
-            backgroundColor: 'rgba(217, 119, 87, 0.1)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginRight: '16px',
-          }}>
+          <div style={MOBILE_HOME_ENTRY_ICON_STYLE}>
             <HeartOutlined style={{ fontSize: '22px', color: '#d97757' }} />
           </div>
           <div style={{ flex: 1 }}>

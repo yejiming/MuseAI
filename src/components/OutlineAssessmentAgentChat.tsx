@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Tooltip } from 'antd';
 import { BulbOutlined, InfoCircleOutlined, PlayCircleOutlined, ReloadOutlined, RobotOutlined, StopOutlined, ToolOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
@@ -35,7 +35,6 @@ interface OutlineAssessmentAgentChatProps {
   setMessages: (messages: Message[] | ((messages: Message[]) => Message[])) => void;
   activeRun: { runId: string | null; messageId: string | null };
   setActiveRun: (run: { runId: string | null; messageId: string | null }) => void;
-  autoTriggerContent?: string;
   onDone?: (lastAgentMessage: string) => void | string | Promise<void | string>;
   isRunning?: boolean;
   onRunningChange?: (running: boolean) => void;
@@ -46,7 +45,7 @@ interface StartOverride {
   allowedWritePaths?: string[];
 }
 
-const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({ 
+const useOutlineAssessmentAgentChatView = ({ 
   title, 
   agentId,
   workspaceDirType,
@@ -61,17 +60,17 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
   setMessages,
   activeRun,
   setActiveRun,
-  autoTriggerContent,
   onDone,
   isRunning,
   onRunningChange
-}) => {
+}: OutlineAssessmentAgentChatProps) => {
   const resolvedWorkspaceDirType = workspaceDirType ?? 'outline';
   const [expandedBlocks, setExpandedBlocks] = useState<Record<string, boolean>>({});
   const stopRequestedRef = useRef(false);
   const currentThinkingIdRef = useRef<string | null>(null);
   const messagesRef = useRef(messages);
   const activeRunRef = useRef(activeRun);
+  const handleSendRef = useRef<(overrideInput?: string) => Promise<void>>(async () => {});
   const onDoneRef = useRef(onDone);
   const onRunningChangeRef = useRef(onRunningChange);
   const accumulatedContentRef = useRef('');
@@ -101,13 +100,13 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
   useEffect(() => { onRunningChangeRef.current = onRunningChange; }, [onRunningChange]);
 
-  const setSyncedMessages = (updater: Message[] | ((messages: Message[]) => Message[])) => {
+  const setSyncedMessages = useCallback((updater: Message[] | ((messages: Message[]) => Message[])) => {
     setMessages((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       messagesRef.current = next;
       return next;
     });
-  };
+  }, [setMessages]);
 
   useEffect(() => {
     let isMounted = true;
@@ -231,7 +230,7 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
             if (typeof res === 'string' && res.trim() !== '') {
               // Using timeout to ensure state is clean before next send
               setTimeout(() => {
-                void handleSend(res);
+                void handleSendRef.current(res);
               }, 100);
             }
           };
@@ -255,7 +254,7 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
         unlistenFn();
       }
     };
-  }, []);
+  }, [setActiveRun, setSyncedMessages]);
 
   const scrollToBottomOnce = () => {
     window.requestAnimationFrame(() => {
@@ -367,11 +366,7 @@ const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (autoTriggerContent && !isRunning) {
-      handleSend(autoTriggerContent);
-    }
-  }, [autoTriggerContent]);
+  handleSendRef.current = handleSend;
 
   const handleStop = async () => {
     stopRequestedRef.current = true;
@@ -613,5 +608,7 @@ function updateMessageTool(
     return { ...msg, tools };
   });
 }
+
+const OutlineAssessmentAgentChat: React.FC<OutlineAssessmentAgentChatProps> = (props) => useOutlineAssessmentAgentChatView(props);
 
 export default OutlineAssessmentAgentChat;

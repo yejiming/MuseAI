@@ -28,6 +28,24 @@ const savedAtFormatter = new Intl.DateTimeFormat('zh-CN', {
 });
 
 const filterSelectStyle: React.CSSProperties = { minWidth: 180, flex: '1 1 180px' };
+const sessionHistoryItemStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'stretch',
+  gap: 8,
+  border: '1px solid #eee8df',
+  borderRadius: 8,
+  background: '#fffdfa',
+};
+const sessionHistoryOpenButtonStyle: React.CSSProperties = {
+  flex: 1,
+  border: 0,
+  background: 'transparent',
+  textAlign: 'left',
+  padding: '12px 14px',
+  cursor: 'pointer',
+  font: 'inherit',
+  minWidth: 0,
+};
 
 export function SessionHistoryModal({
   open,
@@ -97,29 +115,13 @@ export function SessionHistoryModal({
             return (
               <div
                 key={session.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'stretch',
-                  gap: 8,
-                  border: '1px solid #eee8df',
-                  borderRadius: 8,
-                  background: '#fffdfa',
-                }}
+                style={sessionHistoryItemStyle}
               >
                 <button
                   type="button"
                   aria-label={`打开${session.title}`}
                   onClick={() => handleOpenSession(session.id)}
-                  style={{
-                    flex: 1,
-                    border: 0,
-                    background: 'transparent',
-                    textAlign: 'left',
-                    padding: '12px 14px',
-                    cursor: 'pointer',
-                    font: 'inherit',
-                    minWidth: 0,
-                  }}
+                  style={sessionHistoryOpenButtonStyle}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
                     <strong style={{ color: '#33312e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

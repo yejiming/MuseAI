@@ -43,9 +43,42 @@ import {
   defaultChatArchivePrompt,
   defaultStoryArchivePrompt,
 } from '../stores/useSettingsStore';
+import { SettingsConcurrencyCard } from '../components/SettingsConcurrencyCard';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
+
+const SETTINGS_SIDEBAR_STYLE: React.CSSProperties = {
+  width: 180,
+  padding: '40px 0 40px 24px',
+  borderRight: '1px solid #eae6df',
+  overflowY: 'auto',
+  flexShrink: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '8px',
+};
+
+const SETTINGS_MODEL_SELECTOR_ROW_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '12px',
+  marginBottom: '24px',
+  backgroundColor: '#faf9f5',
+  padding: '16px',
+  borderRadius: '8px',
+  border: '1px solid #f2eee8',
+};
+
+const SETTINGS_TEST_RESULT_BASE_STYLE: React.CSSProperties = {
+  marginBottom: '24px',
+  padding: '12px 16px',
+  borderRadius: '8px',
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: '8px',
+  fontSize: '14px',
+};
 
 const MODEL_PROVIDER_PRESETS = [
   { provider: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", interface: "OpenAI-compatible" },
@@ -101,7 +134,7 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
 }) => {
   const store = useSettingsStore();
   const [form] = Form.useForm();
-  const defaultConfig = defaultAgentConfigs[agentId] || {};
+  const defaultConfig = React.useMemo(() => defaultAgentConfigs[agentId] || {}, [agentId]);
   const agentConfig = store.agentConfigs?.[agentId] || defaultConfig;
 
   React.useEffect(() => {
@@ -251,139 +284,7 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
   );
 };
 
-const ReverseOutlineConcurrencyCard: React.FC = () => {
-  const store = useSettingsStore();
-  const [form] = Form.useForm();
-  const concurrency = store.agentConfigs?.reverseOutline?.concurrency ?? 5;
-
-  React.useEffect(() => {
-    form.setFieldsValue({ concurrency });
-  }, [concurrency, form]);
-
-  const handleSave = (values: { concurrency: number }) => {
-    store.setAgentConfig('reverseOutline', {
-      concurrency: Math.max(1, Math.min(20, values.concurrency || 5)),
-    });
-    message.success('已保存 AI 反向分析大纲并发数');
-  };
-
-  const handleReset = () => {
-    const defaultConcurrency = defaultAgentConfigs.reverseOutline?.concurrency ?? 5;
-    form.setFieldsValue({ concurrency: defaultConcurrency });
-    store.setAgentConfig('reverseOutline', { concurrency: defaultConcurrency });
-    message.success('已恢复默认并发数');
-  };
-
-  return (
-    <Card
-      style={{
-        backgroundColor: '#ffffff',
-        border: '1px solid #eae6df',
-        borderRadius: '12px',
-        boxShadow: '0 4px 20px rgba(217, 119, 87, 0.02)',
-        marginBottom: '24px',
-      }}
-      styles={{ body: { padding: '24px' } }}
-    >
-      <Form form={form} layout="vertical" onFinish={handleSave} requiredMark={false}>
-        <Form.Item
-          label="AI 反向分析大纲并发数"
-          name="concurrency"
-          help={<span style={{ color: '#8c8780', fontSize: '12px' }}>仅用于长篇文章的分布式并行分析，默认 5，建议不要超过 20。</span>}
-          style={{ marginBottom: 20 }}
-        >
-          <InputNumber min={1} max={20} step={1} style={{ width: 180 }} />
-        </Form.Item>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <Button
-            type="primary"
-            htmlType="submit"
-            style={{
-              backgroundColor: '#d97757',
-              borderColor: '#d97757',
-              color: '#ffffff',
-              fontWeight: 500,
-              borderRadius: '6px'
-            }}
-          >
-            保存配置
-          </Button>
-          <Button onClick={handleReset} style={{ borderColor: '#eae6df', color: '#5c5751', borderRadius: '6px' }}>
-            恢复默认
-          </Button>
-        </div>
-      </Form>
-    </Card>
-  );
-};
-
-const BackgroundConcurrencyCard: React.FC = () => {
-  const store = useSettingsStore();
-  const [form] = Form.useForm();
-  const concurrency = store.agentConfigs?.backgroundExtraction?.concurrency ?? 5;
-
-  React.useEffect(() => {
-    form.setFieldsValue({ concurrency });
-  }, [concurrency, form]);
-
-  const handleSave = (values: { concurrency: number }) => {
-    store.setAgentConfig('backgroundExtraction', {
-      concurrency: Math.max(1, Math.min(20, values.concurrency || 5)),
-    });
-    message.success('已保存 AI 提取背景设定并发数');
-  };
-
-  const handleReset = () => {
-    const defaultConcurrency = defaultAgentConfigs.backgroundExtraction?.concurrency ?? 5;
-    form.setFieldsValue({ concurrency: defaultConcurrency });
-    store.setAgentConfig('backgroundExtraction', { concurrency: defaultConcurrency });
-    message.success('已恢复默认并发数');
-  };
-
-  return (
-    <Card
-      style={{
-        backgroundColor: '#ffffff',
-        border: '1px solid #eae6df',
-        borderRadius: '12px',
-        boxShadow: '0 4px 20px rgba(217, 119, 87, 0.02)',
-        marginBottom: '24px',
-      }}
-      styles={{ body: { padding: '24px' } }}
-    >
-      <Form form={form} layout="vertical" onFinish={handleSave} requiredMark={false}>
-        <Form.Item
-          label="AI 提取背景设定并发数"
-          name="concurrency"
-          help={<span style={{ color: '#8c8780', fontSize: '12px' }}>仅用于并行提取角色卡，默认 5，建议不要超过 20。</span>}
-          style={{ marginBottom: 20 }}
-        >
-          <InputNumber min={1} max={20} step={1} style={{ width: 180 }} />
-        </Form.Item>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <Button
-            type="primary"
-            htmlType="submit"
-            style={{
-              backgroundColor: '#d97757',
-              borderColor: '#d97757',
-              color: '#ffffff',
-              fontWeight: 500,
-              borderRadius: '6px'
-            }}
-          >
-            保存配置
-          </Button>
-          <Button onClick={handleReset} style={{ borderColor: '#eae6df', color: '#5c5751', borderRadius: '6px' }}>
-            恢复默认
-          </Button>
-        </div>
-      </Form>
-    </Card>
-  );
-};
-
-const Settings: React.FC = () => {
+const useSettingsView = () => {
   const store = useSettingsStore();
   const [globalForm] = Form.useForm();
   const [addForm] = Form.useForm();
@@ -495,16 +396,7 @@ const Settings: React.FC = () => {
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: '#faf9f5' }}>
       {/* 左侧侧边菜单栏 */}
-      <div style={{
-        width: 180,
-        padding: '40px 0 40px 24px',
-        borderRight: '1px solid #eae6df',
-        overflowY: 'auto',
-        flexShrink: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px'
-      }}>
+      <div style={SETTINGS_SIDEBAR_STYLE}>
         <Anchor
           affix={false}
           getContainer={() => document.getElementById('settings-scroll-container') as HTMLElement}
@@ -574,7 +466,7 @@ const Settings: React.FC = () => {
               styles={{ body: { padding: '24px' } }}
             >
               {/* 模型选择区域 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px', backgroundColor: '#faf9f5', padding: '16px', borderRadius: '8px', border: '1px solid #f2eee8' }}>
+              <div style={SETTINGS_MODEL_SELECTOR_ROW_STYLE}>
                 <span style={{ fontWeight: 500, color: '#5c5751', flexShrink: 0 }}>当前使用模型:</span>
                 <Select
                   value={store.selectedModelId}
@@ -644,16 +536,10 @@ const Settings: React.FC = () => {
                 {testResult && (
                   <div
                     style={{
-                      marginBottom: '24px',
-                      padding: '12px 16px',
-                      borderRadius: '8px',
+                      ...SETTINGS_TEST_RESULT_BASE_STYLE,
                       border: testResult.success ? '1px solid #d4edda' : '1px solid #f8d7da',
                       backgroundColor: testResult.success ? '#d4edda20' : '#f8d7da20',
                       color: testResult.success ? '#155724' : '#721c24',
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '8px',
-                      fontSize: '14px'
                     }}
                   >
                     {testResult.success ? (
@@ -934,7 +820,12 @@ const Settings: React.FC = () => {
               helpText="此配置用于长篇反向分析的第二阶段，根据分段概要汇总生成最终大纲。"
             />
 
-            <ReverseOutlineConcurrencyCard />
+            <SettingsConcurrencyCard
+              agentId="reverseOutline"
+              label="AI 反向分析大纲并发数"
+              helpText="仅用于长篇文章的分布式并行分析，默认 5，建议不要超过 20。"
+              saveMessage="已保存 AI 反向分析大纲并发数"
+            />
           </section>
 
           <Divider style={{ borderColor: '#eae6df', margin: '48px 0' }} />
@@ -976,7 +867,12 @@ const Settings: React.FC = () => {
               <Title level={4} style={{ color: '#33312e', margin: 0, fontWeight: 600, fontFamily: '"Inter", "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>背景页设置</Title>
             </div>
 
-            <BackgroundConcurrencyCard />
+            <SettingsConcurrencyCard
+              agentId="backgroundExtraction"
+              label="AI 提取背景设定并发数"
+              helpText="仅用于并行提取角色卡，默认 5，建议不要超过 20。"
+              saveMessage="已保存 AI 提取背景设定并发数"
+            />
 
             <AgentSettingCard
               title="提取世界书"
@@ -1166,5 +1062,7 @@ const Settings: React.FC = () => {
     </div>
   );
 };
+
+const Settings: React.FC = () => useSettingsView();
 
 export default Settings;

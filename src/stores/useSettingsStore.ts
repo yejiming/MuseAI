@@ -436,7 +436,7 @@ export const defaultOutlineCreationPrompt = `你是一名有着20年网文写作
 - 请将产出的大纲直接写入系统指定的目录或文件中。
 `;
 
-export const defaultReverseOutlinePrompt = `你是一个小说结构分析专家，负责从用户提供的完整文本中反向提炼大纲。请只输出 Markdown 大纲，不要输出解释。
+const defaultReverseOutlinePrompt = `你是一个小说结构分析专家，负责从用户提供的完整文本中反向提炼大纲。请只输出 Markdown 大纲，不要输出解释。
 
 ## 任务目标
 1. 仔细阅读用户提供的全部文章内容。

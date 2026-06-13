@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { Card, Empty, Timeline, Spin, Tooltip, Tree } from 'antd';
 import {
   HeartOutlined,
@@ -18,8 +18,24 @@ import { invoke } from '@tauri-apps/api/core';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { groupCharacterCardsByWorldBook } from '../utils/characterCardGroups';
+import { useStateGroup } from '../utils/reducerState';
 
 const DIRECTORY_WIDTH = 260;
+interface BondUiState {
+  selectedId: string | null;
+  expandedCharacterGroupKeys: React.Key[];
+  sessions: AgentSessionSummary[];
+  expandedSessionId: string | null;
+  expandedRecord: AgentSessionRecord | null;
+  loadingSessions: boolean;
+  loadingRecord: boolean;
+  adventures: AgentSessionSummary[];
+  expandedAdventureId: string | null;
+  expandedAdventureRecord: AgentSessionRecord | null;
+  loadingAdventures: boolean;
+  loadingAdventureRecord: boolean;
+}
+
 const HISTORY_TOGGLE_BUTTON_STYLE: React.CSSProperties = {
   width: '100%',
   display: 'flex',
@@ -48,7 +64,7 @@ const formatDate = (timestamp: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
-const renderRelationOverview = (item: PartnerItem) => {
+const RelationOverview: React.FC<{ item: PartnerItem }> = ({ item }) => {
   const fields = item.fields || {};
   return (
     <Card
@@ -115,7 +131,7 @@ const renderRelationOverview = (item: PartnerItem) => {
   );
 };
 
-const renderTimeline = (item: PartnerItem) => {
+const CharacterTimeline: React.FC<{ item: PartnerItem }> = ({ item }) => {
   const events = parseKeyEvents(item.fields?.keyEvents);
   return (
     <Card
@@ -156,70 +172,435 @@ const renderTimeline = (item: PartnerItem) => {
   );
 };
 
+interface CharacterDirectoryProps {
+  characterCards: PartnerItem[];
+  expandedCharacterGroupKeys: React.Key[];
+  selectedId: string | null;
+  characterCardGroupKeys: string[];
+  characterTreeData: React.ComponentProps<typeof Tree>['treeData'];
+  onExpand: (keys: React.Key[]) => void;
+  onToggleGroup: (groupKey: string) => void;
+  onSelectCharacter: (id: string) => void;
+}
+
+const CharacterDirectory: React.FC<CharacterDirectoryProps> = ({
+  characterCards,
+  expandedCharacterGroupKeys,
+  selectedId,
+  characterCardGroupKeys,
+  characterTreeData,
+  onExpand,
+  onToggleGroup,
+  onSelectCharacter,
+}) => (
+  <div
+    style={{
+      width: DIRECTORY_WIDTH,
+      minWidth: DIRECTORY_WIDTH,
+      borderRight: '1px solid rgba(0,0,0,0.04)',
+      background: '#faf9f5',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}
+  >
+    <div
+      style={{
+        padding: '16px 12px 8px',
+        fontSize: 12,
+        fontWeight: 600,
+        color: '#8c8882',
+        letterSpacing: 1,
+        textTransform: 'uppercase',
+      }}
+    >
+      角色羁绊
+    </div>
+    <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 16 }}>
+      {characterCards.length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="暂无角色卡"
+          style={{ marginTop: 40 }}
+        />
+      ) : (
+        <Tree
+          className="bond-character-tree"
+          expandedKeys={expandedCharacterGroupKeys}
+          onExpand={(keys) => onExpand(keys)}
+          selectedKeys={selectedId ? [selectedId] : []}
+          onClick={(_, node) => {
+            const nextKey = String(node.key);
+            if (characterCardGroupKeys.includes(nextKey)) {
+              onToggleGroup(nextKey);
+            }
+          }}
+          onSelect={(_, info) => {
+            const nextId = String(info.node.key || '');
+            if (characterCards.some((card) => card.id === nextId)) {
+              onSelectCharacter(nextId);
+            }
+          }}
+          treeData={characterTreeData}
+          style={{ background: 'transparent', padding: '0 8px' }}
+        />
+      )}
+    </div>
+  </div>
+);
+
+interface SessionHistoryProps {
+  sessions: AgentSessionSummary[];
+  selectedId: string | null;
+  expandedSessionId: string | null;
+  expandedRecord: AgentSessionRecord | null;
+  loadingSessions: boolean;
+  loadingRecord: boolean;
+  selectedCharacterName: string | null;
+  onExpandSession: (id: string) => void | Promise<void>;
+}
+
+const SessionHistory: React.FC<SessionHistoryProps> = ({
+  sessions,
+  selectedId,
+  expandedSessionId,
+  expandedRecord,
+  loadingSessions,
+  loadingRecord,
+  selectedCharacterName,
+  onExpandSession,
+}) => {
+  const filteredSessions = sessions.filter((session) => session.characterCardId === selectedId);
+  return (
+    <Card
+      className="custom-form-card"
+      title={
+        <span className="form-section-title">
+          <MessageOutlined style={{ color: '#d97757' }} /> 会话足迹
+        </span>
+      }
+      size="small"
+    >
+      {loadingSessions ? (
+        <div style={{ textAlign: 'center', padding: 32 }}>
+          <Spin size="small" />
+        </div>
+      ) : filteredSessions.length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="暂无与该角色的聊天会话"
+          style={{ margin: '24px 0' }}
+        />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {filteredSessions.map((session) => {
+            const isExpanded = expandedSessionId === session.id;
+            return (
+              <div
+                key={session.id}
+                style={{
+                  borderRadius: 8,
+                  border: '1px solid rgba(0,0,0,0.04)',
+                  background: isExpanded ? '#faf9f5' : '#fff',
+                  transition: 'background-color 0.2s, border-color 0.2s',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => { void onExpandSession(session.id); }}
+                  style={HISTORY_TOGGLE_BUTTON_STYLE}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <BookOutlined style={{ color: '#8c8882', fontSize: 13, flexShrink: 0 }} />
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: '#33312e',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {session.title}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                    <span style={{ fontSize: 12, color: '#bfbfbf' }}>
+                      {formatDate(session.savedAt)}
+                    </span>
+                    <Tooltip title="查看详情">
+                      <EyeOutlined
+                        style={{
+                          fontSize: 13,
+                          color: isExpanded ? '#d97757' : '#bfbfbf',
+                        }}
+                      />
+                    </Tooltip>
+                  </div>
+                </button>
+                {isExpanded && (
+                  <div style={{ padding: '0 16px 16px' }}>
+                    {loadingRecord && !expandedRecord ? (
+                      <div style={{ textAlign: 'center', padding: 16 }}>
+                        <Spin size="small" />
+                      </div>
+                    ) : expandedRecord ? (
+                      <div
+                        style={{
+                          background: '#fff',
+                          borderRadius: 6,
+                          padding: 12,
+                          maxHeight: 320,
+                          overflowY: 'auto',
+                          border: '1px solid rgba(0,0,0,0.03)',
+                        }}
+                      >
+                        {expandedRecord.messages.map((msg, idx) => (
+                          <div
+                            key={msg.id || idx}
+                            style={{
+                              marginBottom: 12,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                            }}
+                          >
+                            <div
+                              style={{
+                                maxWidth: '85%',
+                                padding: '8px 12px',
+                                borderRadius: 8,
+                                background: msg.role === 'user' ? '#f2e8dc' : '#f5f5f5',
+                                color: '#33312e',
+                                fontSize: 13,
+                                lineHeight: 1.6,
+                              }}
+                            >
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {msg.content}
+                              </ReactMarkdown>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: '#bfbfbf',
+                                marginTop: 4,
+                              }}
+                            >
+                              {msg.role === 'user' ? '我' : selectedCharacterName || '角色'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+};
+
+interface AdventureHistoryProps {
+  adventures: AgentSessionSummary[];
+  selectedId: string | null;
+  expandedAdventureId: string | null;
+  expandedAdventureRecord: AgentSessionRecord | null;
+  loadingAdventures: boolean;
+  loadingAdventureRecord: boolean;
+  onExpandAdventure: (id: string) => void | Promise<void>;
+}
+
+const AdventureHistory: React.FC<AdventureHistoryProps> = ({
+  adventures,
+  selectedId,
+  expandedAdventureId,
+  expandedAdventureRecord,
+  loadingAdventures,
+  loadingAdventureRecord,
+  onExpandAdventure,
+}) => {
+  const filteredAdventures = adventures.filter((session) =>
+    session.characterCardIds?.includes(selectedId || '')
+  );
+  return (
+    <Card
+      className="custom-form-card"
+      title={
+        <span className="form-section-title">
+          <CompassOutlined style={{ color: '#d97757' }} /> 冒险足迹
+        </span>
+      }
+      size="small"
+    >
+      {loadingAdventures ? (
+        <div style={{ textAlign: 'center', padding: 32 }}>
+          <Spin size="small" />
+        </div>
+      ) : filteredAdventures.length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="暂无与该角色的冒险记录"
+          style={{ margin: '24px 0' }}
+        />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {filteredAdventures.map((adventure) => {
+            const isExpanded = expandedAdventureId === adventure.id;
+            return (
+              <div
+                key={adventure.id}
+                style={{
+                  borderRadius: 8,
+                  border: '1px solid rgba(0,0,0,0.04)',
+                  background: isExpanded ? '#faf9f5' : '#fff',
+                  transition: 'background-color 0.2s, border-color 0.2s',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => { void onExpandAdventure(adventure.id); }}
+                  style={HISTORY_TOGGLE_BUTTON_STYLE}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <BookOutlined style={{ color: '#8c8882', fontSize: 13, flexShrink: 0 }} />
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: '#33312e',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {adventure.title}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                    <span style={{ fontSize: 12, color: '#bfbfbf' }}>
+                      {formatDate(adventure.savedAt)}
+                    </span>
+                    <Tooltip title="查看详情">
+                      <EyeOutlined
+                        style={{
+                          fontSize: 13,
+                          color: isExpanded ? '#d97757' : '#bfbfbf',
+                        }}
+                      />
+                    </Tooltip>
+                  </div>
+                </button>
+                {isExpanded && (
+                  <div style={{ padding: '0 16px 16px' }}>
+                    {loadingAdventureRecord && !expandedAdventureRecord ? (
+                      <div style={{ textAlign: 'center', padding: 16 }}>
+                        <Spin size="small" />
+                      </div>
+                    ) : expandedAdventureRecord ? (
+                      <div
+                        style={{
+                          background: '#fff',
+                          borderRadius: 6,
+                          padding: 12,
+                          maxHeight: 320,
+                          overflowY: 'auto',
+                          border: '1px solid rgba(0,0,0,0.03)',
+                        }}
+                      >
+                        {expandedAdventureRecord.messages.map((msg, idx) => (
+                          <div
+                            key={msg.id || idx}
+                            style={{
+                              marginBottom: 12,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                            }}
+                          >
+                            <div
+                              style={{
+                                maxWidth: '85%',
+                                padding: '8px 12px',
+                                borderRadius: 8,
+                                background: msg.role === 'user' ? '#f2e8dc' : '#f5f5f5',
+                                color: '#33312e',
+                                fontSize: 13,
+                                lineHeight: 1.6,
+                              }}
+                            >
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {msg.content}
+                              </ReactMarkdown>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: '#bfbfbf',
+                                marginTop: 4,
+                              }}
+                            >
+                              {msg.role === 'user' ? '我' : '叙事者'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+};
+
 const Bond: React.FC = () => {
   const { worldBooks, characterCards } = usePartnerStore();
   const { selectedCharacterCardId, setSelectedCharacterCardId } = usePartnerChatStore();
 
-  const [selectedId, setSelectedId] = useState<string | null>(selectedCharacterCardId);
-  const [expandedCharacterGroupKeys, setExpandedCharacterGroupKeys] = useState<React.Key[]>([]);
-  const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
-  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
-  const [expandedRecord, setExpandedRecord] = useState<AgentSessionRecord | null>(null);
-  const [loadingSessions, setLoadingSessions] = useState(false);
-  const [loadingRecord, setLoadingRecord] = useState(false);
+  const [uiState, patchUiState, setUiField] = useStateGroup<BondUiState>({
+    selectedId: selectedCharacterCardId,
+    expandedCharacterGroupKeys: [],
+    sessions: [],
+    expandedSessionId: null,
+    expandedRecord: null,
+    loadingSessions: false,
+    loadingRecord: false,
+    adventures: [],
+    expandedAdventureId: null,
+    expandedAdventureRecord: null,
+    loadingAdventures: false,
+    loadingAdventureRecord: false,
+  });
+  const {
+    selectedId,
+    expandedCharacterGroupKeys,
+    sessions,
+    expandedSessionId,
+    expandedRecord,
+    loadingSessions,
+    loadingRecord,
+    adventures,
+    expandedAdventureId,
+    expandedAdventureRecord,
+    loadingAdventures,
+    loadingAdventureRecord,
+  } = uiState;
+  const setExpandedCharacterGroupKeys = (expandedCharacterGroupKeys: React.SetStateAction<React.Key[]>) => setUiField('expandedCharacterGroupKeys', expandedCharacterGroupKeys);
+  const setExpandedSessionId = (expandedSessionId: string | null) => setUiField('expandedSessionId', expandedSessionId);
+  const setExpandedRecord = (expandedRecord: AgentSessionRecord | null) => setUiField('expandedRecord', expandedRecord);
+  const setLoadingRecord = (loadingRecord: boolean) => setUiField('loadingRecord', loadingRecord);
+  const setExpandedAdventureId = (expandedAdventureId: string | null) => setUiField('expandedAdventureId', expandedAdventureId);
+  const setExpandedAdventureRecord = (expandedAdventureRecord: AgentSessionRecord | null) => setUiField('expandedAdventureRecord', expandedAdventureRecord);
+  const setLoadingAdventureRecord = (loadingAdventureRecord: boolean) => setUiField('loadingAdventureRecord', loadingAdventureRecord);
 
-  const [adventures, setAdventures] = useState<AgentSessionSummary[]>([]);
-  const [expandedAdventureId, setExpandedAdventureId] = useState<string | null>(null);
-  const [expandedAdventureRecord, setExpandedAdventureRecord] = useState<AgentSessionRecord | null>(null);
-  const [loadingAdventures, setLoadingAdventures] = useState(false);
-  const [loadingAdventureRecord, setLoadingAdventureRecord] = useState(false);
-
-  // Sync with partner chat store selection
-  useEffect(() => {
-    setSelectedId((currentId) => {
-      if (selectedCharacterCardId && characterCards.some((card) => card.id === selectedCharacterCardId)) {
-        return selectedCharacterCardId;
-      }
-      if (currentId && characterCards.some((card) => card.id === currentId)) {
-        return currentId;
-      }
-      return characterCards[0]?.id ?? null;
-    });
-  }, [selectedCharacterCardId, characterCards]);
-
-  // Load partner chat sessions and story adventures
-  useEffect(() => {
-    const loadSessions = async () => {
-      setLoadingSessions(true);
-      try {
-        const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', {
-          prefix: 'partner-session-',
-        });
-        setSessions(summaries);
-      } catch (err) {
-        console.error('加载会话列表失败:', err);
-      } finally {
-        setLoadingSessions(false);
-      }
-    };
-    const loadAdventures = async () => {
-      setLoadingAdventures(true);
-      try {
-        const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', {
-          prefix: 'story-session-',
-        });
-        setAdventures(summaries);
-      } catch (err) {
-        console.error('加载冒险列表失败:', err);
-      } finally {
-        setLoadingAdventures(false);
-      }
-    };
-    loadSessions();
-    loadAdventures();
-  }, []);
-
-  const selectedCharacter = characterCards.find((c) => c.id === selectedId);
   const characterCardGroups = useMemo(
     () => groupCharacterCardsByWorldBook(worldBooks, characterCards),
     [worldBooks, characterCards],
@@ -228,28 +609,87 @@ const Bond: React.FC = () => {
     () => characterCardGroups.map((group) => group.key),
     [characterCardGroups],
   );
-  const selectedCharacterGroupKey = characterCardGroups.find((group) =>
-    group.cards.some((card) => card.id === selectedId)
-  )?.key;
-
-  useEffect(() => {
-    setExpandedCharacterGroupKeys((keys) => keys.filter((key) => characterCardGroupKeys.includes(String(key))));
-  }, [characterCardGroupKeys]);
-
-  useEffect(() => {
-    if (!selectedCharacterGroupKey) return;
-    setExpandedCharacterGroupKeys((keys) =>
-      keys.includes(selectedCharacterGroupKey) ? keys : [...keys, selectedCharacterGroupKey]
+  const getCharacterGroupKey = useCallback((id: string | null) => characterCardGroups.find((group) =>
+    group.cards.some((card) => card.id === id)
+  )?.key, [characterCardGroups]);
+  const expandCharacterGroupForId = useCallback((id: string | null) => {
+    const groupKey = getCharacterGroupKey(id);
+    if (!groupKey) return;
+    setUiField('expandedCharacterGroupKeys', (keys) =>
+      keys.includes(groupKey) ? keys : [...keys, groupKey]
     );
-  }, [selectedCharacterGroupKey]);
+  }, [getCharacterGroupKey, setUiField]);
+
+  // Sync with partner chat store selection
+  useEffect(() => {
+    patchUiState((state) => {
+      let nextId: string | null;
+      if (selectedCharacterCardId && characterCards.some((card) => card.id === selectedCharacterCardId)) {
+        nextId = selectedCharacterCardId;
+      } else if (state.selectedId && characterCards.some((card) => card.id === state.selectedId)) {
+        nextId = state.selectedId;
+      } else {
+        nextId = characterCards[0]?.id ?? null;
+      }
+      const groupKey = getCharacterGroupKey(nextId);
+      return {
+        ...state,
+        selectedId: nextId,
+        expandedCharacterGroupKeys: groupKey && !state.expandedCharacterGroupKeys.includes(groupKey)
+          ? [...state.expandedCharacterGroupKeys, groupKey]
+          : state.expandedCharacterGroupKeys,
+      };
+    });
+  }, [patchUiState, selectedCharacterCardId, characterCards, getCharacterGroupKey]);
+
+  // Load partner chat sessions and story adventures
+  useEffect(() => {
+    const loadSessions = async () => {
+      patchUiState({ loadingSessions: true });
+      try {
+        const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', {
+          prefix: 'partner-session-',
+        });
+        patchUiState({ sessions: summaries });
+      } catch (err) {
+        console.error('加载会话列表失败:', err);
+      } finally {
+        patchUiState({ loadingSessions: false });
+      }
+    };
+    const loadAdventures = async () => {
+      patchUiState({ loadingAdventures: true });
+      try {
+        const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', {
+          prefix: 'story-session-',
+        });
+        patchUiState({ adventures: summaries });
+      } catch (err) {
+        console.error('加载冒险列表失败:', err);
+      } finally {
+        patchUiState({ loadingAdventures: false });
+      }
+    };
+    loadSessions();
+    loadAdventures();
+  }, [patchUiState]);
+
+  const selectedCharacter = characterCards.find((c) => c.id === selectedId);
+
+  useEffect(() => {
+    setUiField('expandedCharacterGroupKeys', (keys) => keys.filter((key) => characterCardGroupKeys.includes(String(key))));
+  }, [characterCardGroupKeys, setUiField]);
 
   const handleSelectCharacter = (id: string) => {
-    setSelectedId(id);
+    patchUiState({
+      selectedId: id,
+      expandedSessionId: null,
+      expandedRecord: null,
+      expandedAdventureId: null,
+      expandedAdventureRecord: null,
+    });
     setSelectedCharacterCardId(id);
-    setExpandedSessionId(null);
-    setExpandedRecord(null);
-    setExpandedAdventureId(null);
-    setExpandedAdventureRecord(null);
+    expandCharacterGroupForId(id);
   };
 
   const toggleCharacterGroup = (groupKey: string) => {
@@ -261,20 +701,7 @@ const Bond: React.FC = () => {
   const renderCharacterTreeTitle = (item: PartnerItem) => {
     const isSelected = selectedId === item.id;
     return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '10px 10px',
-          borderRadius: 8,
-          cursor: 'pointer',
-          background: isSelected ? '#f2e8dc' : 'transparent',
-          color: isSelected ? '#d97757' : '#33312e',
-          transition: 'background-color 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), color 0.2s cubic-bezier(0.25, 0.8, 0.25, 1)',
-        }}
-        className="bond-directory-item"
-      >
+      <div className={`bond-directory-item ${isSelected ? 'is-selected' : ''}`}>
         <UserOutlined
           style={{
             fontSize: 15,
@@ -282,15 +709,7 @@ const Bond: React.FC = () => {
             color: isSelected ? '#d97757' : '#8c8882',
           }}
         />
-        <span
-          style={{
-            fontSize: 13,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            fontWeight: isSelected ? 500 : 400,
-          }}
-        >
+        <span className="bond-directory-item__name">
           {item.name}
         </span>
       </div>
@@ -351,369 +770,19 @@ const Bond: React.FC = () => {
     }
   };
 
-  const renderCharacterDirectory = () => (
-    <div
-      style={{
-        width: DIRECTORY_WIDTH,
-        minWidth: DIRECTORY_WIDTH,
-        borderRight: '1px solid rgba(0,0,0,0.04)',
-        background: '#faf9f5',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        style={{
-          padding: '16px 12px 8px',
-          fontSize: 12,
-          fontWeight: 600,
-          color: '#8c8882',
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-        }}
-      >
-        角色羁绊
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 16 }}>
-        {characterCards.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="暂无角色卡"
-            style={{ marginTop: 40 }}
-          />
-        ) : (
-          <Tree
-            className="bond-character-tree"
-            expandedKeys={expandedCharacterGroupKeys}
-            onExpand={(keys) => setExpandedCharacterGroupKeys(keys)}
-            selectedKeys={selectedId ? [selectedId] : []}
-            onClick={(_, node) => {
-              const nextKey = String(node.key);
-              if (characterCardGroupKeys.includes(nextKey)) {
-                toggleCharacterGroup(nextKey);
-              }
-            }}
-            onSelect={(_, info) => {
-              const nextId = String(info.node.key || '');
-              if (characterCards.some((card) => card.id === nextId)) {
-                handleSelectCharacter(nextId);
-              }
-            }}
-            treeData={characterTreeData}
-            style={{ background: 'transparent', padding: '0 8px' }}
-          />
-        )}
-      </div>
-    </div>
-  );
-
-  const renderSessionHistory = () => {
-    const filteredSessions = sessions.filter((s) => s.characterCardId === selectedId);
-    return (
-      <Card
-        className="custom-form-card"
-        title={
-          <span className="form-section-title">
-            <MessageOutlined style={{ color: '#d97757' }} /> 会话足迹
-          </span>
-        }
-        size="small"
-      >
-        {loadingSessions ? (
-          <div style={{ textAlign: 'center', padding: 32 }}>
-            <Spin size="small" />
-          </div>
-        ) : filteredSessions.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="暂无与该角色的聊天会话"
-            style={{ margin: '24px 0' }}
-          />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {filteredSessions.map((session) => {
-              const isExpanded = expandedSessionId === session.id;
-              return (
-                <div
-                  key={session.id}
-                  style={{
-                    borderRadius: 8,
-                    border: '1px solid rgba(0,0,0,0.04)',
-                    background: isExpanded ? '#faf9f5' : '#fff',
-                    transition: 'background-color 0.2s, border-color 0.2s',
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleExpandSession(session.id)}
-                    style={HISTORY_TOGGLE_BUTTON_STYLE}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                      <BookOutlined style={{ color: '#8c8882', fontSize: 13, flexShrink: 0 }} />
-                      <span
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 500,
-                          color: '#33312e',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {session.title}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-                      <span style={{ fontSize: 12, color: '#bfbfbf' }}>
-                        {formatDate(session.savedAt)}
-                      </span>
-                      <Tooltip title="查看详情">
-                        <EyeOutlined
-                          style={{
-                            fontSize: 13,
-                            color: isExpanded ? '#d97757' : '#bfbfbf',
-                          }}
-                        />
-                      </Tooltip>
-                    </div>
-                  </button>
-                  {isExpanded && (
-                    <div style={{ padding: '0 16px 16px' }}>
-                      {loadingRecord && !expandedRecord ? (
-                        <div style={{ textAlign: 'center', padding: 16 }}>
-                          <Spin size="small" />
-                        </div>
-                      ) : expandedRecord ? (
-                        <div
-                          style={{
-                            background: '#fff',
-                            borderRadius: 6,
-                            padding: 12,
-                            maxHeight: 320,
-                            overflowY: 'auto',
-                            border: '1px solid rgba(0,0,0,0.03)',
-                          }}
-                        >
-                          {expandedRecord.messages.map((msg, idx) => (
-                            <div
-                              key={msg.id || idx}
-                              style={{
-                                marginBottom: 12,
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                              }}
-                            >
-                              <div
-                                style={{
-                                  maxWidth: '85%',
-                                  padding: '8px 12px',
-                                  borderRadius: 8,
-                                  background: msg.role === 'user' ? '#f2e8dc' : '#f5f5f5',
-                                  color: '#33312e',
-                                  fontSize: 13,
-                                  lineHeight: 1.6,
-                                }}
-                              >
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                  {msg.content}
-                                </ReactMarkdown>
-                              </div>
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  color: '#bfbfbf',
-                                  marginTop: 4,
-                                }}
-                              >
-                                {msg.role === 'user' ? '我' : selectedCharacter?.name || '角色'}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-    );
-  };
-
-  const renderAdventureHistory = () => {
-    const filteredAdventures = adventures.filter((s) =>
-      s.characterCardIds?.includes(selectedId || '')
-    );
-    return (
-      <Card
-        className="custom-form-card"
-        title={
-          <span className="form-section-title">
-            <CompassOutlined style={{ color: '#d97757' }} /> 冒险足迹
-          </span>
-        }
-        size="small"
-      >
-        {loadingAdventures ? (
-          <div style={{ textAlign: 'center', padding: 32 }}>
-            <Spin size="small" />
-          </div>
-        ) : filteredAdventures.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="暂无与该角色的冒险记录"
-            style={{ margin: '24px 0' }}
-          />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {filteredAdventures.map((adventure) => {
-              const isExpanded = expandedAdventureId === adventure.id;
-              return (
-                <div
-                  key={adventure.id}
-                  style={{
-                    borderRadius: 8,
-                    border: '1px solid rgba(0,0,0,0.04)',
-                    background: isExpanded ? '#faf9f5' : '#fff',
-                    transition: 'background-color 0.2s, border-color 0.2s',
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleExpandAdventure(adventure.id)}
-                    style={HISTORY_TOGGLE_BUTTON_STYLE}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                      <BookOutlined style={{ color: '#8c8882', fontSize: 13, flexShrink: 0 }} />
-                      <span
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 500,
-                          color: '#33312e',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {adventure.title}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-                      <span style={{ fontSize: 12, color: '#bfbfbf' }}>
-                        {formatDate(adventure.savedAt)}
-                      </span>
-                      <Tooltip title="查看详情">
-                        <EyeOutlined
-                          style={{
-                            fontSize: 13,
-                            color: isExpanded ? '#d97757' : '#bfbfbf',
-                          }}
-                        />
-                      </Tooltip>
-                    </div>
-                  </button>
-                  {isExpanded && (
-                    <div style={{ padding: '0 16px 16px' }}>
-                      {loadingAdventureRecord && !expandedAdventureRecord ? (
-                        <div style={{ textAlign: 'center', padding: 16 }}>
-                          <Spin size="small" />
-                        </div>
-                      ) : expandedAdventureRecord ? (
-                        <div
-                          style={{
-                            background: '#fff',
-                            borderRadius: 6,
-                            padding: 12,
-                            maxHeight: 320,
-                            overflowY: 'auto',
-                            border: '1px solid rgba(0,0,0,0.03)',
-                          }}
-                        >
-                          {expandedAdventureRecord.messages.map((msg, idx) => (
-                            <div
-                              key={msg.id || idx}
-                              style={{
-                                marginBottom: 12,
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                              }}
-                            >
-                              <div
-                                style={{
-                                  maxWidth: '85%',
-                                  padding: '8px 12px',
-                                  borderRadius: 8,
-                                  background: msg.role === 'user' ? '#f2e8dc' : '#f5f5f5',
-                                  color: '#33312e',
-                                  fontSize: 13,
-                                  lineHeight: 1.6,
-                                }}
-                              >
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                  {msg.content}
-                                </ReactMarkdown>
-                              </div>
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  color: '#bfbfbf',
-                                  marginTop: 4,
-                                }}
-                              >
-                                {msg.role === 'user' ? '我' : '叙事者'}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-    );
-  };
-
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100%',
-        width: '100%',
-        overflow: 'hidden',
-        background: '#faf9f5',
-      }}
-    >
-      <style>{`
-        .bond-directory-item:hover {
-          background-color: #faf6f0;
-        }
-        .bond-character-tree .ant-tree-node-content-wrapper {
-          padding: 0;
-        }
-        .bond-character-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
-          background: transparent;
-        }
-        .bond-character-tree .ant-tree-treenode {
-          padding: 1px 0;
-        }
-      `}</style>
-      {renderCharacterDirectory()}
-      <div
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '24px 32px',
-        }}
-      >
+    <div className="bond-page">
+      <CharacterDirectory
+        characterCards={characterCards}
+        expandedCharacterGroupKeys={expandedCharacterGroupKeys}
+        selectedId={selectedId}
+        characterCardGroupKeys={characterCardGroupKeys}
+        characterTreeData={characterTreeData}
+        onExpand={setExpandedCharacterGroupKeys}
+        onToggleGroup={toggleCharacterGroup}
+        onSelectCharacter={handleSelectCharacter}
+      />
+      <div className="bond-content">
         {!selectedCharacter ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -747,10 +816,27 @@ const Bond: React.FC = () => {
               </div>
             </div>
 
-            {renderRelationOverview(selectedCharacter)}
-            {renderTimeline(selectedCharacter)}
-            {renderSessionHistory()}
-            {renderAdventureHistory()}
+            <RelationOverview item={selectedCharacter} />
+            <CharacterTimeline item={selectedCharacter} />
+            <SessionHistory
+              sessions={sessions}
+              selectedId={selectedId}
+              expandedSessionId={expandedSessionId}
+              expandedRecord={expandedRecord}
+              loadingSessions={loadingSessions}
+              loadingRecord={loadingRecord}
+              selectedCharacterName={selectedCharacter.name}
+              onExpandSession={handleExpandSession}
+            />
+            <AdventureHistory
+              adventures={adventures}
+              selectedId={selectedId}
+              expandedAdventureId={expandedAdventureId}
+              expandedAdventureRecord={expandedAdventureRecord}
+              loadingAdventures={loadingAdventures}
+              loadingAdventureRecord={loadingAdventureRecord}
+              onExpandAdventure={handleExpandAdventure}
+            />
           </div>
         )}
       </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Button, Tooltip, Tag, Input, message, Modal, Spin, Select, Radio, Checkbox, Switch, Tree } from 'antd';
 import {
   BookOutlined,
@@ -40,6 +40,8 @@ import {
 import { parseArchiveAnalysisResponse } from '../utils/archiveAnalysis';
 import { getCharacterCardIdsForWorldBook, groupCharacterCardsByWorldBook } from '../utils/characterCardGroups';
 import { createStableContentKey, createStableToolKey } from '../utils/renderKeys';
+import { useStateGroup } from '../utils/reducerState';
+import { ensureSessionId } from '../utils/sessionIds';
 
 interface ChatStreamEvent {
   runId: string;
@@ -51,6 +53,25 @@ interface ChatStreamEvent {
   toolStatus?: string;
   toolArguments?: string;
   contextCompaction?: SessionContextCompaction;
+}
+
+interface AdventureUiState {
+  isArchiveModalOpen: boolean;
+  isAnalyzing: boolean;
+  isSavingConversation: boolean;
+  archiveAnalyses: Record<string, any>;
+  selectedTargetCardId: string;
+  editedTitle: string;
+  editedRelationTypes: Record<string, string>;
+  editedRelationModels: Record<string, string>;
+  editedRelationBottomLines: Record<string, string>;
+  editedEventsMap: Record<string, string>;
+  editingMessageId: string | null;
+  editingContent: string;
+  tempSelectedCardIds: string[];
+  hasStartedAnalysis: boolean;
+  expandedCharacterGroupKeys: React.Key[];
+  isHistoryOpen: boolean;
 }
 
 const BACKGROUND_LINK_BUTTON_STYLE: React.CSSProperties = {
@@ -101,7 +122,7 @@ const estimateContextUsage = (systemPrompt: string, messages: Message[], draft: 
 
 
 
-const Adventure: React.FC = () => {
+const useAdventureView = () => {
   const {
     messages, setMessages,
     input, setInput,
@@ -137,24 +158,58 @@ const Adventure: React.FC = () => {
   const selectedCharacterCardIdsRef = useRef(selectedCharacterCardIds);
   const contextCompactionRef = useRef<SessionContextCompaction | null>(contextCompaction);
 
-  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isSavingConversation, setIsSavingConversation] = useState(false);
-  const [archiveAnalyses, setArchiveAnalyses] = useState<Record<string, any>>({});
-  const [selectedTargetCardId, setSelectedTargetCardId] = useState<string>('');
-
-  const [editedTitle, setEditedTitle] = useState('');
-  const [editedRelationTypes, setEditedRelationTypes] = useState<Record<string, string>>({});
-  const [editedRelationModels, setEditedRelationModels] = useState<Record<string, string>>({});
-  const [editedRelationBottomLines, setEditedRelationBottomLines] = useState<Record<string, string>>({});
-  const [editedEventsMap, setEditedEventsMap] = useState<Record<string, string>>({});
-
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editingContent, setEditingContent] = useState('');
-
-  const [tempSelectedCardIds, setTempSelectedCardIds] = useState<string[]>([]);
-  const [hasStartedAnalysis, setHasStartedAnalysis] = useState(false);
-  const [expandedCharacterGroupKeys, setExpandedCharacterGroupKeys] = useState<React.Key[]>([]);
+  const [uiState, , setUiField] = useStateGroup<AdventureUiState>({
+    isArchiveModalOpen: false,
+    isAnalyzing: false,
+    isSavingConversation: false,
+    archiveAnalyses: {},
+    selectedTargetCardId: '',
+    editedTitle: '',
+    editedRelationTypes: {},
+    editedRelationModels: {},
+    editedRelationBottomLines: {},
+    editedEventsMap: {},
+    editingMessageId: null,
+    editingContent: '',
+    tempSelectedCardIds: [],
+    hasStartedAnalysis: false,
+    expandedCharacterGroupKeys: [],
+    isHistoryOpen: false,
+  });
+  const {
+    isArchiveModalOpen,
+    isAnalyzing,
+    isSavingConversation,
+    archiveAnalyses,
+    selectedTargetCardId,
+    editedTitle,
+    editedRelationTypes,
+    editedRelationModels,
+    editedRelationBottomLines,
+    editedEventsMap,
+    editingMessageId,
+    editingContent,
+    tempSelectedCardIds,
+    hasStartedAnalysis,
+    expandedCharacterGroupKeys,
+    isHistoryOpen,
+  } = uiState;
+  const setIsArchiveModalOpen = (isArchiveModalOpen: boolean) => setUiField('isArchiveModalOpen', isArchiveModalOpen);
+  const setIsAnalyzing = (isAnalyzing: boolean) => setUiField('isAnalyzing', isAnalyzing);
+  const setIsSavingConversation = (isSavingConversation: boolean) => setUiField('isSavingConversation', isSavingConversation);
+  const setArchiveAnalyses = (archiveAnalyses: Record<string, any>) => setUiField('archiveAnalyses', archiveAnalyses);
+  const setSelectedTargetCardId = (selectedTargetCardId: string) => setUiField('selectedTargetCardId', selectedTargetCardId);
+  const setEditedTitle = (editedTitle: string) => setUiField('editedTitle', editedTitle);
+  const setEditedRelationTypes = (editedRelationTypes: React.SetStateAction<Record<string, string>>) => setUiField('editedRelationTypes', editedRelationTypes);
+  const setEditedRelationModels = (editedRelationModels: React.SetStateAction<Record<string, string>>) => setUiField('editedRelationModels', editedRelationModels);
+  const setEditedRelationBottomLines = (editedRelationBottomLines: React.SetStateAction<Record<string, string>>) => setUiField('editedRelationBottomLines', editedRelationBottomLines);
+  const setEditedEventsMap = (editedEventsMap: React.SetStateAction<Record<string, string>>) => setUiField('editedEventsMap', editedEventsMap);
+  const setEditingMessageId = (editingMessageId: string | null) => setUiField('editingMessageId', editingMessageId);
+  const setEditingContent = (editingContent: string) => setUiField('editingContent', editingContent);
+  const setTempSelectedCardIds = (tempSelectedCardIds: React.SetStateAction<string[]>) => setUiField('tempSelectedCardIds', tempSelectedCardIds);
+  const setHasStartedAnalysis = (hasStartedAnalysis: boolean) => setUiField('hasStartedAnalysis', hasStartedAnalysis);
+  const setExpandedCharacterGroupKeys = (expandedCharacterGroupKeys: React.SetStateAction<React.Key[]>) => setUiField('expandedCharacterGroupKeys', expandedCharacterGroupKeys);
+  const setIsHistoryOpen = (isHistoryOpen: boolean) => setUiField('isHistoryOpen', isHistoryOpen);
 
 
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
@@ -165,11 +220,18 @@ const Adventure: React.FC = () => {
   useEffect(() => { selectedCharacterCardIdsRef.current = selectedCharacterCardIds; }, [selectedCharacterCardIds]);
   useEffect(() => { contextCompactionRef.current = contextCompaction; }, [contextCompaction]);
 
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const refreshSessions = useCallback(async () => {
+    try {
+      const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'story-session-', sessionKind: 'story' });
+      setSessions(summaries);
+    } catch (err) {
+      console.error('读取故事会话失败:', err);
+    }
+  }, [setSessions]);
 
   useEffect(() => {
     void refreshSessions();
-  }, []);
+  }, [refreshSessions]);
 
   // Listen to stream events from tauri backend
   useEffect(() => {
@@ -304,7 +366,7 @@ const Adventure: React.FC = () => {
       isMounted = false;
       if (unlistenFn) unlistenFn();
     };
-  }, []);
+  }, [setActiveRun, setContextCompaction, setIsStreaming, setMessages]);
 
   const scrollToBottomOnce = () => {
     window.requestAnimationFrame(() => {
@@ -332,8 +394,8 @@ const Adventure: React.FC = () => {
   );
   const characterCardIdSet = new Set(characterCards.map((card) => card.id));
   useEffect(() => {
-    setExpandedCharacterGroupKeys((keys) => keys.filter((key) => characterCardGroupKeys.includes(String(key))));
-  }, [characterCardGroupKeys]);
+    setUiField('expandedCharacterGroupKeys', (keys) => keys.filter((key) => characterCardGroupKeys.includes(String(key))));
+  }, [characterCardGroupKeys, setUiField]);
 
   const toggleCharacterGroup = (groupKey: string) => {
     setExpandedCharacterGroupKeys((keys) =>
@@ -729,23 +791,24 @@ const Adventure: React.FC = () => {
     setExpandedBlocks((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const refreshSessions = async () => {
-    try {
-      const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'story-session-', sessionKind: 'story' });
-      setSessions(summaries);
-    } catch (err) {
-      console.error('读取故事会话失败:', err);
+  const ensureCurrentSessionId = useCallback(() => {
+    const nextSessionId = ensureSessionId(sessionIdRef.current, 'story-session');
+    if (nextSessionId !== sessionIdRef.current) {
+      sessionIdRef.current = nextSessionId;
+      setSessionId(nextSessionId);
     }
-  };
+    return nextSessionId;
+  }, [setSessionId]);
 
   const saveCurrentSession = async () => {
     const userMessages = messagesRef.current.filter(m => m.role === 'user');
-    if (userMessages.length === 0) return;
+    if (userMessages.length === 0) return false;
+    const currentSessionId = ensureCurrentSessionId();
 
     try {
       await invoke<AgentSessionSummary>('save_agent_session', {
         session: {
-          id: sessionIdRef.current,
+          id: currentSessionId,
           title: sessionTitleRef.current,
           savedAt: Date.now(),
           sessionKind: 'story',
@@ -761,8 +824,10 @@ const Adventure: React.FC = () => {
         }
       });
       await refreshSessions();
+      return true;
     } catch (err) {
       console.error('保存故事会话失败:', err);
+      return false;
     }
   };
 
@@ -792,7 +857,11 @@ const Adventure: React.FC = () => {
       });
       sessionTitleRef.current = generatedTitle;
       setSessionTitle(generatedTitle);
-      await saveCurrentSession();
+      const saved = await saveCurrentSession();
+      if (!saved) {
+        message.error('保存对话失败，请稍后重试');
+        return;
+      }
       message.success('对话已保存');
     } catch (err) {
       console.error('保存对话失败:', err);
@@ -873,9 +942,13 @@ const Adventure: React.FC = () => {
 
     try {
       const archiveConfig = settings.agentConfigs?.storyArchive || {};
-      const filteredCards = selectedCards.filter(cc => tempSelectedCardIds.includes(cc.id));
-      const promises = filteredCards.map(async (card) => {
-        const resultStr = await invoke<string | Record<string, any>>('analyze_character_memory', {
+      const selectedCardIds = new Set(tempSelectedCardIds);
+      const promises: Promise<{ cardId: string; analysis: any }>[] = [];
+      for (const card of selectedCards) {
+        if (!selectedCardIds.has(card.id)) {
+          continue;
+        }
+        promises.push(invoke<string | Record<string, any>>('analyze_character_memory', {
           request: {
             modelInterface: settings.modelInterface,
             baseUrl: settings.llmBaseUrl,
@@ -893,10 +966,11 @@ const Adventure: React.FC = () => {
             currentUserRelationBottomLine: card.fields?.userRelationBottomLine || '',
             currentEvents: card.fields?.keyEvents || '暂无共同经历的关键事件。'
           }
-        });
-        const analysis = parseArchiveAnalysisResponse(resultStr);
-        return { cardId: card.id, analysis };
-      });
+        }).then((resultStr) => ({
+          cardId: card.id,
+          analysis: parseArchiveAnalysisResponse(resultStr),
+        })));
+      }
 
       const results = await Promise.all(promises);
       const analyses: Record<string, any> = {};
@@ -962,7 +1036,10 @@ const Adventure: React.FC = () => {
       isSessionArchivedRef.current = true;
 
       // 3. Save the archived session
-      await saveCurrentSession();
+      const saved = await saveCurrentSession();
+      if (!saved) {
+        throw new Error('保存归档会话失败');
+      }
 
       message.success('冒险记忆成功封存到选中的角色卡！本局会话已锁定归档。');
       setIsArchiveModalOpen(false);
@@ -1073,16 +1150,7 @@ const Adventure: React.FC = () => {
                         checked ? [...prev, card.id] : prev.filter((id) => id !== card.id)
                       );
                     }}
-                    style={{
-                      margin: 0,
-                      padding: '8px 16px',
-                      border: isChecked ? '1px solid #d97757' : '1px solid #eae6df',
-                      borderRadius: '8px',
-                      backgroundColor: isChecked ? '#fff7f2' : '#faf9f5',
-                      color: isChecked ? '#d97757' : '#5c5751',
-                      transition: 'background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease',
-                      cursor: 'pointer'
-                    }}
+                    className={`adventure-archive-checkbox ${isChecked ? 'is-selected' : ''}`}
                   >
                     <span style={{ fontSize: '13px', fontWeight: 500 }}>{card.name}</span>
                   </Checkbox>
@@ -1478,18 +1546,7 @@ const Adventure: React.FC = () => {
         </div>
       ) : (
         /* Empty/Wizard Setup State */
-        <div style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: '40px 24px',
-          maxWidth: '720px',
-          margin: '0 auto',
-          width: '100%',
-          overflowY: 'auto'
-        }}>
+        <div className="adventure-setup">
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
             <CompassOutlined style={{ fontSize: '56px', color: '#d97757', marginBottom: '16px', opacity: 0.9 }} />
             <h2 style={{ fontSize: '26px', fontWeight: 600, color: '#33312e', margin: '0 0 8px 0', letterSpacing: '-0.5px' }}>
@@ -1500,17 +1557,7 @@ const Adventure: React.FC = () => {
             </p>
           </div>
 
-          <div style={{
-            width: '100%',
-            background: '#ffffff',
-            border: '1px solid #eae6df',
-            borderRadius: '12px',
-            padding: '32px',
-            boxShadow: '0 4px 24px rgba(217, 119, 87, 0.02)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '24px'
-          }}>
+          <div className="adventure-setup-card">
             {/* World Book Dropdown Selector */}
             <div>
               <div style={{ fontSize: '14px', fontWeight: 600, color: '#33312e', marginBottom: '8px' }}>
@@ -1559,7 +1606,7 @@ const Adventure: React.FC = () => {
                   />
                 </div>
               ) : (
-                <div style={{ color: '#8c8882', fontSize: '13px', textAlign: 'center', padding: '12px', border: '1px dashed #eae6df', borderRadius: '6px', background: '#faf9f5' }}>
+                <div className="adventure-empty-card">
                   目前还没有角色卡，去背景页新建一个吧！
                 </div>
               )}
@@ -1585,16 +1632,7 @@ const Adventure: React.FC = () => {
               />
             </div>
 
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '16px',
-              padding: '12px 14px',
-              border: '1px solid #f0e7de',
-              borderRadius: '8px',
-              background: '#fffaf6'
-            }}>
+            <div className="adventure-dynamic-role-card">
               <div>
                 <div style={{ fontSize: '14px', fontWeight: 600, color: '#33312e' }}>
                   角色卡动态加载
@@ -1702,7 +1740,7 @@ const Adventure: React.FC = () => {
               value={input}
             />
 
-            <div className="agent-composer__actions" style={{ position: 'absolute', bottom: '12px', left: '16px', right: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
+            <div className="agent-composer__actions adventure-composer-actions">
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '12px', color: '#8c8882' }}>
@@ -1864,5 +1902,7 @@ function RolePlayToolBubble({ tool }: { tool: AgentToolEntry }) {
     </div>
   );
 }
+
+const Adventure: React.FC = () => useAdventureView();
 
 export default Adventure;

@@ -9,6 +9,7 @@ import { useStoryStore } from '../stores/useStoryStore';
 const appInvokeMock = vi.fn(async (command: string, _args?: unknown) => {
   if (command === 'list_agent_sessions') return [];
   if (command === 'save_agent_session') return { id: 'saved-session', title: '已保存' };
+  if (command === 'start_chat_completion_stream') return { runId: 'run-1' };
   if (command === 'analyze_character_memory') {
     return {
       recommendedSessionTitle: '归档标题',
@@ -20,10 +21,17 @@ const appInvokeMock = vi.fn(async (command: string, _args?: unknown) => {
   }
   return undefined;
 });
+const listenStreamMock = vi.fn((
+  _runId: string,
+  _onEvent: unknown,
+  _onError?: unknown,
+  _onComplete?: unknown,
+) => undefined);
 
 vi.mock('../utils/runtime', () => ({
   appInvoke: (command: string, args?: unknown) => appInvokeMock(command, args),
-  listenStream: vi.fn(),
+  listenStream: (runId: string, onEvent: unknown, onError?: unknown, onComplete?: unknown) =>
+    listenStreamMock(runId, onEvent, onError, onComplete),
 }));
 
 const characterCard = {
@@ -41,6 +49,14 @@ const secondCharacterCard = {
   fields: {},
 };
 
+const compactedContext = {
+  summary: '旧上下文摘要',
+  compactedThroughMessageId: 'm1',
+  compactedThroughIndex: 0,
+  sourceMessageCount: 2,
+  updatedAt: 123,
+};
+
 function resetPartnerStore() {
   usePartnerStore.setState({
     characterCards: [characterCard, secondCharacterCard],
@@ -53,6 +69,7 @@ function resetPartnerStore() {
 describe('mobile archive flow', () => {
   beforeEach(() => {
     appInvokeMock.mockClear();
+    listenStreamMock.mockClear();
     Element.prototype.scrollTo = vi.fn();
     resetPartnerStore();
   });
@@ -70,7 +87,7 @@ describe('mobile archive flow', () => {
       sessionTitle: '新聊天',
       activeRun: { runId: null, messageId: null },
       isSessionArchived: false,
-      contextCompaction: null,
+      contextCompaction: compactedContext,
     });
 
     render(<MobileChat />);
@@ -86,6 +103,7 @@ describe('mobile archive flow', () => {
             todos: [],
             isArchived: false,
             characterCardId: characterCard.id,
+            contextCompaction: compactedContext,
           }),
         })
       );
@@ -115,7 +133,7 @@ describe('mobile archive flow', () => {
       activeRun: { runId: null, messageId: null },
       isSessionArchived: false,
       initialPlot: '',
-      contextCompaction: null,
+      contextCompaction: compactedContext,
       dynamicRoleLoadingEnabled: false,
     });
 
@@ -139,6 +157,7 @@ describe('mobile archive flow', () => {
             todos: [],
             isArchived: false,
             characterCardIds: [characterCard.id, secondCharacterCard.id],
+            contextCompaction: compactedContext,
           }),
         })
       );
@@ -156,5 +175,77 @@ describe('mobile archive flow', () => {
     const analyzeIndex = appInvokeMock.mock.calls.findIndex(([command]) => command === 'analyze_character_memory');
     expect(saveIndex).toBeLessThan(analyzeIndex);
     expect(await screen.findByDisplayValue('归档标题')).toBeInTheDocument();
+  });
+
+  it('passes mobile chat context compaction back into the next stream request', async () => {
+    usePartnerChatStore.setState({
+      messages: [{ id: 'm1', role: 'user', content: '你好', tools: [] }],
+      input: '继续聊',
+      isStreaming: false,
+      expandedBlocks: {},
+      selectedWorldBookId: null,
+      selectedCharacterCardId: characterCard.id,
+      sessions: [],
+      sessionId: 'partner-session-existing',
+      sessionTitle: '旧聊天',
+      activeRun: { runId: null, messageId: null },
+      isSessionArchived: false,
+      contextCompaction: compactedContext,
+    });
+
+    const { container } = render(<MobileChat />);
+    const sendButton = container.querySelector('button.ant-btn-circle') as HTMLButtonElement | null;
+    expect(sendButton).not.toBeNull();
+    fireEvent.click(sendButton!);
+
+    await waitFor(() => {
+      expect(appInvokeMock).toHaveBeenCalledWith(
+        'start_chat_completion_stream',
+        expect.objectContaining({
+          request: expect.objectContaining({
+            contextCompaction: compactedContext,
+          }),
+        }),
+      );
+    });
+  });
+
+  it('passes mobile story context compaction back into the next stream request', async () => {
+    useStoryStore.setState({
+      messages: [
+        { id: 'm1', role: 'user', content: '进入森林', tools: [] },
+        { id: 'm2', role: 'agent', content: '雾气升起。', tools: [] },
+      ],
+      input: '继续前进',
+      inputMode: 'speech',
+      isStreaming: false,
+      expandedBlocks: {},
+      selectedWorldBookId: null,
+      selectedCharacterCardIds: [characterCard.id],
+      sessions: [],
+      sessionId: 'story-session-existing',
+      sessionTitle: '旧故事',
+      activeRun: { runId: null, messageId: null },
+      isSessionArchived: false,
+      initialPlot: '',
+      contextCompaction: compactedContext,
+      dynamicRoleLoadingEnabled: false,
+    });
+
+    const { container } = render(<MobileStory />);
+    const sendButton = container.querySelector('button.ant-btn-circle') as HTMLButtonElement | null;
+    expect(sendButton).not.toBeNull();
+    fireEvent.click(sendButton!);
+
+    await waitFor(() => {
+      expect(appInvokeMock).toHaveBeenCalledWith(
+        'start_chat_completion_stream',
+        expect.objectContaining({
+          request: expect.objectContaining({
+            contextCompaction: compactedContext,
+          }),
+        }),
+      );
+    });
   });
 });

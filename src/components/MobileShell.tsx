@@ -9,6 +9,21 @@ const MOBILE_NAV_ITEMS = [
   { key: '/bond', label: '羁绊', icon: <HeartOutlined /> },
 ];
 
+const MOBILE_NAV_BUTTON_STYLE: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: 1,
+  height: '100%',
+  cursor: 'pointer',
+  transition: 'color 0.2s ease',
+  border: 0,
+  background: 'transparent',
+  padding: 0,
+  font: 'inherit',
+};
+
 const MobileShell: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -40,21 +55,7 @@ const MobileShell: React.FC = () => {
               aria-label={item.label}
               aria-current={isActive ? 'page' : undefined}
               onClick={() => navigate(item.key)}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flex: 1,
-                height: '100%',
-                cursor: 'pointer',
-                color: isActive ? '#d97757' : '#8c8880',
-                transition: 'color 0.2s ease',
-                border: 0,
-                background: 'transparent',
-                padding: 0,
-                font: 'inherit',
-              }}
+              style={{ ...MOBILE_NAV_BUTTON_STYLE, color: isActive ? '#d97757' : '#8c8880' }}
             >
               <div style={{ fontSize: '20px', marginBottom: '2px' }}>
                 {item.icon}

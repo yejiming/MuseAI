@@ -149,6 +149,24 @@ describe('Story dynamic role loading page', () => {
     });
   });
 
+  it('repairs an empty story session id before saving adventures', async () => {
+    useStoryStore.setState({
+      sessionId: '',
+      messages: [{ id: 'm1', role: 'user', content: '进入森林', tools: [] }],
+      sessionTitle: '森林开局',
+    });
+    render(<Adventure />);
+
+    fireEvent.click(screen.getByRole('button', { name: /保存对话/ }));
+
+    await waitFor(() => {
+      const saveCall = invokeMock.mock.calls.find(([command]) => command === 'save_agent_session');
+      const saveArgs = saveCall?.[1] as any;
+      expect(saveArgs.session.id).toMatch(/^story-session-/);
+      expect(useStoryStore.getState().sessionId).toBe(saveArgs.session.id);
+    });
+  });
+
   it('auto-selects owned Character Cards after choosing a World Book and allows manual adjustment', async () => {
     const secondWorldBook = {
       id: 'wb-other',

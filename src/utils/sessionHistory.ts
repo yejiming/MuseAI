@@ -8,7 +8,7 @@ export interface ResolvedSessionHistoryMeta {
   characterCards: Array<{ id: string; name: string }>;
 }
 
-export function getSessionCharacterCardIds(session: AgentSessionSummary): string[] {
+function getSessionCharacterCardIds(session: AgentSessionSummary): string[] {
   if (Array.isArray(session.characterCardIds) && session.characterCardIds.length > 0) {
     return session.characterCardIds.filter(Boolean);
   }

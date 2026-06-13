@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Select, Button, Input, Modal, Spin, message } from 'antd';
 import {
   PlusOutlined,
@@ -19,9 +19,61 @@ import { useSettingsStore } from '../stores/useSettingsStore';
 import { appInvoke, listenStream } from '../utils/runtime';
 import { parseArchiveAnalysisResponse } from '../utils/archiveAnalysis';
 import { createStableContentKey } from '../utils/renderKeys';
+import { useStateGroup } from '../utils/reducerState';
+import { ensureSessionId } from '../utils/sessionIds';
 import type { Message, AgentSessionSummary } from '../stores/useAgentStore';
 
-const MobileChat: React.FC = () => {
+interface MobileChatUiState {
+  isArchiveModalOpen: boolean;
+  isAnalyzing: boolean;
+  isSavingConversation: boolean;
+  archiveAnalysis: any;
+  editedTitle: string;
+  editedRelationType: string;
+  editedRelationModel: string;
+  editedRelationBottomLine: string;
+  editedEvents: string;
+}
+
+const MOBILE_CHAT_CHARACTER_BUTTON_STYLE: React.CSSProperties = {
+  backgroundColor: '#fff',
+  borderRadius: '12px',
+  padding: '16px',
+  cursor: 'pointer',
+  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.01)',
+  border: '1px solid rgba(217, 119, 87, 0.05)',
+  textAlign: 'center',
+  fontWeight: 500,
+  width: '100%',
+  font: 'inherit',
+};
+
+const MOBILE_CHAT_MESSAGE_BUBBLE_BASE_STYLE: React.CSSProperties = {
+  maxWidth: '85%',
+  borderRadius: '16px',
+  padding: '12px 16px',
+  boxShadow: '0 2px 10px rgba(0, 0, 0, 0.01)',
+  fontSize: '14px',
+  lineHeight: 1.6,
+};
+
+const MOBILE_CHAT_THINKING_BUTTON_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+  fontSize: '12px',
+  color: '#d97757',
+  cursor: 'pointer',
+  fontWeight: 600,
+  border: 'none',
+  background: 'transparent',
+  padding: 0,
+  font: 'inherit',
+  width: '100%',
+  textAlign: 'left',
+};
+
+const useMobileChatView = () => {
   const {
     messages,
     input,
@@ -34,6 +86,7 @@ const MobileChat: React.FC = () => {
     sessionTitle,
     activeRun,
     isSessionArchived,
+    contextCompaction,
     setMessages,
     setInput,
     setIsStreaming,
@@ -52,22 +105,43 @@ const MobileChat: React.FC = () => {
   const { characterCards, worldBooks } = usePartnerStore();
   const settings = useSettingsStore();
 
-  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isSavingConversation, setIsSavingConversation] = useState(false);
-  const [archiveAnalysis, setArchiveAnalysis] = useState<any>(null);
-
-  // Archive fields
-  const [editedTitle, setEditedTitle] = useState('');
-  const [editedRelationType, setEditedRelationType] = useState('');
-  const [editedRelationModel, setEditedRelationModel] = useState('');
-  const [editedRelationBottomLine, setEditedRelationBottomLine] = useState('');
-  const [editedEvents, setEditedEvents] = useState('');
+  const [uiState, , setUiField] = useStateGroup<MobileChatUiState>({
+    isArchiveModalOpen: false,
+    isAnalyzing: false,
+    isSavingConversation: false,
+    archiveAnalysis: null,
+    editedTitle: '',
+    editedRelationType: '',
+    editedRelationModel: '',
+    editedRelationBottomLine: '',
+    editedEvents: '',
+  });
+  const {
+    isArchiveModalOpen,
+    isAnalyzing,
+    isSavingConversation,
+    archiveAnalysis,
+    editedTitle,
+    editedRelationType,
+    editedRelationModel,
+    editedRelationBottomLine,
+    editedEvents,
+  } = uiState;
+  const setIsArchiveModalOpen = (isArchiveModalOpen: boolean) => setUiField('isArchiveModalOpen', isArchiveModalOpen);
+  const setIsAnalyzing = (isAnalyzing: boolean) => setUiField('isAnalyzing', isAnalyzing);
+  const setIsSavingConversation = (isSavingConversation: boolean) => setUiField('isSavingConversation', isSavingConversation);
+  const setArchiveAnalysis = (archiveAnalysis: any) => setUiField('archiveAnalysis', archiveAnalysis);
+  const setEditedTitle = (editedTitle: string) => setUiField('editedTitle', editedTitle);
+  const setEditedRelationType = (editedRelationType: string) => setUiField('editedRelationType', editedRelationType);
+  const setEditedRelationModel = (editedRelationModel: string) => setUiField('editedRelationModel', editedRelationModel);
+  const setEditedRelationBottomLine = (editedRelationBottomLine: string) => setUiField('editedRelationBottomLine', editedRelationBottomLine);
+  const setEditedEvents = (editedEvents: string) => setUiField('editedEvents', editedEvents);
 
   const chatListRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<Message[]>(messages);
   const activeRunRef = useRef(activeRun);
+  const contextCompactionRef = useRef(contextCompaction);
   const currentThinkingIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -77,6 +151,10 @@ const MobileChat: React.FC = () => {
   useEffect(() => {
     activeRunRef.current = activeRun;
   }, [activeRun]);
+
+  useEffect(() => {
+    contextCompactionRef.current = contextCompaction;
+  }, [contextCompaction]);
 
   const scrollToBottom = () => {
     if (chatListRef.current) {
@@ -96,21 +174,25 @@ const MobileChat: React.FC = () => {
     appInvoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'partner-session-' })
       .then((list) => setSessions(list))
       .catch((e) => console.error('加载会话列表失败:', e));
-  }, []);
+  }, [setSessions]);
 
   const saveCurrentSession = async (customMessages?: Message[]) => {
     const list = customMessages || messagesRef.current;
     if (list.length === 0) return false;
+    const currentSessionId = ensureSessionId(sessionId, 'partner-session');
+    if (currentSessionId !== sessionId) {
+      setSessionId(currentSessionId);
+    }
     try {
       const record = {
-        id: sessionId,
+        id: currentSessionId,
         title: sessionTitle,
         messages: list,
         savedAt: Date.now(),
         selectedReferenceFiles: [],
         selectedOutlineFile: null,
         todos: [],
-        contextCompaction: null,
+        contextCompaction: contextCompactionRef.current,
         isArchived: isSessionArchived,
         characterCardId: selectedCharacterCardId,
         selectedWorldBookId,
@@ -134,16 +216,23 @@ const MobileChat: React.FC = () => {
     }
     setIsSavingConversation(true);
     try {
-      const chatHistoryText = messages
-        .filter(m => m.role === 'user' || m.role === 'agent')
-        .map(m => `${m.role === 'user' ? '我' : '故事旁白与NPC'}: ${m.content.replace(/\[\[THINKING:[^\]]+\]\]/g, '').trim()}`)
-        .join('\n\n');
+      const chatHistoryLines: string[] = [];
+      for (const m of messages) {
+        if (m.role === 'user' || m.role === 'agent') {
+          chatHistoryLines.push(`${m.role === 'user' ? '我' : '故事旁白与NPC'}: ${m.content.replace(/\[\[THINKING:[^\]]+\]\]/g, '').trim()}`);
+        }
+      }
+      const chatHistoryText = chatHistoryLines.join('\n\n');
       const res = await appInvoke<{ title: string }>('summarize_text', {
         request: { text: chatHistoryText }
       });
       const generatedTitle = res.title;
       setSessionTitle(generatedTitle);
-      await saveCurrentSession();
+      const saved = await saveCurrentSession();
+      if (!saved) {
+        message.error('保存对话失败，请稍后重试');
+        return;
+      }
       message.success('对话已保存');
     } catch (err) {
       console.error('保存对话失败:', err);
@@ -165,6 +254,9 @@ const MobileChat: React.FC = () => {
       setMessages(record.messages || []);
       setSelectedCharacterCardId(record.characterCardId ?? record.character_card_id ?? null);
       setSelectedWorldBookId(record.selectedWorldBookId ?? record.selected_world_book_id ?? null);
+      const loadedContextCompaction = record.contextCompaction ?? record.context_compaction ?? null;
+      contextCompactionRef.current = loadedContextCompaction;
+      setContextCompaction(loadedContextCompaction);
       setIsSessionArchived(record.isArchived ?? record.is_archived ?? false);
     } catch (e) {
       message.error('加载会话失败');
@@ -276,6 +368,7 @@ const MobileChat: React.FC = () => {
           thinkingDepth: settings.agentConfigs?.partnerChat?.thinkingDepth ?? 'off',
           systemPrompt,
           messages: modelMessages,
+          contextCompaction: contextCompactionRef.current,
         }
       });
 
@@ -330,6 +423,7 @@ const MobileChat: React.FC = () => {
               return { ...msg, thinkingBlocks: newThinkingBlocks };
             }));
           } else if (payload.eventType === 'context_compacted' && payload.contextCompaction) {
+            contextCompactionRef.current = payload.contextCompaction;
             setContextCompaction(payload.contextCompaction);
           } else if (payload.eventType === 'error') {
             currentThinkingIdRef.current = null;
@@ -527,18 +621,7 @@ const MobileChat: React.FC = () => {
                   onClick={() => {
                     setSelectedCharacterCardId(card.id);
                   }}
-                  style={{
-                    backgroundColor: '#fff',
-                    borderRadius: '12px',
-                    padding: '16px',
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.01)',
-                    border: '1px solid rgba(217, 119, 87, 0.05)',
-                    textAlign: 'center',
-                    fontWeight: 500,
-                    width: '100%',
-                    font: 'inherit',
-                  }}
+                  style={MOBILE_CHAT_CHARACTER_BUTTON_STYLE}
                 >
                   {card.name}
                 </button>
@@ -615,15 +698,10 @@ const MobileChat: React.FC = () => {
                     }}
                   >
                     <div style={{
-                      maxWidth: '85%',
+                      ...MOBILE_CHAT_MESSAGE_BUBBLE_BASE_STYLE,
                       backgroundColor: isUser ? '#d97757' : '#fff',
                       color: isUser ? '#fff' : '#33312e',
-                      borderRadius: '16px',
-                      padding: '12px 16px',
-                      boxShadow: '0 2px 10px rgba(0, 0, 0, 0.01)',
                       border: isUser ? 'none' : '1px solid rgba(217, 119, 87, 0.05)',
-                      fontSize: '14px',
-                      lineHeight: 1.6,
                     }}>
                       {isUser ? (
                         <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
@@ -653,21 +731,7 @@ const MobileChat: React.FC = () => {
                                     <button
                                       type="button"
                                       onClick={() => toggleBlock(`${msg.id}-${thinkingId}`)}
-                                      style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '6px',
-                                        fontSize: '12px',
-                                        color: '#d97757',
-                                        cursor: 'pointer',
-                                        fontWeight: 600,
-                                        border: 'none',
-                                        background: 'transparent',
-                                        padding: 0,
-                                        font: 'inherit',
-                                        width: '100%',
-                                        textAlign: 'left',
-                                      }}
+                                      style={MOBILE_CHAT_THINKING_BUTTON_STYLE}
                                     >
                                       <BulbOutlined />
                                       <span>思考过程 (点击{isExpanded ? '折叠' : '展开'})</span>
@@ -876,5 +940,7 @@ const MobileChat: React.FC = () => {
     </div>
   );
 };
+
+const MobileChat: React.FC = () => useMobileChatView();
 
 export default MobileChat;

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Tooltip, Tag, Input, message, Modal, Spin, Select, Radio, Empty } from 'antd';
 import {
   HistoryOutlined,
@@ -31,6 +31,7 @@ import {
   getStoryAllowedTools,
 } from './storyAgent';
 import { resolveBookTravelProgressMaterial } from '../utils/sessionHistory';
+import { ensureSessionId } from '../utils/sessionIds';
 
 interface ChatStreamEvent {
   runId: string;
@@ -45,10 +46,20 @@ interface ChatStreamEvent {
 }
 
 const estimateContextUsage = (systemPrompt: string, messages: Message[], draft: string) => {
+  let userText = draft;
+  let assistantText = '';
+  for (const message of messages) {
+    if (message.role === 'user') {
+      userText += message.content;
+    }
+    if (message.role === 'agent') {
+      assistantText += message.content;
+    }
+  }
   const stats = {
     system: Math.max(0, Math.ceil(systemPrompt.length * 1.5)),
-    user: Math.max(0, Math.ceil(([draft, ...messages.filter(m => m.role === 'user').map(m => m.content)].join('')).length * 1.5)),
-    assistant: Math.max(0, Math.ceil((messages.filter(m => m.role === 'agent').map(m => m.content).join('')).length * 1.5))
+    user: Math.max(0, Math.ceil(userText.length * 1.5)),
+    assistant: Math.max(0, Math.ceil(assistantText.length * 1.5))
   };
   return {
     ...stats,
@@ -331,11 +342,19 @@ const cancelBookTravelStream = async () => {
   await invoke('stop_book_travel_stream', { runId });
 };
 
+const handleCancelStart = async () => {
+  try {
+    await cancelBookTravelStream();
+  } catch (e) {
+    console.error('停止穿书流失败:', e);
+  }
+};
+
 const isBookTravelStreamCancelled = (err?: unknown) => (
   String(err) === '用户中断' || useBookTravelStore.getState().streamRuntime.phase === 'cancelled'
 );
 
-const Story: React.FC = () => {
+const useStoryView = () => {
   const {
     messages, setMessages,
     input, setInput,
@@ -343,7 +362,7 @@ const Story: React.FC = () => {
     isStreaming, setIsStreaming,
     selectedWorldBookId,
     selectedCharacterCardIds,
-    sessionId,
+    sessionId, setSessionId,
     sessionTitle, setSessionTitle,
     activeRun, setActiveRun,
     isSessionArchived,
@@ -360,7 +379,7 @@ const Story: React.FC = () => {
 
   // Book-travel stream states
   const [, setIsTransitioningScene] = useState(false);
-  const [streamNowMs, setStreamNowMs] = useState(Date.now());
+  const [streamNowMs, setStreamNowMs] = useState(() => Date.now());
   const {
     phase: startProgressPhase,
     plannerOutput,
@@ -410,15 +429,6 @@ const Story: React.FC = () => {
     systemPrompt,
   });
 
-  const handleCancelStart = async () => {
-    try {
-      await cancelBookTravelStream();
-    } catch (e) {
-      console.error('停止穿书流失败:', e);
-    }
-  };
-
-
   const { worldBooks, characterCards } = usePartnerStore();
   const { userInfo: partnerChatUserInfo } = usePartnerChatStore();
   const settings = useSettingsStore();
@@ -431,21 +441,72 @@ const Story: React.FC = () => {
   const sessionIdRef = useRef(sessionId);
   const sessionTitleRef = useRef(sessionTitle);
   const isSessionArchivedRef = useRef(isSessionArchived);
+  const selectedWorldBookIdRef = useRef(selectedWorldBookId);
+  const dynamicRoleLoadingEnabledRef = useRef(dynamicRoleLoadingEnabled);
   const selectedCharacterCardIdsRef = useRef(selectedCharacterCardIds);
   const contextCompactionRef = useRef<SessionContextCompaction | null>(contextCompaction);
 
+  const refreshSessions = useCallback(async () => {
+    try {
+      const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'story-session-' });
+      setSessions(summaries);
+    } catch (err) {
+      console.error('读取故事会话失败:', err);
+    }
+  }, [setSessions]);
+
+  const ensureCurrentSessionId = useCallback(() => {
+    const nextSessionId = ensureSessionId(sessionIdRef.current, 'story-session');
+    if (nextSessionId !== sessionIdRef.current) {
+      sessionIdRef.current = nextSessionId;
+      setSessionId(nextSessionId);
+    }
+    return nextSessionId;
+  }, [setSessionId]);
+
+  const saveCurrentSession = useCallback(async () => {
+    const userMessages = messagesRef.current.filter(m => m.role === 'user');
+    if (userMessages.length === 0) return false;
+    const currentSessionId = ensureCurrentSessionId();
+
+    try {
+      await invoke<AgentSessionSummary>('save_agent_session', {
+        session: {
+          id: currentSessionId,
+          title: sessionTitleRef.current,
+          savedAt: Date.now(),
+          messages: messagesRef.current,
+          selectedReferenceFiles: [],
+          selectedOutlineFile: null,
+          todos: [],
+          contextCompaction: contextCompactionRef.current,
+          isArchived: isSessionArchivedRef.current,
+          selectedWorldBookId: selectedWorldBookIdRef.current,
+          dynamicRoleLoadingEnabled: dynamicRoleLoadingEnabledRef.current,
+          characterCardIds: selectedCharacterCardIdsRef.current
+        }
+      });
+      await refreshSessions();
+      return true;
+    } catch (err) {
+      console.error('保存故事会话失败:', err);
+      return false;
+    }
+  }, [ensureCurrentSessionId, refreshSessions]);
 
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   useEffect(() => { sessionTitleRef.current = sessionTitle; }, [sessionTitle]);
   useEffect(() => { isSessionArchivedRef.current = isSessionArchived; }, [isSessionArchived]);
+  useEffect(() => { selectedWorldBookIdRef.current = selectedWorldBookId; }, [selectedWorldBookId]);
+  useEffect(() => { dynamicRoleLoadingEnabledRef.current = dynamicRoleLoadingEnabled; }, [dynamicRoleLoadingEnabled]);
   useEffect(() => { selectedCharacterCardIdsRef.current = selectedCharacterCardIds; }, [selectedCharacterCardIds]);
   useEffect(() => { contextCompactionRef.current = contextCompaction; }, [contextCompaction]);
 
   useEffect(() => {
     void refreshSessions();
-  }, []);
+  }, [refreshSessions]);
 
   // Listen to stream events from tauri backend
   useEffect(() => {
@@ -583,7 +644,7 @@ const Story: React.FC = () => {
       isMounted = false;
       if (unlistenFn) unlistenFn();
     };
-  }, []);
+  }, [saveCurrentSession, setActiveRun, setContextCompaction, setIsStreaming, setMessages]);
 
   const scrollToBottomOnce = () => {
     window.requestAnimationFrame(() => {
@@ -1318,42 +1379,6 @@ const Story: React.FC = () => {
     setIsStreaming(false);
   };
 
-  const refreshSessions = async () => {
-    try {
-      const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'story-session-' });
-      setSessions(summaries);
-    } catch (err) {
-      console.error('读取故事会话失败:', err);
-    }
-  };
-
-  const saveCurrentSession = async () => {
-    const userMessages = messagesRef.current.filter(m => m.role === 'user');
-    if (userMessages.length === 0) return;
-
-    try {
-      await invoke<AgentSessionSummary>('save_agent_session', {
-        session: {
-          id: sessionIdRef.current,
-          title: sessionTitleRef.current,
-          savedAt: Date.now(),
-          messages: messagesRef.current,
-          selectedReferenceFiles: [],
-          selectedOutlineFile: null,
-          todos: [],
-          contextCompaction: contextCompactionRef.current,
-          isArchived: isSessionArchivedRef.current,
-          selectedWorldBookId,
-          dynamicRoleLoadingEnabled,
-          characterCardIds: selectedCharacterCardIdsRef.current
-        }
-      });
-      await refreshSessions();
-    } catch (err) {
-      console.error('保存故事会话失败:', err);
-    }
-  };
-
   // Context Stats
   const contextStats = estimateContextUsage(effectiveSystemPrompt, messages, input);
   const maxContext = storyAgentConfig.maxContextTokens ?? 200000;
@@ -1383,9 +1408,14 @@ const Story: React.FC = () => {
   );
 
   const hasMessages = messages.length > 0;
+  const canStartBookTravel = Boolean(
+    bookTravelStore.selectedMaterialId &&
+    bookTravelStore.selectedEntryPointId &&
+    bookTravelStore.userCharacter?.name?.trim()
+  );
 
   return (
-    <div className="agent-chat" style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#faf9f5' }}>
+    <div className="agent-chat book-travel-page">
 
       {/* Book Travel Planner Progress Modal */}
       <Modal
@@ -1399,7 +1429,7 @@ const Story: React.FC = () => {
         closable={startProgressPhase === 'error' || startProgressPhase === 'cancelled'}
         maskClosable={startProgressPhase === 'error' || startProgressPhase === 'cancelled'}
         title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#33312e', fontSize: '18px', fontWeight: 600 }}>
+          <div className="book-travel-modal-title">
             <CompassOutlined style={{ color: '#d97757' }} />
             <span>穿书任务进展</span>
           </div>
@@ -1408,27 +1438,27 @@ const Story: React.FC = () => {
         styles={{ body: { padding: '16px 24px' } }}
         footer={
           startProgressPhase === 'planner' ? (
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div className="book-travel-modal-footer">
               <Button size="small" onClick={handleCancelStart}>中断</Button>
             </div>
           ) : (
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div className="book-travel-modal-footer">
               <Button onClick={() => { setStartProgressOpen(false); setStartProgressPhase('done'); }}>关闭</Button>
             </div>
           )
         }
       >
-        <div style={{ height: 400, overflowY: 'auto' }}>
+        <div className="book-travel-progress-body">
           {startProgressPhase === 'planner' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8c8882', fontSize: 13 }}>
+            <div className="book-travel-progress-stack">
+              <div className="book-travel-progress-line">
                 <Spin size="small" />
                 🧠 剧情规划师正在分析你的行动...
                 <span style={{ fontSize: 12, color: '#b8b3ab', fontFamily: 'monospace', marginLeft: 'auto' }}>
                   {formatElapsed(startElapsedMs)}
                 </span>
               </div>
-              <div style={{ color: '#5c5751', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#f5f3ef', borderRadius: 8, padding: '12px 14px', border: '1px dashed #ddd8d0' }}>
+              <div className="book-travel-planner-output">
                 {plannerOutput}
                 <span style={{ display: 'inline-block', width: 2, height: 14, background: '#d97757', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />
               </div>
@@ -1436,13 +1466,13 @@ const Story: React.FC = () => {
           )}
 
           {startProgressPhase === 'error' && (
-            <div style={{ padding: '12px 16px', background: '#fff2f0', borderRadius: 8, color: '#ff4d4f', fontSize: 14 }}>
+            <div className="book-travel-error-notice">
               生成失败：{startProgressError}
             </div>
           )}
 
           {startProgressPhase === 'cancelled' && (
-            <div style={{ padding: '12px 16px', background: '#f5f5f5', borderRadius: 8, color: '#8c8882', fontSize: 14 }}>
+            <div className="book-travel-cancel-notice">
               已中断生成
             </div>
           )}
@@ -1530,18 +1560,11 @@ const Story: React.FC = () => {
         {filteredSavedProgressRows.length === 0 ? (
           <Empty description={bookTravelMaterialFilter ? '没有符合筛选的穿书进度' : '暂无保存的穿书进度'} />
         ) : (
-          <div style={{ maxHeight: 460, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="book-travel-history-list">
             {filteredSavedProgressRows.map(({ progress, material }) => (
               <div
                 key={progress.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'stretch',
-                  gap: 8,
-                  border: '1px solid #eee8df',
-                  borderRadius: 8,
-                  background: '#fffdfa',
-                }}
+                className="book-travel-history-row"
               >
                 <button
                   type="button"
@@ -1550,16 +1573,7 @@ const Story: React.FC = () => {
                     bookTravelStore.loadSavedProgress(progress.id);
                     setIsBookTravelHistoryOpen(false);
                   }}
-                  style={{
-                    flex: 1,
-                    border: 0,
-                    background: 'transparent',
-                    textAlign: 'left',
-                    padding: '12px 14px',
-                    cursor: 'pointer',
-                    font: 'inherit',
-                    minWidth: 0,
-                  }}
+                  className="book-travel-history-open"
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
                     <strong style={{ color: '#33312e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1591,9 +1605,9 @@ const Story: React.FC = () => {
       </Modal>
 
       {/* Unified scrollable content area */}
-      <div ref={chatHistoryRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+      <div ref={chatHistoryRef} className="book-travel-scroll">
         {bookTravelStore.scenes.length > 0 ? (
-          <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="book-travel-turns">
             {/* Turns history */}
             {bookTravelStore.turns.map((turn) => {
               const createdScene = turn.createdSceneId ? bookTravelStore.scenes.find((s) => s.id === turn.createdSceneId) : null;
@@ -1607,16 +1621,16 @@ const Story: React.FC = () => {
               const shouldShowSituationCard = shouldShowSceneBrief || Boolean(sceneContext?.currentSituation);
               const canRetryWriter = turn.status === 'error' && turn.failedStage === 'writing';
               return (
-                <div key={turn.id} style={{ marginBottom: 24 }}>
-                  <div style={{ textAlign: 'right', marginBottom: 8 }}>
-                    <div style={{ display: 'inline-block', background: '#d97757', color: '#fff', padding: '10px 14px', borderRadius: '12px 12px 2px 12px', maxWidth: '80%', fontSize: 14, lineHeight: 1.6 }}>
+                <div key={turn.id} className="book-travel-turn">
+                  <div className="book-travel-user-row">
+                    <div className="book-travel-user-bubble">
                       {turn.userInput}
                     </div>
                   </div>
                   {sceneContext && (
-                    <div style={{ marginBottom: 12, background: '#faf6f0', border: '1px solid #f2e8dc', borderRadius: 10, padding: '14px 16px' }}>
+                    <div className="book-travel-scene-card">
                       <div style={{ fontSize: 15, fontWeight: 600, color: '#33312e', marginBottom: 6 }}>{sceneContext.title}</div>
-                      <div style={{ fontSize: 12, color: '#8c8882', marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+                      <div className="book-travel-scene-meta">
                         {sceneContext.time && <span>时间：{sceneContext.time}</span>}
                         {sceneContext.location && <span>地点：{sceneContext.location}</span>}
                       </div>
@@ -1626,7 +1640,7 @@ const Story: React.FC = () => {
                         </div>
                       )}
                       {shouldShowSituationCard && (
-                        <div data-testid="scene-situation-card" style={{ fontSize: 12, color: '#5c5751', marginBottom: 8, background: '#fff', padding: '8px 10px', borderRadius: 6 }}>
+                        <div data-testid="scene-situation-card" className="book-travel-situation-card">
                           {userCharacterLabel && (
                             <div>
                               <span style={{ color: '#d97757', fontWeight: 600 }}>扮演身份：</span>{userCharacterLabel}
@@ -1645,7 +1659,7 @@ const Story: React.FC = () => {
                         </div>
                       )}
                       {sceneContext.activeCharacters && sceneContext.activeCharacters.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        <div className="book-travel-character-tags">
                           {sceneContext.activeCharacters.map((name) => (
                             <Tag key={name} color="#d97757" style={{ borderRadius: 4, margin: 0 }}>{name}</Tag>
                           ))}
@@ -1654,8 +1668,8 @@ const Story: React.FC = () => {
                     </div>
                   )}
                   {turn.narrativeOutput ? (
-                    <div style={{ textAlign: 'left' }}>
-                      <div style={{ display: 'inline-block', background: '#fff', border: '1px solid #eae6df', padding: '12px 14px', borderRadius: '12px 12px 12px 2px', maxWidth: '80%', color: '#33312e', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                    <div className="book-travel-narrative-row">
+                      <div className="book-travel-narrative-bubble">
                         {turn.narrativeOutput}
                       </div>
                       {canRetryWriter && (
@@ -1685,8 +1699,8 @@ const Story: React.FC = () => {
 
             {/* Streaming progress in message stream */}
             {startProgressPhase === 'writer' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px', background: '#f5f3ef', borderRadius: 12, border: '1px dashed #ddd8d0' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8c8882', fontSize: 13 }}>
+              <div className="book-travel-stream-card">
+                <div className="book-travel-progress-line">
                   <Spin size="small" />
                   ✍️ 场景写手正在书写...
                   <span style={{ fontSize: 12, color: '#b8b3ab', fontFamily: 'monospace', marginLeft: 'auto' }}>
@@ -1696,24 +1710,24 @@ const Story: React.FC = () => {
                 {(() => {
                   const partial = extractPartialContent(writerOutput);
                   return partial !== null ? (
-                    <div style={{ color: '#5c5751', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fff', borderRadius: 8, padding: '12px 14px', border: '1px solid #eae6df' }}>
+                    <div className="book-travel-writer-output">
                       {partial}
                       <span style={{ display: 'inline-block', width: 2, height: 14, background: '#d97757', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />
                     </div>
                   ) : null;
                 })()}
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <div className="book-travel-modal-footer">
                   <Button size="small" onClick={handleCancelStart}>中断</Button>
                 </div>
               </div>
             )}
             {startProgressPhase === 'error' && (
-              <div style={{ padding: '12px 16px', background: '#fff2f0', borderRadius: 8, color: '#ff4d4f', fontSize: 14 }}>
+              <div className="book-travel-error-notice">
                 生成失败：{startProgressError}
               </div>
             )}
             {startProgressPhase === 'cancelled' && (
-              <div style={{ padding: '12px 16px', background: '#f5f5f5', borderRadius: 8, color: '#8c8882', fontSize: 14 }}>
+              <div className="book-travel-cancel-notice">
                 已中断生成
               </div>
             )}
@@ -1721,17 +1735,7 @@ const Story: React.FC = () => {
           </div>
         ) : (
           /* Book Travel Setup Wizard */
-          <div style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            alignItems: 'center',
-            padding: '40px 24px',
-            maxWidth: '720px',
-            margin: '0 auto',
-            width: '100%'
-          }}>
+          <div className="book-travel-setup">
             <div style={{ textAlign: 'center', marginBottom: '32px' }}>
               <CompassOutlined style={{ fontSize: '56px', color: '#d97757', marginBottom: '16px', opacity: 0.9 }} />
               <h2 style={{ fontSize: '26px', fontWeight: 600, color: '#33312e', margin: '0 0 8px 0', letterSpacing: '-0.5px' }}>
@@ -1742,24 +1746,14 @@ const Story: React.FC = () => {
               </p>
             </div>
 
-            <div style={{
-              width: '100%',
-              background: '#ffffff',
-              border: '1px solid #eae6df',
-              borderRadius: '12px',
-              padding: '32px',
-              boxShadow: '0 4px 24px rgba(217, 119, 87, 0.02)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '24px'
-            }}>
+            <div className="book-travel-setup-card">
               {/* Select Assembled Material */}
               <div>
                 <div style={{ fontSize: '14px', fontWeight: 600, color: '#33312e', marginBottom: '8px' }}>
                   选择穿书素材
                 </div>
                 {bookTravelStore.assembledMaterials.length === 0 ? (
-                  <div style={{ color: '#8c8882', fontSize: '13px', textAlign: 'center', padding: '12px', border: '1px dashed #eae6df', borderRadius: '6px', background: '#faf9f5' }}>
+                  <div className="book-travel-empty-card">
                     暂无已装配素材，请先前往<Button type="link" style={{ padding: 0, height: 'auto' }} onClick={() => navigate('/book-travel-materials')}>穿书素材页</Button>装配素材
                   </div>
                 ) : (
@@ -1779,7 +1773,7 @@ const Story: React.FC = () => {
                   <div style={{ fontSize: '14px', fontWeight: 600, color: '#33312e', marginBottom: '8px' }}>
                     选择入场点
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="book-travel-entry-list">
                     {bookTravelStore.entryPoints.map((ep) => {
                       const selected = bookTravelStore.selectedEntryPointId === ep.id;
                       return (
@@ -1787,18 +1781,9 @@ const Story: React.FC = () => {
                           type="button"
                           key={ep.id}
                           onClick={() => bookTravelStore.setSelectedEntryPointId(ep.id)}
-                          style={{
-                            padding: '12px 14px',
-                            borderRadius: 8,
-                            border: selected ? '1px solid #d97757' : '1px solid #eae6df',
-                            background: selected ? '#fff7f2' : '#ffffff',
-                            cursor: 'pointer',
-                            width: '100%',
-                            font: 'inherit',
-                            textAlign: 'left',
-                          }}
+                          className={`book-travel-entry-button ${selected ? 'is-selected' : ''}`}
                         >
-                          <div style={{ fontWeight: 600, color: selected ? '#d97757' : '#33312e', fontSize: 14 }}>{ep.title}</div>
+                          <div className="book-travel-entry-title">{ep.title}</div>
                           <div style={{ fontSize: 12, color: '#8c8882', marginTop: 4 }}>{ep.summary}</div>
                           {ep.risk && <div style={{ fontSize: 12, color: '#ff4d4f', marginTop: 4 }}>风险：{ep.risk}</div>}
                         </button>
@@ -1815,7 +1800,7 @@ const Story: React.FC = () => {
                     选择扮演身份
                   </div>
                   {bookTravelStore.recommendedUserCharacters.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+                    <div className="book-travel-character-options">
                       {bookTravelStore.recommendedUserCharacters.map((uc) => {
                         const selected = bookTravelStore.userCharacter?.name === uc.name;
                         return (
@@ -1825,16 +1810,7 @@ const Story: React.FC = () => {
                             onChange={(checked) => {
                               if (checked) bookTravelStore.setUserCharacter(uc);
                             }}
-                            style={{
-                              padding: '6px 14px',
-                              fontSize: '13px',
-                              border: selected ? '1px solid #d97757' : '1px solid #eae6df',
-                              borderRadius: '6px',
-                              backgroundColor: selected ? '#fff7f2' : '#faf9f5',
-                              color: selected ? '#d97757' : '#5c5751',
-                              margin: 0,
-                              cursor: 'pointer'
-                            }}
+                            className={`book-travel-character-option ${selected ? 'is-selected' : ''}`}
                           >
                             <UserOutlined style={{ marginRight: 6 }} />
                             {uc.name}（{uc.identity}）
@@ -1873,14 +1849,8 @@ const Story: React.FC = () => {
                 size="large"
                 icon={<PlayCircleOutlined />}
                 onClick={startBookTravelAdventure}
-                disabled={!bookTravelStore.selectedMaterialId || !bookTravelStore.selectedEntryPointId || !bookTravelStore.userCharacter?.name?.trim()}
-                style={{
-                  backgroundColor: (bookTravelStore.selectedMaterialId && bookTravelStore.selectedEntryPointId && bookTravelStore.userCharacter?.name?.trim()) ? '#d97757' : undefined,
-                  borderColor: (bookTravelStore.selectedMaterialId && bookTravelStore.selectedEntryPointId && bookTravelStore.userCharacter?.name?.trim()) ? '#d97757' : undefined,
-                  borderRadius: '8px',
-                  fontWeight: 600,
-                  marginTop: '12px'
-                }}
+                disabled={!canStartBookTravel}
+                className={`book-travel-start-button ${canStartBookTravel ? 'is-ready' : ''}`}
               >
                 开始穿书
               </Button>
@@ -1888,8 +1858,8 @@ const Story: React.FC = () => {
 
             {/* Streaming progress in setup wizard */}
             {startProgressPhase === 'writer' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '16px', background: '#f5f3ef', borderRadius: 12, border: '1px dashed #ddd8d0', marginTop: 16, width: '100%' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8c8882', fontSize: 13 }}>
+              <div className="book-travel-stream-card book-travel-stream-card--setup">
+                <div className="book-travel-progress-line">
                   <Spin size="small" />
                   ✍️ 场景写手正在书写...
                   <span style={{ fontSize: 12, color: '#b8b3ab', fontFamily: 'monospace', marginLeft: 'auto' }}>
@@ -1899,24 +1869,24 @@ const Story: React.FC = () => {
                 {(() => {
                   const partial = extractPartialContent(writerOutput);
                   return partial !== null ? (
-                    <div style={{ color: '#5c5751', fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fff', borderRadius: 8, padding: '12px 14px', border: '1px solid #eae6df' }}>
+                    <div className="book-travel-writer-output">
                       {partial}
                       <span style={{ display: 'inline-block', width: 2, height: 14, background: '#d97757', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />
                     </div>
                   ) : null;
                 })()}
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <div className="book-travel-modal-footer">
                   <Button size="small" onClick={handleCancelStart}>中断</Button>
                 </div>
               </div>
             )}
             {startProgressPhase === 'error' && (
-              <div style={{ padding: '12px 16px', background: '#fff2f0', borderRadius: 8, color: '#ff4d4f', fontSize: 14, marginTop: 16, width: '100%' }}>
+              <div className="book-travel-error-notice book-travel-setup-notice">
                 生成失败：{startProgressError}
               </div>
             )}
             {startProgressPhase === 'cancelled' && (
-              <div style={{ padding: '12px 16px', background: '#f5f5f5', borderRadius: 8, color: '#8c8882', fontSize: 14, marginTop: 16, width: '100%' }}>
+              <div className="book-travel-cancel-notice book-travel-setup-notice">
                 已中断生成
               </div>
             )}
@@ -1927,30 +1897,12 @@ const Story: React.FC = () => {
 
       {/* Composer Input Area */}
       {(hasMessages || bookTravelStore.scenes.length > 0) && !bookTravelStore.isCompleted && (
-        <div className="agent-composer" style={{
-          padding: '16px 24px 24px 24px',
-          width: '100%',
-          boxSizing: 'border-box'
-        }}>
+        <div className="agent-composer book-travel-composer">
           {/* Formatted Text input helper overlay inside composer box */}
-          <div id="agent-composer-box" className="agent-composer__box" style={{
-            boxShadow: '0 2px 12px rgba(0, 0, 0, 0.04)',
-            border: '1px solid #eae6df',
-            borderRadius: '12px',
-            background: '#ffffff',
-            position: 'relative',
-            paddingTop: '40px' // Leave space for Segment Tabs
-          }}>
+          <div id="agent-composer-box" className="agent-composer__box book-travel-composer-box">
 
             {/* Input Action Segment Controller */}
-            <div style={{
-              position: 'absolute',
-              top: '8px',
-              left: '12px',
-              zIndex: 10,
-              display: 'flex',
-              gap: '6px'
-            }}>
+            <div className="book-travel-mode-tabs">
               <Radio.Group
                 value={inputMode}
                 onChange={(e) => setInputMode(e.target.value)}
@@ -2002,7 +1954,7 @@ const Story: React.FC = () => {
               value={input}
             />
 
-            <div className="agent-composer__actions" style={{ position: 'absolute', bottom: '12px', left: '16px', right: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
+            <div className="agent-composer__actions book-travel-composer-actions">
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 {bookTravelStore.scenes.length > 0 ? (
@@ -2097,4 +2049,6 @@ function updateMessageTool(
     return { ...msg, tools };
   });
 }
+const Story: React.FC = () => useStoryView();
+
 export default Story;

@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Tree, Dropdown, MenuProps, message, Modal, Form, Select, Input, Button } from 'antd';
 import { open } from '@tauri-apps/plugin-dialog';
 import { DownOutlined } from '@ant-design/icons';
+import { useStateGroup } from '../utils/reducerState';
 
 
 interface FileNode {
@@ -19,6 +20,17 @@ interface WorkspaceDirectoryProps {
   selectedFile: string | null;
   onSelectFile: (file: string | null) => void;
   footer?: React.ReactNode;
+}
+
+interface WorkspaceDirectoryUiState {
+  nodes: FileNode[];
+  rootDir: string;
+  expandedKeys: React.Key[];
+  cutPath: string | null;
+  isCrawlModalOpen: boolean;
+  isCrawling: boolean;
+  crawlTargetDir: string;
+  renamingKey: string | null;
 }
 
 const parentPathOf = (path: string) => path.replace(/[\\/][^\\/]*$/, '');
@@ -39,63 +51,239 @@ const replacePathPrefix = (path: string, oldPrefix: string, newPrefix: string) =
   return path;
 };
 
-const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = ({ title, dirType, selectedFile, onSelectFile, footer }) => {
-  const [nodes, setNodes] = useState<FileNode[]>([]);
-  const [rootDir, setRootDir] = useState<string>('');
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
-  const [cutPath, setCutPath] = useState<string | null>(null);
-  
-  const [isCrawlModalOpen, setIsCrawlModalOpen] = useState(false);
-  const [isCrawling, setIsCrawling] = useState(false);
-  const [crawlTargetDir, setCrawlTargetDir] = useState<string>('');
-  const [renamingKey, setRenamingKey] = useState<string | null>(null);
-  const [form] = Form.useForm();
-  
-  
+const copyText = async (text: string) => {
+  await navigator.clipboard.writeText(text);
+  message.success('已复制路径');
+};
 
-  const loadFiles = async (keys: React.Key[] = expandedKeys) => {
+interface WorkspaceTreeDataOptions {
+  renamingKey: string | null;
+  cutPath: string | null;
+  canPasteTo: (targetDir: string) => boolean;
+  relativeToWorkspace: (path: string) => string;
+  onCreateItem: (type: 'file' | 'folder', targetDir?: string) => void;
+  onDelete: (path: string) => void;
+  onMoveItem: (sourcePath: string, targetDir: string) => void;
+  onRename: (path: string, oldName: string, newName: string) => void;
+  onSetCutPath: (path: string | null) => void;
+  onSetRenamingKey: (path: string | null) => void;
+}
+
+const buildWorkspaceTreeData = (files: FileNode[], options: WorkspaceTreeDataOptions): any[] => {
+  const {
+    renamingKey,
+    cutPath,
+    canPasteTo,
+    relativeToWorkspace,
+    onCreateItem,
+    onDelete,
+    onMoveItem,
+    onRename,
+    onSetCutPath,
+    onSetRenamingKey,
+  } = options;
+
+  return files.map((file) => {
+    const isRenaming = renamingKey === file.path;
+    return {
+      title: isRenaming ? (
+        <Input
+          autoFocus
+          defaultValue={file.name}
+          size="small"
+          onClick={(e) => e.stopPropagation()}
+          onBlur={(e) => onRename(file.path, file.name, e.target.value)}
+          onPressEnter={(e) => onRename(file.path, file.name, (e.target as any).value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              onSetRenamingKey(null);
+              e.stopPropagation();
+            }
+          }}
+        />
+      ) : (
+        <Dropdown
+          menu={{
+            items: [
+              ...(file.is_dir ? [
+                { key: 'new_file', label: '新建文件' },
+                { key: 'new_folder', label: '新建文件夹' },
+                ...(cutPath && canPasteTo(file.path) ? [
+                  { key: 'paste', label: '粘贴到此处' },
+                ] : []),
+                { type: 'divider' as const },
+              ] : []),
+              { key: 'cut', label: '剪切' },
+              { key: 'copy-absolute', label: '复制绝对路径', onClick: (e) => { e.domEvent.stopPropagation(); void copyText(file.path); } },
+              { key: 'copy-relative', label: '复制基于工作空间的相对路径', onClick: (e) => { e.domEvent.stopPropagation(); void copyText(relativeToWorkspace(file.path)); } },
+              { key: 'rename', label: '重命名', onClick: (e) => { e.domEvent.stopPropagation(); onSetRenamingKey(file.path); } },
+              { key: 'delete', label: '删除', danger: true, onClick: (e) => { e.domEvent.stopPropagation(); onDelete(file.path); } }
+            ],
+            onClick: ({ key, domEvent }) => {
+              domEvent.stopPropagation();
+              if (key === 'new_file') {
+                onCreateItem('file', file.path);
+              }
+              if (key === 'new_folder') {
+                onCreateItem('folder', file.path);
+              }
+              if (key === 'paste' && cutPath) {
+                onMoveItem(cutPath, file.path);
+              }
+              if (key === 'cut') {
+                onSetCutPath(file.path);
+                message.success('已剪切，右键目标文件夹或空白处粘贴');
+              }
+            },
+          }}
+          trigger={['contextMenu']}
+        >
+          <div
+            onContextMenu={(event) => event.stopPropagation()}
+            style={{
+              width: '100%',
+              opacity: cutPath === file.path ? 0.55 : 1,
+            }}
+          >
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {file.name}
+            </span>
+          </div>
+        </Dropdown>
+      ),
+      key: file.path,
+      name: file.name,
+      path: file.path,
+      isDir: file.is_dir,
+      isLeaf: !file.is_dir,
+      children: file.children ? buildWorkspaceTreeData(file.children, options) : undefined,
+    };
+  });
+};
+
+const updateWorkspaceTreeData = (list: FileNode[], key: React.Key, children: FileNode[]): FileNode[] =>
+  list.map((node) => {
+    if (node.path === key) {
+      return {
+        ...node,
+        children,
+      };
+    }
+    if (node.children) {
+      return {
+        ...node,
+        children: updateWorkspaceTreeData(node.children, key, children),
+      };
+    }
+    return node;
+  });
+
+const useWorkspaceFiles = (
+  dirType: WorkspaceDirectoryProps['dirType'],
+  patchUiState: (patch: Partial<WorkspaceDirectoryUiState>) => void,
+  setUiField: <K extends keyof WorkspaceDirectoryUiState>(
+    key: K,
+    value: WorkspaceDirectoryUiState[K] | ((current: WorkspaceDirectoryUiState[K]) => WorkspaceDirectoryUiState[K]),
+  ) => void,
+) => {
+  const expandedKeysRef = useRef<React.Key[]>([]);
+
+  const setExpandedKeysSynced = useCallback((keys: React.Key[]) => {
+    expandedKeysRef.current = keys;
+    setUiField('expandedKeys', keys);
+  }, [setUiField]);
+
+  const loadFiles = useCallback(async (keys: React.Key[]) => {
     try {
       const referenceRootDir: string = await invoke('get_workspace_dir', { dirType });
-      setRootDir(referenceRootDir);
+      patchUiState({ rootDir: referenceRootDir });
       const rootItems: FileNode[] = await invoke('list_dir', { path: referenceRootDir });
-      
-      const fetchChildren = async (items: FileNode[]): Promise<FileNode[]> => {
-        return Promise.all(items.map(async item => {
-          if (item.is_dir && keys.includes(item.path)) {
-            try {
-              const children = await invoke<FileNode[]>('list_dir', { path: item.path });
-              item.children = await fetchChildren(children.filter(i => i.name !== '.versions'));
-            } catch (e) {
-              item.children = [];
-            }
+
+      const fetchChildren = async (items: FileNode[]): Promise<FileNode[]> => Promise.all(items.map(async (item) => {
+        if (item.is_dir && keys.includes(item.path)) {
+          try {
+            const children = await invoke<FileNode[]>('list_dir', { path: item.path });
+            item.children = await fetchChildren(children.filter((child) => child.name !== '.versions'));
+          } catch (e) {
+            item.children = [];
           }
-          return item;
-        }));
-      };
-      
-      const newNodes = await fetchChildren(rootItems.filter(i => i.name !== '.versions'));
-      setNodes(newNodes);
+        }
+        return item;
+      }));
+
+      const newNodes = await fetchChildren(rootItems.filter((item) => item.name !== '.versions'));
+      patchUiState({ nodes: newNodes });
     } catch (e) {
       console.error(e);
       message.error('加载文件失败');
     }
-  };
+  }, [dirType, patchUiState]);
 
   const loadFilesRef = useRef(loadFiles);
   loadFilesRef.current = loadFiles;
 
   useEffect(() => {
-    loadFiles();
-  }, [expandedKeys]);
+    void loadFiles(expandedKeysRef.current);
+  }, [loadFiles]);
 
   useEffect(() => {
     const unlistenPromise = listen('workspace-changed', () => {
-      loadFilesRef.current();
+      loadFilesRef.current(expandedKeysRef.current);
     });
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
     };
   }, []);
+
+  const handleLoadData = useCallback(async ({ key, children }: any) => {
+    if (children && children.length > 0) {
+      return;
+    }
+    const items: FileNode[] = await invoke('list_dir', { path: key });
+    setUiField('nodes', (origin) => updateWorkspaceTreeData(origin, key, items.filter((item) => item.name !== '.versions')));
+  }, [setUiField]);
+
+  return {
+    expandedKeysRef,
+    handleLoadData,
+    loadFiles,
+    setExpandedKeysSynced,
+  };
+};
+
+const useWorkspaceDirectoryView = ({ title, dirType, selectedFile, onSelectFile, footer }: WorkspaceDirectoryProps) => {
+  const [uiState, patchUiState, setUiField] = useStateGroup<WorkspaceDirectoryUiState>({
+    nodes: [],
+    rootDir: '',
+    expandedKeys: [],
+    cutPath: null,
+    isCrawlModalOpen: false,
+    isCrawling: false,
+    crawlTargetDir: '',
+    renamingKey: null,
+  });
+  const {
+    nodes,
+    rootDir,
+    expandedKeys,
+    cutPath,
+    isCrawlModalOpen,
+    isCrawling,
+    crawlTargetDir,
+    renamingKey,
+  } = uiState;
+  const setRootDir = useCallback((rootDir: string) => setUiField('rootDir', rootDir), [setUiField]);
+  const setCutPath = useCallback((cutPath: string | null) => setUiField('cutPath', cutPath), [setUiField]);
+  const setIsCrawlModalOpen = useCallback((isCrawlModalOpen: boolean) => setUiField('isCrawlModalOpen', isCrawlModalOpen), [setUiField]);
+  const setIsCrawling = useCallback((isCrawling: boolean) => setUiField('isCrawling', isCrawling), [setUiField]);
+  const setCrawlTargetDir = useCallback((crawlTargetDir: string) => setUiField('crawlTargetDir', crawlTargetDir), [setUiField]);
+  const setRenamingKey = useCallback((renamingKey: string | null) => setUiField('renamingKey', renamingKey), [setUiField]);
+  const [form] = Form.useForm();
+  const { expandedKeysRef, handleLoadData, loadFiles, setExpandedKeysSynced } = useWorkspaceFiles(
+    dirType,
+    patchUiState,
+    setUiField,
+  );
 
   const getRootDir = async () => {
     const referenceRootDir = await invoke<string>('get_workspace_dir', { dirType });
@@ -121,7 +309,7 @@ const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = ({ title, dirType,
       });
       message.success(msg);
       setIsCrawlModalOpen(false);
-      loadFiles();
+      void loadFiles(expandedKeysRef.current);
     } catch (e) {
       console.error(e);
       message.error(`爬取失败: ${e}`);
@@ -158,7 +346,7 @@ const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = ({ title, dirType,
       }
       
       message.success('导入成功');
-      loadFiles();
+      void loadFiles(expandedKeysRef.current);
     } catch (e) {
       console.error(e);
       message.error(`导入失败: ${e}`);
@@ -176,7 +364,7 @@ const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = ({ title, dirType,
             onSelectFile(null);
           }
           message.success('删除成功');
-          loadFiles();
+          void loadFiles(expandedKeysRef.current);
         } catch (e) {
           message.error(`删除失败: ${e}`);
         }
@@ -195,47 +383,16 @@ const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = ({ title, dirType,
          onSelectFile(parts.join('/') + '/' + newNameStr);
       }
       message.success('重命名成功');
-      loadFiles();
+      void loadFiles(expandedKeysRef.current);
     } catch (e) {
       message.error(`重命名失败: ${e}`);
     }
-  };
-
-  const updateTreeData = (list: FileNode[], key: React.Key, children: FileNode[]): FileNode[] =>
-    list.map((node) => {
-      if (node.path === key) {
-        return {
-          ...node,
-          children,
-        };
-      }
-      if (node.children) {
-        return {
-          ...node,
-          children: updateTreeData(node.children, key, children),
-        };
-      }
-      return node;
-    });
-
-  
-  const copyText = async (text: string) => {
-    await navigator.clipboard.writeText(text);
-    message.success('已复制路径');
   };
 
   const relativeToWorkspace = (path: string) => {
     if (!rootDir) return path;
     if (path === rootDir) return '.';
     return path.startsWith(`${rootDir}/`) ? path.slice(rootDir.length + 1) : path;
-  };
-
-  const handleLoadData = async ({ key, children }: any) => {
-    if (children && children.length > 0) {
-      return;
-    }
-    const items: FileNode[] = await invoke('list_dir', { path: key });
-    setNodes((origin) => updateTreeData(origin, key, items.filter(item => item.name !== '.versions')));
   };
 
   const moveItemToDirectory = async (sourcePath: string, targetDir: string) => {
@@ -260,7 +417,7 @@ const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = ({ title, dirType,
       }
       setCutPath(null);
       const nextExpandedKeys = expandedKeys.includes(targetDir) ? expandedKeys : [...expandedKeys, targetDir];
-      setExpandedKeys(nextExpandedKeys);
+      setExpandedKeysSynced(nextExpandedKeys);
       message.success('移动成功');
       await loadFiles(nextExpandedKeys);
     } catch (e) {
@@ -273,92 +430,12 @@ const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = ({ title, dirType,
     return parentPathOf(cutPath) !== targetDir && !isInsidePath(targetDir, cutPath);
   };
 
-  const mapToTreeData = (files: FileNode[]): any[] => {
-    return files.map(file => {
-      const isRenaming = renamingKey === file.path;
-      return {
-        title: isRenaming ? (
-          <Input 
-            autoFocus
-            defaultValue={file.name}
-            size="small"
-            onClick={(e) => e.stopPropagation()}
-            onBlur={(e) => handleRenameSubmit(file.path, file.name, e.target.value)}
-            onPressEnter={(e) => handleRenameSubmit(file.path, file.name, (e.target as any).value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setRenamingKey(null);
-                e.stopPropagation();
-              }
-            }}
-          />
-        ) : (
-          <Dropdown
-            menu={{
-              items: [
-                ...(file.is_dir ? [
-                  { key: 'new_file', label: '新建文件' },
-                  { key: 'new_folder', label: '新建文件夹' },
-                  ...(cutPath && canPasteTo(file.path) ? [
-                    { key: 'paste', label: '粘贴到此处' },
-                  ] : []),
-                  { type: 'divider' as const },
-                ] : []),
-                
-                { key: 'cut', label: '剪切' },
-                { key: 'copy-absolute', label: '复制绝对路径', onClick: (e) => { e.domEvent.stopPropagation(); void copyText(file.path); } },
-                { key: 'copy-relative', label: '复制基于工作空间的相对路径', onClick: (e) => { e.domEvent.stopPropagation(); void copyText(relativeToWorkspace(file.path)); } },
-                { key: 'rename', label: '重命名', onClick: (e) => { e.domEvent.stopPropagation(); setRenamingKey(file.path); } },
-                { key: 'delete', label: '删除', danger: true, onClick: (e) => { e.domEvent.stopPropagation(); handleDelete(file.path); } }
-              ],
-              onClick: ({ key, domEvent }) => {
-                domEvent.stopPropagation();
-                if (key === 'new_file') {
-                  void handleCreateItem('file', file.path);
-                }
-                if (key === 'new_folder') {
-                  void handleCreateItem('folder', file.path);
-                }
-                if (key === 'paste' && cutPath) {
-                  void moveItemToDirectory(cutPath, file.path);
-                }
-                if (key === 'cut') {
-                  setCutPath(file.path);
-                  message.success('已剪切，右键目标文件夹或空白处粘贴');
-                }
-              },
-            }}
-            trigger={['contextMenu']}
-          >
-            <div
-              onContextMenu={(event) => event.stopPropagation()}
-              style={{
-                width: '100%',
-                opacity: cutPath === file.path ? 0.55 : 1,
-              }}
-            >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {file.name}
-              </span>
-            </div>
-          </Dropdown>
-        ),
-        key: file.path,
-        name: file.name,
-        path: file.path,
-        isDir: file.is_dir,
-        isLeaf: !file.is_dir,
-        children: file.children ? mapToTreeData(file.children) : undefined,
-      };
-    });
-  };
-
   const handleCreateItem = async (type: 'file' | 'folder', explicitTargetDir?: string) => {
     const targetDir = explicitTargetDir ?? await getRootDir();
     try {
       const newName: string = await invoke('create_untitled_item', { targetDir, isDir: type === 'folder' });
       const nextExpandedKeys = expandedKeys.includes(targetDir) ? expandedKeys : [...expandedKeys, targetDir];
-      setExpandedKeys(nextExpandedKeys);
+      setExpandedKeysSynced(nextExpandedKeys);
       await loadFiles(nextExpandedKeys);
       const newPath = `${targetDir}/${newName}`;
       setTimeout(() => setRenamingKey(newPath), 100);
@@ -402,89 +479,159 @@ const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = ({ title, dirType,
     },
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: footer ? '16px 16px 70px' : '16px', position: 'relative' }}>
-      <Modal
-        title="爬取互联网文章"
-        open={isCrawlModalOpen}
-        onCancel={() => setIsCrawlModalOpen(false)}
-        footer={null}
-        destroyOnClose
-      >
-        <Form form={form} layout="vertical" onFinish={handleCrawlSubmit}>
-          <Form.Item 
-            name="type" 
-            label="小说类型" 
-            rules={[{ required: true, message: '请选择类型' }]}
-          >
-            <Select>
-              <Select.Option value="番茄小说-长篇">番茄小说-长篇</Select.Option>
-              <Select.Option value="番茄小说-短篇">番茄小说-短篇</Select.Option>
-            </Select>
-          </Form.Item>
-          
-          <Form.Item 
-            name="url" 
-            label="小说链接 (主页/阅读页 URL)" 
-            rules={[{ required: true, message: '请输入链接' }, { type: 'url', message: '请输入有效的网址' }]}
-          >
-            <Input placeholder="例如: https://fanqienovel.com/page/... 或 /reader/..." />
-          </Form.Item>
-          
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={isCrawling} block>
-              开始爬取
-            </Button>
-          </Form.Item>
-        </Form>
-      </Modal>
+  const treeData = buildWorkspaceTreeData(nodes, {
+    renamingKey,
+    cutPath,
+    canPasteTo,
+    relativeToWorkspace,
+    onCreateItem: (type, targetDir) => void handleCreateItem(type, targetDir),
+    onDelete: handleDelete,
+    onMoveItem: (sourcePath, targetDir) => void moveItemToDirectory(sourcePath, targetDir),
+    onRename: handleRenameSubmit,
+    onSetCutPath: setCutPath,
+    onSetRenamingKey: setRenamingKey,
+  });
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <strong style={{ color: '#d97757', fontSize: 16 }}>{title}</strong>
-        <Dropdown menu={menuProps} trigger={['click']}>
-          <button type="button" style={{ cursor: 'pointer', color: '#d97757', fontWeight: 500, border: 0, background: 'transparent', padding: 0, font: 'inherit' }}>
-            添加 <DownOutlined style={{ fontSize: 12 }} />
-          </button>
-        </Dropdown>
-      </div>
-      <Dropdown menu={rootContextMenuProps} trigger={['contextMenu']}>
-        <div
-          style={{ flex: 1, overflowY: 'auto' }}
-        >
-          {nodes.length > 0 ? (
-            <Tree
-              treeData={mapToTreeData(nodes)}
-              loadData={handleLoadData}
-              selectedKeys={selectedFile ? [selectedFile] : []}
-              expandedKeys={expandedKeys}
-              onExpand={(keys) => setExpandedKeys([...keys])}
-              onSelect={(selectedKeys, info) => {
-                const key = info.node.key as string;
-                if (info.node.isLeaf && selectedKeys.length > 0) {
-                  onSelectFile(key);
-                } else {
-                  setExpandedKeys((keys) =>
-                    keys.includes(key) ? keys.filter((item) => item !== key) : [...keys, key]
-                  );
-                }
-              }}
-              blockNode
-              style={{ background: 'transparent' }}
-            />
-          ) : (
-            <div style={{ color: '#999', textAlign: 'center', marginTop: 40, fontSize: 14 }}>
-              目录为空，请导入文件或爬取文章
-            </div>
-          )}
-        </div>
-      </Dropdown>
-      {footer && (
-        <div style={{ position: 'absolute', left: 16, right: 16, bottom: 16 }}>
-          {footer}
-        </div>
-      )}
-    </div>
+  const handleTreeSelect = (selectedKeys: React.Key[], info: any) => {
+    const key = info.node.key as string;
+    if (info.node.isLeaf && selectedKeys.length > 0) {
+      onSelectFile(key);
+      return;
+    }
+    const nextExpandedKeys = expandedKeys.includes(key)
+      ? expandedKeys.filter((item) => item !== key)
+      : [...expandedKeys, key];
+    setExpandedKeysSynced(nextExpandedKeys);
+  };
+
+  return (
+    <WorkspaceDirectoryView
+      expandedKeys={expandedKeys}
+      footer={footer}
+      form={form}
+      isCrawlModalOpen={isCrawlModalOpen}
+      isCrawling={isCrawling}
+      menuProps={menuProps}
+      rootContextMenuProps={rootContextMenuProps}
+      selectedFile={selectedFile}
+      title={title}
+      treeData={treeData}
+      onCancelCrawl={() => setIsCrawlModalOpen(false)}
+      onCrawlSubmit={handleCrawlSubmit}
+      onExpand={(keys) => setExpandedKeysSynced([...keys])}
+      onLoadData={handleLoadData}
+      onSelect={handleTreeSelect}
+    />
   );
 };
+
+const WorkspaceDirectory: React.FC<WorkspaceDirectoryProps> = (props) => useWorkspaceDirectoryView(props);
+
+interface WorkspaceDirectoryViewProps {
+  expandedKeys: React.Key[];
+  footer?: React.ReactNode;
+  form: any;
+  isCrawlModalOpen: boolean;
+  isCrawling: boolean;
+  menuProps: MenuProps;
+  rootContextMenuProps: MenuProps;
+  selectedFile: string | null;
+  title: string;
+  treeData: any[];
+  onCancelCrawl: () => void;
+  onCrawlSubmit: (values: any) => void;
+  onExpand: (keys: React.Key[]) => void;
+  onLoadData: (node: any) => Promise<void>;
+  onSelect: (selectedKeys: React.Key[], info: any) => void;
+}
+
+const WorkspaceDirectoryView: React.FC<WorkspaceDirectoryViewProps> = ({
+  expandedKeys,
+  footer,
+  form,
+  isCrawlModalOpen,
+  isCrawling,
+  menuProps,
+  rootContextMenuProps,
+  selectedFile,
+  title,
+  treeData,
+  onCancelCrawl,
+  onCrawlSubmit,
+  onExpand,
+  onLoadData,
+  onSelect,
+}) => (
+  <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: footer ? '16px 16px 70px' : '16px', position: 'relative' }}>
+    <Modal
+      title="爬取互联网文章"
+      open={isCrawlModalOpen}
+      onCancel={onCancelCrawl}
+      footer={null}
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical" onFinish={onCrawlSubmit}>
+        <Form.Item
+          name="type"
+          label="小说类型"
+          rules={[{ required: true, message: '请选择类型' }]}
+        >
+          <Select>
+            <Select.Option value="番茄小说-长篇">番茄小说-长篇</Select.Option>
+            <Select.Option value="番茄小说-短篇">番茄小说-短篇</Select.Option>
+          </Select>
+        </Form.Item>
+
+        <Form.Item
+          name="url"
+          label="小说链接 (主页/阅读页 URL)"
+          rules={[{ required: true, message: '请输入链接' }, { type: 'url', message: '请输入有效的网址' }]}
+        >
+          <Input placeholder="例如: https://fanqienovel.com/page/... 或 /reader/..." />
+        </Form.Item>
+
+        <Form.Item>
+          <Button type="primary" htmlType="submit" loading={isCrawling} block>
+            开始爬取
+          </Button>
+        </Form.Item>
+      </Form>
+    </Modal>
+
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <strong style={{ color: '#d97757', fontSize: 16 }}>{title}</strong>
+      <Dropdown menu={menuProps} trigger={['click']}>
+        <button type="button" style={{ cursor: 'pointer', color: '#d97757', fontWeight: 500, border: 0, background: 'transparent', padding: 0, font: 'inherit' }}>
+          添加 <DownOutlined style={{ fontSize: 12 }} />
+        </button>
+      </Dropdown>
+    </div>
+    <Dropdown menu={rootContextMenuProps} trigger={['contextMenu']}>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {treeData.length > 0 ? (
+          <Tree
+            treeData={treeData}
+            loadData={onLoadData}
+            selectedKeys={selectedFile ? [selectedFile] : []}
+            expandedKeys={expandedKeys}
+            onExpand={(keys) => onExpand([...keys])}
+            onSelect={onSelect}
+            blockNode
+            style={{ background: 'transparent' }}
+          />
+        ) : (
+          <div style={{ color: '#999', textAlign: 'center', marginTop: 40, fontSize: 14 }}>
+            目录为空，请导入文件或爬取文章
+          </div>
+        )}
+      </div>
+    </Dropdown>
+    {footer && (
+      <div style={{ position: 'absolute', left: 16, right: 16, bottom: 16 }}>
+        {footer}
+      </div>
+    )}
+  </div>
+);
 
 export default WorkspaceDirectory;

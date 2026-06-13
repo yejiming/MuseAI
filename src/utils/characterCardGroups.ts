@@ -13,7 +13,7 @@ const hasWorldBook = (worldBooks: PartnerItem[], worldBookId?: string | null) =>
   !!worldBookId && worldBooks.some((worldBook) => worldBook.id === worldBookId)
 );
 
-export const resolveCharacterCardWorldBookId = (
+const resolveCharacterCardWorldBookId = (
   worldBooks: PartnerItem[],
   card: PartnerItem,
 ): string | null => (hasWorldBook(worldBooks, card.worldBookId) ? card.worldBookId! : null);
@@ -61,7 +61,7 @@ export const getCharacterCardIdsForWorldBook = (
   characterCards: PartnerItem[],
 ): string[] => {
   if (!worldBookId) return [];
-  return characterCards
-    .filter((card) => card.worldBookId === worldBookId)
-    .map((card) => card.id);
+  return characterCards.flatMap((card) => (
+    card.worldBookId === worldBookId ? [card.id] : []
+  ));
 };

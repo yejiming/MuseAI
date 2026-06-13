@@ -1,7 +1,7 @@
 {
   "name": "museai",
   "private": true,
-  "version": "0.7.0",
+  "version": "0.7.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,7 +19,6 @@
     "@codemirror/view": "^6.43.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
-    "@tauri-apps/plugin-opener": "^2",
     "@uiw/react-codemirror": "^4.25.10",
     "antd": "^6.4.3",
     "echarts": "^6.1.0",

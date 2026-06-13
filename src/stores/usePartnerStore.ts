@@ -151,8 +151,10 @@ const fieldToText = (value: unknown): string => {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) {
     return value
-      .map((item) => fieldToText(item))
-      .filter(Boolean)
+      .flatMap((item) => {
+        const text = fieldToText(item);
+        return text ? [text] : [];
+      })
       .join('\n');
   }
   if (typeof value === 'object') {
@@ -222,12 +224,17 @@ export const normalizePartnerFields = (fields?: PartnerItemFields): PartnerItemF
 
   const identityTags = source.identityTags;
   if (Array.isArray(identityTags)) {
-    normalized.identityTags = identityTags.map((tag) => fieldToText(tag)).filter(Boolean);
+    normalized.identityTags = identityTags.flatMap((tag) => {
+      const text = fieldToText(tag);
+      return text ? [text] : [];
+    });
   } else {
     const tags = fieldToText(identityTags)
       .split(/[\n,，、；;]+/)
-      .map((tag) => tag.trim())
-      .filter(Boolean);
+      .flatMap((tag) => {
+        const trimmed = tag.trim();
+        return trimmed ? [trimmed] : [];
+      });
     if (tags.length > 0) {
       normalized.identityTags = tags;
     }
@@ -247,13 +254,19 @@ const formatFieldLine = (label: string, value?: string) => {
 };
 
 const buildListSection = (title: string, items: { label: string; value?: string }[]) => {
-  const lines = items.map(i => formatFieldLine(i.label, i.value)).filter(Boolean);
+  const lines = items.flatMap((item) => {
+    const line = formatFieldLine(item.label, item.value);
+    return line ? [line] : [];
+  });
   if (lines.length === 0) return '';
   return `## ${title}\n${lines.join('\n')}\n\n`;
 };
 
 const buildCustomFieldsSection = (title: string, fields: CustomField[]) => {
-  const lines = fields.map(f => formatFieldLine(f.label, f.value)).filter(Boolean);
+  const lines = fields.flatMap((field) => {
+    const line = formatFieldLine(field.label, field.value);
+    return line ? [line] : [];
+  });
   if (lines.length === 0) return '';
   return `### ${title}\n${lines.join('\n')}\n\n`;
 };
@@ -267,9 +280,10 @@ const compileCustomFields = (fields?: CustomField[]): string => {
     byModule[f.moduleId].push(f);
   });
 
-  const sections = Object.entries(byModule)
-    .map(([moduleId, moduleFields]) => buildCustomFieldsSection(MODULE_NAMES[moduleId] || moduleId, moduleFields))
-    .filter(Boolean);
+  const sections = Object.entries(byModule).flatMap(([moduleId, moduleFields]) => {
+    const section = buildCustomFieldsSection(MODULE_NAMES[moduleId] || moduleId, moduleFields);
+    return section ? [section] : [];
+  });
 
   if (sections.length === 0) return '';
   return `## 自定义补充设定\n\n${sections.join('')}`;
@@ -349,7 +363,7 @@ const toPackageCharacterCard = (item: PartnerItem): PartnerItemsPackage['charact
   worldBookId: item.worldBookId ?? null,
 });
 
-export const createPartnerItemsPackage = (
+const createPartnerItemsPackage = (
   worldBooks: PartnerItem[],
   characterCards: PartnerItem[],
   type: PartnerImportExportType,
@@ -373,22 +387,24 @@ const readPackageItems = (value: unknown): PartnerItemsPackage => {
   const worldBookInputs = Array.isArray(value.worldBooks) ? value.worldBooks : [];
   const characterCardInputs = Array.isArray(value.characterCards) ? value.characterCards : [];
 
-  const worldBooks = worldBookInputs
-    .filter(isRecord)
-    .map((item) => ({
+  const worldBooks = worldBookInputs.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    return [{
       id: typeof item.id === 'string' ? item.id : undefined,
       name: fieldToText(item.name) || '未命名世界书',
       fields: normalizePartnerFields(item.fields as PartnerItemFields | undefined),
-    }));
+    }];
+  });
 
-  const characterCards = characterCardInputs
-    .filter(isRecord)
-    .map((item) => ({
+  const characterCards = characterCardInputs.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    return [{
       id: typeof item.id === 'string' ? item.id : undefined,
       name: fieldToText(item.name) || '未命名角色卡',
       fields: normalizePartnerFields(item.fields as PartnerItemFields | undefined),
       worldBookId: typeof item.worldBookId === 'string' ? item.worldBookId : null,
-    }));
+    }];
+  });
 
   return {
     schema: PACKAGE_SCHEMA,
@@ -399,7 +415,7 @@ const readPackageItems = (value: unknown): PartnerItemsPackage => {
   };
 };
 
-export const parsePartnerItemsPackage = (packageText: string): PartnerItemsPackage => {
+const parsePartnerItemsPackage = (packageText: string): PartnerItemsPackage => {
   try {
     return readPackageItems(JSON.parse(packageText));
   } catch (error) {
@@ -599,9 +615,9 @@ export const usePartnerStore = create<PartnerState>()(
 
       deleteWorldBookWithCharacterCards: (id) => set((state) => {
         const removedCharacterIds = new Set(
-          state.characterCards
-            .filter((item) => item.worldBookId === id)
-            .map((item) => item.id)
+          state.characterCards.flatMap((item) => (
+            item.worldBookId === id ? [item.id] : []
+          ))
         );
         const nextWorldBooks = state.worldBooks.filter((item) => item.id !== id);
         const nextCharacterCards = state.characterCards.filter((item) => item.worldBookId !== id);
@@ -897,7 +913,9 @@ export const usePartnerStore = create<PartnerState>()(
           : parsed.worldBooks.filter((worldBook) =>
               parsed.characterCards.some((card) => card.worldBookId && card.worldBookId === worldBook.id)
             );
-        const importedWorldBookSourceIds = new Set(importedWorldBooks.map((worldBook) => worldBook.id).filter(Boolean));
+        const importedWorldBookSourceIds = new Set(importedWorldBooks.flatMap((worldBook) => (
+          worldBook.id ? [worldBook.id] : []
+        )));
         const importedCharacterCards = type === 'character_card'
           ? parsed.characterCards
           : parsed.characterCards.filter((card) => card.worldBookId && importedWorldBookSourceIds.has(card.worldBookId));

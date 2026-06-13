@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { Button, Input, Tooltip, Empty, Card, Tabs, Tag, Row, Col, Space, Radio, Modal, Spin, message, Tree, Progress, Select } from 'antd';
 import { 
   GlobalOutlined, 
@@ -33,9 +33,44 @@ import {
   splitCharacterNames,
 } from '../utils/backgroundExtraction';
 import { UNASSIGNED_CHARACTER_CARD_GROUP_ID, groupCharacterCardsByWorldBook } from '../utils/characterCardGroups';
+import { useStateGroup } from '../utils/reducerState';
 
 const DIRECTORY_WIDTH = 280;
 const DEFAULT_BACKGROUND_CANCELLATION_SETTLE_MS = 15_000;
+
+interface FileTreeNode {
+  title: string;
+  key: string;
+  isLeaf: boolean;
+  children?: FileTreeNode[];
+}
+
+interface BackgroundUiState {
+  isAiModalOpen: boolean;
+  selectedFilePaths: string[];
+  isGenerating: boolean;
+  isCancellingBackground: boolean;
+  extractionMode: BackgroundExtractionMode;
+  extractionStep: 'setup' | 'review' | 'characters';
+  manualCharacterNames: string;
+  reviewWorldBookName: string;
+  reviewWorldBookFieldsJson: string;
+  reviewCharacterNames: string;
+  characterStatuses: CharacterExtractionItem<{ name: string; fields: PartnerItemFields }>[];
+  articlesTree: FileTreeNode[];
+  outlineTree: FileTreeNode[];
+  referencesTree: FileTreeNode[];
+  isMemModalOpen: boolean;
+  optimizedEvents: string;
+  isOptimizing: boolean;
+  pendingWorldBookDelete: PartnerItem | null;
+  editingId: string | null;
+  editName: string;
+  activeMode: 'edit' | 'preview';
+  tagInputVisible: boolean;
+  tagInputValue: string;
+  expandedCharacterGroupKeys: React.Key[];
+}
 
 const getBackgroundCancellationSettleMs = () => {
   const testValue = (globalThis as { __MUSEAI_BACKGROUND_CANCELLATION_SETTLE_MS__?: number })
@@ -43,7 +78,81 @@ const getBackgroundCancellationSettleMs = () => {
   return typeof testValue === 'number' ? testValue : DEFAULT_BACKGROUND_CANCELLATION_SETTLE_MS;
 };
 
-const Background: React.FC = () => {
+const partnerTypeLabel = (type: PartnerImportExportType) => type === 'world_book' ? '世界书' : '角色卡';
+
+const partnerPackageText = (data: PartnerItemsPackage) => JSON.stringify(data, null, 2);
+
+interface CustomFieldsBlockProps {
+  item: PartnerItem;
+  moduleId: string;
+  addCustomField: (id: string, type: 'world_book' | 'character_card', moduleId: string) => void;
+  updateCustomField: (
+    id: string,
+    type: 'world_book' | 'character_card',
+    fieldId: string,
+    updates: Partial<Pick<CustomField, 'label' | 'value'>>,
+  ) => void;
+  removeCustomField: (id: string, type: 'world_book' | 'character_card', fieldId: string) => void;
+}
+
+const CustomFieldsBlock: React.FC<CustomFieldsBlockProps> = ({
+  item,
+  moduleId,
+  addCustomField,
+  updateCustomField,
+  removeCustomField,
+}) => {
+  const fields = item.fields?.customFields?.filter((field: CustomField) => field.moduleId === moduleId) || [];
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px dashed rgba(0,0,0,0.06)' }}>
+      <Row gutter={[16, 16]}>
+        {fields.map((field: CustomField) => (
+          <Col span={8} key={field.id}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Input
+                  value={field.label}
+                  placeholder="字段名"
+                  onChange={(event) => updateCustomField(item.id, item.type, field.id, { label: event.target.value })}
+                  style={{ flex: 1, fontSize: 12, fontWeight: 500 }}
+                  className="custom-form-input"
+                />
+                <Tooltip title="删除">
+                  <Button
+                    type="text"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined style={{ fontSize: 12 }} />}
+                    onClick={() => removeCustomField(item.id, item.type, field.id)}
+                    style={{ width: 22, height: 22, padding: 0 }}
+                  />
+                </Tooltip>
+              </div>
+              <Input
+                value={field.value}
+                placeholder={`请输入${field.label || '内容'}`}
+                onChange={(event) => updateCustomField(item.id, item.type, field.id, { value: event.target.value })}
+                className="custom-form-input"
+              />
+            </div>
+          </Col>
+        ))}
+      </Row>
+      <Button
+        type="dashed"
+        size="small"
+        icon={<PlusOutlined />}
+        onClick={() => addCustomField(item.id, item.type, moduleId)}
+        style={{ marginTop: 16, height: 28, fontSize: 12, color: '#8c8882', borderColor: 'rgba(0,0,0,0.1)' }}
+      >
+        添加自定义字段
+      </Button>
+    </div>
+  );
+};
+
+const useBackgroundView = () => {
   const { 
     worldBooks, 
     characterCards, 
@@ -71,39 +180,83 @@ const Background: React.FC = () => {
   const backgroundCharacterCardConfig = settings.agentConfigs?.backgroundCharacterCard || {};
   const backgroundCharacterConcurrency = Math.max(1, Math.min(20, backgroundExtractionConfig.concurrency ?? 5));
 
-  // AI settings generation states
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [selectedFilePaths, setSelectedFilePaths] = useState<string[]>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isCancellingBackground, setIsCancellingBackground] = useState(false);
-  const [extractionMode, setExtractionMode] = useState<BackgroundExtractionMode>('world_book_and_character_cards');
-  const [extractionStep, setExtractionStep] = useState<'setup' | 'review' | 'characters'>('setup');
+  const [uiState, patchUiState, setUiField] = useStateGroup<BackgroundUiState>({
+    isAiModalOpen: false,
+    selectedFilePaths: [],
+    isGenerating: false,
+    isCancellingBackground: false,
+    extractionMode: 'world_book_and_character_cards',
+    extractionStep: 'setup',
+    manualCharacterNames: '',
+    reviewWorldBookName: '',
+    reviewWorldBookFieldsJson: '',
+    reviewCharacterNames: '',
+    characterStatuses: [],
+    articlesTree: [],
+    outlineTree: [],
+    referencesTree: [],
+    isMemModalOpen: false,
+    optimizedEvents: '',
+    isOptimizing: false,
+    pendingWorldBookDelete: null,
+    editingId: null,
+    editName: '',
+    activeMode: 'edit',
+    tagInputVisible: false,
+    tagInputValue: '',
+    expandedCharacterGroupKeys: [],
+  });
+  const {
+    isAiModalOpen,
+    selectedFilePaths,
+    isGenerating,
+    isCancellingBackground,
+    extractionMode,
+    extractionStep,
+    manualCharacterNames,
+    reviewWorldBookName,
+    reviewWorldBookFieldsJson,
+    reviewCharacterNames,
+    characterStatuses,
+    articlesTree,
+    outlineTree,
+    referencesTree,
+    isMemModalOpen,
+    optimizedEvents,
+    isOptimizing,
+    pendingWorldBookDelete,
+    editingId,
+    editName,
+    activeMode,
+    tagInputVisible,
+    tagInputValue,
+    expandedCharacterGroupKeys,
+  } = uiState;
+  const setIsAiModalOpen = (isAiModalOpen: boolean) => setUiField('isAiModalOpen', isAiModalOpen);
+  const setSelectedFilePaths = (selectedFilePaths: React.SetStateAction<string[]>) => setUiField('selectedFilePaths', selectedFilePaths);
+  const setIsGenerating = (isGenerating: boolean) => setUiField('isGenerating', isGenerating);
+  const setIsCancellingBackground = (isCancellingBackground: boolean) => setUiField('isCancellingBackground', isCancellingBackground);
+  const setExtractionMode = (extractionMode: BackgroundExtractionMode) => setUiField('extractionMode', extractionMode);
+  const setExtractionStep = (extractionStep: BackgroundUiState['extractionStep']) => setUiField('extractionStep', extractionStep);
+  const setManualCharacterNames = (manualCharacterNames: string) => setUiField('manualCharacterNames', manualCharacterNames);
+  const setReviewWorldBookName = (reviewWorldBookName: string) => setUiField('reviewWorldBookName', reviewWorldBookName);
+  const setReviewWorldBookFieldsJson = (reviewWorldBookFieldsJson: string) => setUiField('reviewWorldBookFieldsJson', reviewWorldBookFieldsJson);
+  const setReviewCharacterNames = (reviewCharacterNames: string) => setUiField('reviewCharacterNames', reviewCharacterNames);
+  const setCharacterStatuses = (characterStatuses: React.SetStateAction<CharacterExtractionItem<{ name: string; fields: PartnerItemFields }>[]>): void => setUiField('characterStatuses', characterStatuses);
+  const setIsMemModalOpen = (isMemModalOpen: boolean) => setUiField('isMemModalOpen', isMemModalOpen);
+  const setOptimizedEvents = (optimizedEvents: string) => setUiField('optimizedEvents', optimizedEvents);
+  const setIsOptimizing = (isOptimizing: boolean) => setUiField('isOptimizing', isOptimizing);
+  const setPendingWorldBookDelete = (pendingWorldBookDelete: PartnerItem | null) => setUiField('pendingWorldBookDelete', pendingWorldBookDelete);
+  const setEditingId = (editingId: string | null) => setUiField('editingId', editingId);
+  const setEditName = (editName: string) => setUiField('editName', editName);
+  const setActiveMode = (activeMode: BackgroundUiState['activeMode']) => setUiField('activeMode', activeMode);
+  const setTagInputVisible = (tagInputVisible: boolean) => setUiField('tagInputVisible', tagInputVisible);
+  const setTagInputValue = (tagInputValue: string) => setUiField('tagInputValue', tagInputValue);
+  const setExpandedCharacterGroupKeys = (expandedCharacterGroupKeys: React.SetStateAction<React.Key[]>) => setUiField('expandedCharacterGroupKeys', expandedCharacterGroupKeys);
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentTaskIdRef = useRef<string | null>(null);
   const generatedWorldBookIdRef = useRef<string | null>(null);
-  const [manualCharacterNames, setManualCharacterNames] = useState('');
-  const [reviewWorldBookName, setReviewWorldBookName] = useState('');
-  const [reviewWorldBookFieldsJson, setReviewWorldBookFieldsJson] = useState('');
-  const [reviewCharacterNames, setReviewCharacterNames] = useState('');
-  const [characterStatuses, setCharacterStatuses] = useState<CharacterExtractionItem<{ name: string; fields: PartnerItemFields }>[]>([]);
-
-  // Folder Tree States for AI Settings Modal
-  interface FileTreeNode {
-    title: string;
-    key: string;
-    isLeaf: boolean;
-    children?: FileTreeNode[];
-  }
-  const [articlesTree, setArticlesTree] = useState<FileTreeNode[]>([]);
-  const [outlineTree, setOutlineTree] = useState<FileTreeNode[]>([]);
-  const [referencesTree, setReferencesTree] = useState<FileTreeNode[]>([]);
   const flatFilesRef = useRef<string[]>([]);
-
-  // AI memory optimization states
-  const [isMemModalOpen, setIsMemModalOpen] = useState(false);
-  const [optimizedEvents, setOptimizedEvents] = useState('');
-  const [isOptimizing, setIsOptimizing] = useState(false);
-  const [pendingWorldBookDelete, setPendingWorldBookDelete] = useState<PartnerItem | null>(null);
 
   const generateTaskId = useCallback(() => {
     return 'task_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
@@ -169,9 +322,11 @@ const Background: React.FC = () => {
       ]);
 
       flatFilesRef.current = filesList;
-      setArticlesTree(artNodes);
-      setOutlineTree(outNodes);
-      setReferencesTree(refNodes);
+      patchUiState({
+        articlesTree: artNodes,
+        outlineTree: outNodes,
+        referencesTree: refNodes,
+      });
     } catch (e) {
       console.error('加载工作区文件目录树失败:', e);
       message.error('加载工作区文件目录树失败');
@@ -180,16 +335,18 @@ const Background: React.FC = () => {
 
   const handleOpenAiModal = () => {
     void loadWorkspaceFiles();
-    setSelectedFilePaths([]);
-    setExtractionMode('world_book_and_character_cards');
-    setExtractionStep('setup');
-    setManualCharacterNames('');
-    setReviewWorldBookName('');
-    setReviewWorldBookFieldsJson('');
-    setReviewCharacterNames('');
-    setCharacterStatuses([]);
+    patchUiState({
+      selectedFilePaths: [],
+      extractionMode: 'world_book_and_character_cards',
+      extractionStep: 'setup',
+      manualCharacterNames: '',
+      reviewWorldBookName: '',
+      reviewWorldBookFieldsJson: '',
+      reviewCharacterNames: '',
+      characterStatuses: [],
+      isAiModalOpen: true,
+    });
     generatedWorldBookIdRef.current = null;
-    setIsAiModalOpen(true);
   };
 
   const readSelectedReferenceText = async () => {
@@ -561,14 +718,6 @@ const Background: React.FC = () => {
     }
   };
 
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  const [activeMode, setActiveMode] = useState<'edit' | 'preview'>('edit');
-  
-  // Tag input states for character card
-  const [tagInputVisible, setTagInputVisible] = useState(false);
-  const [tagInputValue, setTagInputValue] = useState('');
-  const [expandedCharacterGroupKeys, setExpandedCharacterGroupKeys] = useState<React.Key[]>([]);
   const tagInputRef = useRef<any>(null);
   const renameInputRef = useRef<any>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -628,10 +777,6 @@ const Background: React.FC = () => {
     deleteWorldBookWithCharacterCards(pendingWorldBookDelete.id);
     setPendingWorldBookDelete(null);
   };
-
-  const partnerTypeLabel = (type: PartnerImportExportType) => type === 'world_book' ? '世界书' : '角色卡';
-
-  const partnerPackageText = (data: PartnerItemsPackage) => JSON.stringify(data, null, 2);
 
   const exportFilesForItem = (item: PartnerItem) => {
     const data = exportPartnerItemBundle(item.type, item.id);
@@ -729,6 +874,9 @@ const Background: React.FC = () => {
   const selectedItem = selectedType === 'world_book' 
     ? worldBooks.find(b => b.id === selectedId) 
     : characterCards.find(c => c.id === selectedId);
+  const characterLoadingIndicator = useMemo(() => (
+    <LoadingOutlined style={{ fontSize: 16, color: '#d97757' }} spin />
+  ), []);
   const characterCardGroups = useMemo(
     () => groupCharacterCardsByWorldBook(worldBooks, characterCards),
     [worldBooks, characterCards],
@@ -742,7 +890,7 @@ const Background: React.FC = () => {
     const previousGroupKeys = knownCharacterGroupKeysRef.current;
     knownCharacterGroupKeysRef.current = characterCardGroupKeys;
 
-    setExpandedCharacterGroupKeys((previousKeys) => {
+    setUiField('expandedCharacterGroupKeys', (previousKeys) => {
       if (!hasInitializedCharacterGroupsRef.current) {
         hasInitializedCharacterGroupsRef.current = true;
         return characterCardGroupKeys;
@@ -752,65 +900,13 @@ const Background: React.FC = () => {
       const newKeys = characterCardGroupKeys.filter((key) => !previousGroupKeys.includes(key));
       return [...validKeys, ...newKeys];
     });
-  }, [characterCardGroupKeys]);
+  }, [characterCardGroupKeys, setUiField]);
 
   // Sync editName when item name changes or new item is selected
   const handleFieldChange = (key: keyof PartnerItemFields, value: any) => {
     if (selectedItem) {
       updateItemFields(selectedItem.id, selectedItem.type, { [key]: value });
     }
-  };
-
-  // Render custom fields for a given module
-  const renderCustomFieldsBlock = (item: PartnerItem, moduleId: string) => {
-    const fields = item.fields?.customFields?.filter((f: CustomField) => f.moduleId === moduleId) || [];
-
-    return (
-      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px dashed rgba(0,0,0,0.06)' }}>
-        <Row gutter={[16, 16]}>
-          {fields.map((field: CustomField) => (
-            <Col span={8} key={field.id}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Input
-                    value={field.label}
-                    placeholder="字段名"
-                    onChange={(e) => updateCustomField(item.id, item.type, field.id, { label: e.target.value })}
-                    style={{ flex: 1, fontSize: 12, fontWeight: 500 }}
-                    className="custom-form-input"
-                  />
-                  <Tooltip title="删除">
-                    <Button
-                      type="text"
-                      danger
-                      size="small"
-                      icon={<DeleteOutlined style={{ fontSize: 12 }} />}
-                      onClick={() => removeCustomField(item.id, item.type, field.id)}
-                      style={{ width: 22, height: 22, padding: 0 }}
-                    />
-                  </Tooltip>
-                </div>
-                <Input
-                  value={field.value}
-                  placeholder={`请输入${field.label || '内容'}`}
-                  onChange={(e) => updateCustomField(item.id, item.type, field.id, { value: e.target.value })}
-                  className="custom-form-input"
-                />
-              </div>
-            </Col>
-          ))}
-        </Row>
-        <Button
-          type="dashed"
-          size="small"
-          icon={<PlusOutlined />}
-          onClick={() => addCustomField(item.id, item.type, moduleId)}
-          style={{ marginTop: 16, height: 28, fontSize: 12, color: '#8c8882', borderColor: 'rgba(0,0,0,0.1)' }}
-        >
-          添加自定义字段
-        </Button>
-      </div>
-    );
   };
 
   // Tag manipulation for Character Card
@@ -856,22 +952,9 @@ const Background: React.FC = () => {
           }
         }}
         onDoubleClick={(e) => handleStartRename(item, e)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '8px 12px',
-          margin: '4px 8px',
-          borderRadius: '6px',
-          cursor: 'pointer',
-          background: isSelected ? '#f2e8dc' : 'transparent',
-          color: isSelected ? '#d97757' : '#33312e',
-          transition: 'background-color 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), color 0.2s cubic-bezier(0.25, 0.8, 0.25, 1)',
-          position: 'relative',
-        }}
-        className="directory-item-hover"
+        className={`directory-item-hover background-directory-item ${isSelected ? 'is-selected' : ''}`}
       >
-        <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0, gap: 8 }}>
+        <div className="background-directory-item__body">
           {item.type === 'world_book' ? (
             <GlobalOutlined style={{ fontSize: 15, flexShrink: 0, color: isSelected ? '#d97757' : '#8c8882' }} />
           ) : (
@@ -895,13 +978,7 @@ const Background: React.FC = () => {
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
-            <span style={{ 
-              fontSize: 13, 
-              overflow: 'hidden', 
-              textOverflow: 'ellipsis', 
-              whiteSpace: 'nowrap',
-              fontWeight: isSelected ? 500 : 400
-            }}>
+            <span className="background-directory-item__name">
               {item.name}
             </span>
           )}
@@ -945,18 +1022,8 @@ const Background: React.FC = () => {
       <div
         className={`character-tree-item ${isSelected ? 'is-selected' : ''}`}
         onDoubleClick={(e) => handleStartRename(item, e)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          minHeight: 30,
-          padding: '4px 8px',
-          borderRadius: 6,
-          background: isSelected ? '#f2e8dc' : 'transparent',
-          color: isSelected ? '#d97757' : '#33312e',
-        }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0, gap: 8 }}>
+        <div className="background-directory-item__body">
           <UserOutlined style={{ fontSize: 14, flexShrink: 0, color: isSelected ? '#d97757' : '#8c8882' }} />
           {isEditing ? (
             <Input
@@ -970,13 +1037,7 @@ const Background: React.FC = () => {
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
-            <span style={{
-              fontSize: 13,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              fontWeight: isSelected ? 500 : 400,
-            }}>
+            <span className="background-directory-item__name">
               {item.name}
             </span>
           )}
@@ -1090,7 +1151,13 @@ const Background: React.FC = () => {
               />
             </Col>
           </Row>
-          {renderCustomFieldsBlock(item, 'world_basic')}
+          <CustomFieldsBlock
+            item={item}
+            moduleId="world_basic"
+            addCustomField={addCustomField}
+            updateCustomField={updateCustomField}
+            removeCustomField={removeCustomField}
+          />
         </Card>
 
         <Card className="custom-form-card" title={<span className="form-section-title"><GlobalOutlined style={{ color: '#d97757' }} /> 核心世界观架构</span>} size="small">
@@ -1145,7 +1212,13 @@ const Background: React.FC = () => {
                 onChange={(e) => handleFieldChange('conflict', e.target.value)}
               />
             </div>
-            {renderCustomFieldsBlock(item, 'world_core')}
+            <CustomFieldsBlock
+              item={item}
+              moduleId="world_core"
+              addCustomField={addCustomField}
+              updateCustomField={updateCustomField}
+              removeCustomField={removeCustomField}
+            />
           </Space>
         </Card>
       </Space>
@@ -1256,17 +1329,7 @@ const Background: React.FC = () => {
                     key={tag}
                     closable
                     onClose={() => handleRemoveTag(tag)}
-                    style={{
-                      backgroundColor: '#faf6f0',
-                      border: '1px solid #f2e8dc',
-                      color: '#d97757',
-                      fontSize: 13,
-                      padding: '4px 10px',
-                      borderRadius: 4,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}
+                    className="background-identity-tag"
                   >
                     {tag}
                   </Tag>
@@ -1301,7 +1364,13 @@ const Background: React.FC = () => {
                 )}
               </div>
             </Card>
-            {renderCustomFieldsBlock(item, 'char_basic')}
+            <CustomFieldsBlock
+              item={item}
+              moduleId="char_basic"
+              addCustomField={addCustomField}
+              updateCustomField={updateCustomField}
+              removeCustomField={removeCustomField}
+            />
           </Space>
         )
       },
@@ -1425,7 +1494,13 @@ const Background: React.FC = () => {
                 </Row>
               </Space>
             </Card>
-            {renderCustomFieldsBlock(item, 'char_appearance')}
+            <CustomFieldsBlock
+              item={item}
+              moduleId="char_appearance"
+              addCustomField={addCustomField}
+              updateCustomField={updateCustomField}
+              removeCustomField={removeCustomField}
+            />
           </Space>
         )
       },
@@ -1493,7 +1568,13 @@ const Background: React.FC = () => {
                 </div>
               </Space>
             </Card>
-            {renderCustomFieldsBlock(item, 'char_ability')}
+            <CustomFieldsBlock
+              item={item}
+              moduleId="char_ability"
+              addCustomField={addCustomField}
+              updateCustomField={updateCustomField}
+              removeCustomField={removeCustomField}
+            />
           </Space>
         )
       },
@@ -1542,17 +1623,7 @@ const Background: React.FC = () => {
                       disabled={isOptimizing}
                       icon={isOptimizing ? <LoadingOutlined spin /> : <ThunderboltOutlined style={{ color: '#d97757' }} />}
                       onClick={() => handleOptimizeMemories(fields.keyEvents || '')}
-                      style={{
-                        fontSize: '11px',
-                        color: '#d97757',
-                        background: '#faf6f0',
-                        border: '1px solid #f2e8dc',
-                        borderRadius: '4px',
-                        height: '22px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px'
-                      }}
+                      className="background-optimize-button"
                     >
                       {isOptimizing ? 'AI 优化中...' : 'AI 浓缩与优化'}
                     </Button>
@@ -1567,7 +1638,13 @@ const Background: React.FC = () => {
                 </div>
               </Space>
             </Card>
-            {renderCustomFieldsBlock(item, 'char_memory')}
+            <CustomFieldsBlock
+              item={item}
+              moduleId="char_memory"
+              addCustomField={addCustomField}
+              updateCustomField={updateCustomField}
+              removeCustomField={removeCustomField}
+            />
           </Space>
         )
       }
@@ -1581,11 +1658,84 @@ const Background: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden', background: '#faf9f5' }}>
+      <div className="background-page">
       {/* CSS injection for aesthetic styling and theme preservation */}
       <style>{`
         .directory-item-hover:hover {
           background-color: #faf6f0;
+        }
+        .background-page {
+          display: flex;
+          height: 100%;
+          width: 100%;
+          overflow: hidden;
+          background: #faf9f5;
+        }
+        .background-directory-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          position: relative;
+          margin: 4px 8px;
+          padding: 8px 12px;
+          border-radius: 6px;
+          color: #33312e;
+          cursor: pointer;
+          transition: background-color 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), color 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+        .background-directory-item.is-selected,
+        .character-tree-item.is-selected {
+          background: #f2e8dc;
+          color: #d97757;
+        }
+        .background-directory-item__body {
+          display: flex;
+          flex: 1;
+          min-width: 0;
+          align-items: center;
+          gap: 8px;
+        }
+        .background-directory-item__name {
+          overflow: hidden;
+          font-size: 13px;
+          font-weight: 400;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .background-directory-item.is-selected .background-directory-item__name,
+        .character-tree-item.is-selected .background-directory-item__name {
+          font-weight: 500;
+        }
+        .character-tree-item {
+          display: flex;
+          min-height: 30px;
+          align-items: center;
+          justify-content: space-between;
+          padding: 4px 8px;
+          border-radius: 6px;
+          color: #33312e;
+        }
+        .background-identity-tag {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 4px 10px;
+          border: 1px solid #f2e8dc;
+          border-radius: 4px;
+          background-color: #faf6f0;
+          color: #d97757;
+          font-size: 13px;
+        }
+        .background-optimize-button.ant-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          height: 22px;
+          border: 1px solid #f2e8dc;
+          border-radius: 4px;
+          background: #faf6f0;
+          color: #d97757;
+          font-size: 11px;
         }
         .directory-item-hover:hover .action-btn {
           display: inline-flex !important;
@@ -1622,6 +1772,52 @@ const Background: React.FC = () => {
         .add-category-btn:hover {
           color: #d97757 !important;
           background-color: #f2e8dc !important;
+        }
+        .background-ai-button.ant-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          height: 24px;
+          padding: 2px 8px;
+          border: 1px solid #f2e8dc;
+          border-radius: 4px;
+          background: #faf6f0;
+          color: #d97757;
+          font-size: 12px;
+        }
+        .background-category-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 4px 16px 4px 20px;
+          color: #8c8882;
+          font-size: 12px;
+          font-weight: 500;
+          letter-spacing: 0.05em;
+        }
+        .background-export-button.ant-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          padding: 0;
+          border: 1px solid rgba(0, 0, 0, 0.03);
+          border-radius: 6px;
+          background: #faf9f5;
+        }
+        .background-character-error-pre {
+          max-height: 220px;
+          margin: 0;
+          padding: 10px;
+          overflow: auto;
+          border: 1px solid rgba(0, 0, 0, 0.04);
+          border-radius: 6px;
+          background: #fff;
+          font-family: Consolas, Monaco, "Courier New", monospace;
+          font-size: 12px;
+          white-space: pre-wrap;
+          word-break: break-word;
         }
         
         /* Premium custom styles for inputs and forms */
@@ -1793,18 +1989,7 @@ const Background: React.FC = () => {
             size="small"
             icon={<RobotOutlined style={{ color: '#d97757' }} />}
             onClick={handleOpenAiModal}
-            style={{
-              fontSize: '12px',
-              color: '#d97757',
-              background: '#faf6f0',
-              border: '1px solid #f2e8dc',
-              borderRadius: '4px',
-              padding: '2px 8px',
-              height: '24px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4
-            }}
+            className="background-ai-button"
           >
             AI 智能提取
           </Button>
@@ -1815,16 +2000,7 @@ const Background: React.FC = () => {
           
           {/* World Book Category */}
           <div>
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'space-between',
-              padding: '4px 16px 4px 20px',
-              color: '#8c8882',
-              fontSize: 12,
-              fontWeight: 500,
-              letterSpacing: '0.05em'
-            }}>
+            <div className="background-category-header">
               <span>世界书</span>
               <Space size={2}>
                 <Tooltip title="导入世界书">
@@ -1864,16 +2040,7 @@ const Background: React.FC = () => {
 
           {/* Character Card Category */}
           <div>
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'space-between',
-              padding: '4px 16px 4px 20px',
-              color: '#8c8882',
-              fontSize: 12,
-              fontWeight: 500,
-              letterSpacing: '0.05em'
-            }}>
+            <div className="background-category-header">
               <span>角色卡</span>
               <Space size={2}>
                 <Tooltip title="导入角色卡">
@@ -1985,17 +2152,7 @@ const Background: React.FC = () => {
                     size="small"
                     icon={<DownloadOutlined style={{ fontSize: 13, color: '#8c8882' }} />}
                     onClick={() => handleExportPartnerItem(selectedItem)}
-                    style={{
-                      width: 28,
-                      height: 28,
-                      padding: 0,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderRadius: 6,
-                      background: '#faf9f5',
-                      border: '1px solid rgba(0,0,0,0.03)',
-                    }}
+                    className="background-export-button"
                   />
                 </Tooltip>
 
@@ -2202,7 +2359,7 @@ const Background: React.FC = () => {
         ) : extractionStep === 'characters' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8c8882', fontSize: '13px' }}>
-              {isGenerating && <Spin indicator={<LoadingOutlined style={{ fontSize: 16, color: '#d97757' }} spin />} size="small" />}
+              {isGenerating && <Spin indicator={characterLoadingIndicator} size="small" />}
               <span>
                 {isCancellingBackground
                   ? '正在中断提取并等待模型服务释放连接...'
@@ -2242,7 +2399,7 @@ const Background: React.FC = () => {
                       </summary>
                       <div style={{ color: '#8c8882', fontSize: 12, lineHeight: 1.6, marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(0,0,0,0.04)' }}>
                         <div style={{ color: '#33312e', fontWeight: 500, marginBottom: 4 }}>后端原始信息</div>
-                        <pre style={{ margin: 0, padding: 10, maxHeight: 220, overflow: 'auto', background: '#fff', border: '1px solid rgba(0,0,0,0.04)', borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'Consolas, Monaco, "Courier New", monospace', fontSize: 12 }}>
+                        <pre className="background-character-error-pre">
                           {item.rawOutput || item.error || '未返回失败详情'}
                         </pre>
                       </div>
@@ -2412,5 +2569,7 @@ const Background: React.FC = () => {
     </div>
   );
 };
+
+const Background: React.FC = () => useBackgroundView();
 
 export default Background;

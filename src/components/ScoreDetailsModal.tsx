@@ -7,6 +7,16 @@ const { Title, Paragraph, Text } = Typography;
 
 const DEFAULT_SCORE_FIELDS = ['引流能力', '开局钩子', '设定新鲜感', '情绪爽点密度', '人设代入与话题性'];
 const SUGGESTION_KEYS = new Set(['综合建议', '优化建议', '建议', '改进方向', '整体评价']);
+const COPY_SUGGESTION_BUTTON_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  border: 'none',
+  background: 'transparent',
+  cursor: 'pointer',
+  opacity: 0.8,
+  transition: 'opacity 0.2s',
+};
 
 interface ScoreDetailsModalProps {
   isOpen: boolean;
@@ -164,16 +174,7 @@ export const ScoreDetailsModal: React.FC<ScoreDetailsModalProps> = ({
                               message.error('复制失败，请手动选择复制');
                             });
                         }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          border: 'none',
-                          background: 'transparent',
-                          cursor: 'pointer',
-                          opacity: 0.8,
-                          transition: 'opacity 0.2s',
-                        }}
+                        style={COPY_SUGGESTION_BUTTON_STYLE}
                         onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
                         onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.8')}
                       />

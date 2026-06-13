@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Tooltip, Dropdown, Tag, Input, Cascader, Form, Modal, Tree, TreeSelect, Empty, message } from 'antd';
 import { BulbOutlined, CloseOutlined, HistoryOutlined, ReloadOutlined, RobotOutlined, StopOutlined, ToolOutlined, UnorderedListOutlined, SettingOutlined, PlayCircleOutlined, InfoCircleOutlined, DeleteOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { createStableContentKey, createStableToolKey } from '../utils/renderKeys';
+import { useStateGroup } from '../utils/reducerState';
 import {
   useAgentStore,
   Message,
@@ -52,7 +53,23 @@ interface AgentChatProps {
   title?: string;
 }
 
-const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent' }) => {
+interface AgentChatUiState {
+  isSettingsOpen: boolean;
+  allReferenceFiles: string[];
+  referenceTree: any[];
+  referenceFilesLoaded: boolean;
+  outlineTree: any[];
+  outlineFilesLoaded: boolean;
+}
+
+const savedAtFormatter = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+const useAgentChatView = ({ onClose, title = '写文章Agent' }: AgentChatProps) => {
   const {
     messages, setMessages,
     input, setInput,
@@ -84,12 +101,57 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
   const todosRef = useRef(todos);
   const contextCompactionRef = useRef<SessionContextCompaction | null>(contextCompaction);
 
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [allReferenceFiles, setAllReferenceFiles] = useState<string[]>([]);
-  const [referenceTree, setReferenceTree] = useState<any[]>([]);
-  const [referenceFilesLoaded, setReferenceFilesLoaded] = useState(false);
-  const [outlineTree, setOutlineTree] = useState<any[]>([]);
-  const [outlineFilesLoaded, setOutlineFilesLoaded] = useState(false);
+  const [uiState, patchUiState, setUiField] = useStateGroup<AgentChatUiState>({
+    isSettingsOpen: false,
+    allReferenceFiles: [],
+    referenceTree: [],
+    referenceFilesLoaded: false,
+    outlineTree: [],
+    outlineFilesLoaded: false,
+  });
+  const {
+    isSettingsOpen,
+    allReferenceFiles,
+    referenceTree,
+    referenceFilesLoaded,
+    outlineTree,
+    outlineFilesLoaded,
+  } = uiState;
+  const setIsSettingsOpen = (isSettingsOpen: boolean) => setUiField('isSettingsOpen', isSettingsOpen);
+
+  const refreshSessions = useCallback(async () => {
+    try {
+      const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'session-' });
+      setSessions(summaries);
+    } catch (err) {
+      console.error('读取历史会话失败:', err);
+    }
+  }, [setSessions]);
+
+  const saveCurrentSession = useCallback(async () => {
+    const userMessages = messagesRef.current.filter((message) => message.role === 'user');
+    if (userMessages.length === 0) {
+      return;
+    }
+
+    try {
+      await invoke<AgentSessionSummary>('save_agent_session', {
+        session: {
+          id: sessionIdRef.current,
+          title: sessionTitleRef.current,
+          savedAt: 0,
+          messages: messagesRef.current,
+          selectedReferenceFiles: selectedReferenceFilesRef.current,
+          selectedOutlineFile: selectedOutlineFileRef.current,
+          todos: todosRef.current,
+          contextCompaction: contextCompactionRef.current,
+        },
+      });
+      await refreshSessions();
+    } catch (err) {
+      console.error('保存会话失败:', err);
+    }
+  }, [refreshSessions]);
 
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
   useEffect(() => {
@@ -99,7 +161,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
   React.useEffect(() => {
     invoke<SkillDefinition[]>('get_skills').then(setSkills).catch(console.error);
     void refreshSessions();
-  }, []);
+  }, [refreshSessions, setSkills]);
 
   useEffect(() => {
     selectedReferenceFilesRef.current = selectedReferenceFiles;
@@ -272,87 +334,95 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
         unlistenFn();
       }
     };
-  }, []);
+  }, [saveCurrentSession, setActiveRun, setContextCompaction, setIsStreaming, setIsTodoOpen, setMessages, setTodos]);
 
-  useEffect(() => {
-    const fetchRef = async () => {
-      try {
-        setReferenceFilesLoaded(false);
-        const dir = await invoke<string>('get_workspace_dir', { dirType: 'references' });
-        
-        const fetchTree = async (path: string): Promise<any[]> => {
-          const items = await invoke<any[]>('list_dir', { path });
-          return Promise.all(items
-            .filter((item) => item.name !== '.versions')
-            .map(async (item) => (
-              item.is_dir
-                ? { ...item, children: await fetchTree(item.path) }
-                : item
-            )));
-        };
-        
-        const collectFiles = (nodes: any[]): string[] => {
-          let res: string[] = [];
-          for (const item of nodes) {
-            if (item.is_dir) {
-              res = res.concat(collectFiles(item.children ?? []));
-            } else {
-              res.push(item.path);
-            }
+  const loadReferenceFiles = useCallback(async () => {
+    try {
+      patchUiState({ referenceFilesLoaded: false });
+      const dir = await invoke<string>('get_workspace_dir', { dirType: 'references' });
+      
+      const fetchTree = async (path: string): Promise<any[]> => {
+        const items = await invoke<any[]>('list_dir', { path });
+        const visibleItems = [];
+        for (const item of items) {
+          if (item.name !== '.versions') {
+            visibleItems.push(item);
           }
-          return res;
-        };
+        }
+        return Promise.all(visibleItems.map(async (item) => (
+            item.is_dir
+              ? { ...item, children: await fetchTree(item.path) }
+              : item
+          )));
+      };
+      
+      const collectFiles = (nodes: any[]): string[] => {
+        let res: string[] = [];
+        for (const item of nodes) {
+          if (item.is_dir) {
+            res = res.concat(collectFiles(item.children ?? []));
+          } else {
+            res.push(item.path);
+          }
+        }
+        return res;
+      };
 
-        const tree = await fetchTree(dir);
-        setReferenceTree(tree);
-        setAllReferenceFiles(collectFiles(tree));
-        setReferenceFilesLoaded(true);
-      } catch (e) {
-        console.error(e);
-        setReferenceFilesLoaded(true);
+      const tree = await fetchTree(dir);
+      const allFiles = collectFiles(tree);
+      const nextSelectedFiles = selectedReferenceFilesRef.current.filter((file) => allFiles.includes(file));
+      patchUiState({
+        referenceTree: tree,
+        allReferenceFiles: allFiles,
+        referenceFilesLoaded: true,
+      });
+      if (nextSelectedFiles.length !== selectedReferenceFilesRef.current.length) {
+        selectedReferenceFilesRef.current = nextSelectedFiles;
+        setSelectedReferenceFiles(nextSelectedFiles);
       }
-    };
-    if (isSettingsOpen && !referenceFilesLoaded) {
-      fetchRef();
+    } catch (e) {
+      console.error(e);
+      patchUiState({ referenceFilesLoaded: true });
     }
-  }, [isSettingsOpen, referenceFilesLoaded]);
+  }, [patchUiState, setSelectedReferenceFiles]);
 
-  useEffect(() => {
-    if (!referenceFilesLoaded) return;
-    setSelectedReferenceFiles(
-      selectedReferenceFiles.filter((file) => allReferenceFiles.includes(file))
-    );
-  }, [allReferenceFiles, referenceFilesLoaded]);
+  const loadOutlineFiles = useCallback(async () => {
+    try {
+      patchUiState({ outlineFilesLoaded: false });
+      const dir = await invoke<string>('get_workspace_dir', { dirType: 'outline' });
 
-  useEffect(() => {
-    const fetchOutline = async () => {
-      try {
-        setOutlineFilesLoaded(false);
-        const dir = await invoke<string>('get_workspace_dir', { dirType: 'outline' });
+      const fetchTree = async (path: string): Promise<any[]> => {
+        const items = await invoke<any[]>('list_dir', { path });
+        const visibleItems = [];
+        for (const item of items) {
+          if (item.name !== '.versions') {
+            visibleItems.push(item);
+          }
+        }
+        return Promise.all(visibleItems.map(async (item) => (
+            item.is_dir
+              ? { ...item, children: await fetchTree(item.path) }
+              : item
+          )));
+      };
 
-        const fetchTree = async (path: string): Promise<any[]> => {
-          const items = await invoke<any[]>('list_dir', { path });
-          return Promise.all(items
-            .filter((item) => item.name !== '.versions')
-            .map(async (item) => (
-              item.is_dir
-                ? { ...item, children: await fetchTree(item.path) }
-                : item
-            )));
-        };
-
-        const tree = await fetchTree(dir);
-        setOutlineTree(tree);
-        setOutlineFilesLoaded(true);
-      } catch (e) {
-        console.error(e);
-        setOutlineFilesLoaded(true);
-      }
-    };
-    if (isSettingsOpen && !outlineFilesLoaded) {
-      fetchOutline();
+      const tree = await fetchTree(dir);
+      patchUiState({ outlineTree: tree, outlineFilesLoaded: true });
+    } catch (e) {
+      console.error(e);
+      patchUiState({ outlineFilesLoaded: true });
     }
-  }, [isSettingsOpen, outlineFilesLoaded]);
+  }, [patchUiState]);
+
+  const openSettings = () => {
+    setIsSettingsOpen(true);
+    if (!referenceFilesLoaded) {
+      void loadReferenceFiles();
+    }
+    if (!outlineFilesLoaded) {
+      void loadOutlineFiles();
+    }
+  };
 
   const scrollToBottomOnce = () => {
     window.requestAnimationFrame(() => {
@@ -489,40 +559,6 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     setExpandedBlocks((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const refreshSessions = async () => {
-    try {
-      const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'session-' });
-      setSessions(summaries);
-    } catch (err) {
-      console.error('读取历史会话失败:', err);
-    }
-  };
-
-  const saveCurrentSession = async () => {
-    const userMessages = messagesRef.current.filter((message) => message.role === 'user');
-    if (userMessages.length === 0) {
-      return;
-    }
-
-    try {
-      await invoke<AgentSessionSummary>('save_agent_session', {
-        session: {
-          id: sessionIdRef.current,
-          title: sessionTitleRef.current,
-          savedAt: 0,
-          messages: messagesRef.current,
-          selectedReferenceFiles: selectedReferenceFilesRef.current,
-          selectedOutlineFile: selectedOutlineFileRef.current,
-          todos: todosRef.current,
-          contextCompaction: contextCompactionRef.current,
-        },
-      });
-      await refreshSessions();
-    } catch (err) {
-      console.error('保存会话失败:', err);
-    }
-  };
-
   const openSession = async (id: string) => {
     try {
       const session = await invoke<AgentSessionRecord>('load_agent_session', { id });
@@ -604,14 +640,20 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
     children: node.children ? mapReferenceTreeData(node.children) : undefined,
   }));
 
-  const mapOutlineTreeForSelect = (nodes: any[]): any[] =>
-    nodes
-      .filter((node) => node.name !== '.versions')
-      .map((node) => ({
+  const mapOutlineTreeForSelect = (nodes: any[]): any[] => {
+    const treeData = [];
+    for (const node of nodes) {
+      if (node.name === '.versions') {
+        continue;
+      }
+      treeData.push({
         title: node.name,
         value: node.is_dir ? undefined : node.path,
         children: node.children ? mapOutlineTreeForSelect(node.children) : undefined,
-      }));
+      });
+    }
+    return treeData;
+  };
 
   const contextTooltip = (
     <div className="agent-context-popover">
@@ -723,7 +765,15 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
                   className="de-ai-reference-picker__tree"
                   onCheck={(checkedKeys) => {
                     const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
-                    setSelectedReferenceFiles(keys.map(String).filter((key) => allReferenceFiles.includes(key)));
+                    const allowedFiles = new Set(allReferenceFiles);
+                    const nextFiles: string[] = [];
+                    for (const key of keys) {
+                      const file = String(key);
+                      if (allowedFiles.has(file)) {
+                        nextFiles.push(file);
+                      }
+                    }
+                    setSelectedReferenceFiles(nextFiles);
                   }}
                   selectable={false}
                   treeData={mapReferenceTreeData(referenceTree)}
@@ -984,7 +1034,7 @@ const AgentChat: React.FC<AgentChatProps> = ({ onClose, title = '写文章Agent'
               aria-label="Agent 设置"
               className="de-ai-agent-settings-button"
               icon={<SettingOutlined />}
-              onClick={() => setIsSettingsOpen(true)}
+              onClick={openSettings}
               shape="circle"
               title="Agent 设置"
               type={selectedReferenceFiles.length > 0 ? 'primary' : 'default'}
@@ -1102,7 +1152,12 @@ function buildModelMessages(
 
 function buildAssistantHistoryMessages(message: Message): ModelMessage[] {
   const tools = message.tools ?? [];
-  const toolsById = new Map(tools.filter((tool) => tool.id).map((tool) => [tool.id!, tool]));
+  const toolsById = new Map<string, AgentToolEntry>();
+  for (const tool of tools) {
+    if (tool.id) {
+      toolsById.set(tool.id, tool);
+    }
+  }
   const emittedToolIds = new Set<string>();
   const modelMessages: ModelMessage[] = [];
   const parts = message.content.split(/(\[\[TOOL:[^\]]+\]\])/);
@@ -1183,17 +1238,25 @@ function estimateContextUsage({
   messages: Message[];
   draft: string;
 }) {
+  let userText = draft;
+  let assistantText = '';
+  let toolText = '';
+  for (const message of messages) {
+    if (message.role === 'user') {
+      userText += message.content;
+    }
+    if (message.role === 'agent') {
+      assistantText += message.content.replace(/\[\[TOOL:[^\]]+\]\]/g, '');
+    }
+    for (const tool of message.tools ?? []) {
+      toolText += `${tool.name}\n${tool.arguments || ''}\n${tool.result}`;
+    }
+  }
   const stats = {
     system: estimateTokens(buildEstimatedSystemPrompt(systemPrompt, workspacePath, selectedReferenceFiles, skills)),
-    user: estimateTokens([draft, ...messages.filter((message) => message.role === 'user').map((message) => message.content)].join('')),
-    assistant: estimateTokens(messages
-      .filter((message) => message.role === 'agent')
-      .map((message) => message.content.replace(/\[\[TOOL:[^\]]+\]\]/g, ''))
-      .join('')),
-    tool: estimateTokens(messages
-      .flatMap((message) => message.tools ?? [])
-      .map((tool) => `${tool.name}\n${tool.arguments || ''}\n${tool.result}`)
-      .join('')),
+    user: estimateTokens(userText),
+    assistant: estimateTokens(assistantText),
+    tool: estimateTokens(toolText),
   };
 
   return {
@@ -1261,12 +1324,9 @@ function formatSavedAt(value: number) {
   if (!value) {
     return '未保存';
   }
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value));
+  return savedAtFormatter.format(new Date(value));
 }
+
+const AgentChat: React.FC<AgentChatProps> = (props) => useAgentChatView(props);
 
 export default AgentChat;

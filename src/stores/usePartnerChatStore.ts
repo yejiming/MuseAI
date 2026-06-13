@@ -3,13 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { createDiskStorage } from './diskStorage';
 import { Message, AgentSessionSummary, SessionContextCompaction } from './useAgentStore';
 import { PartnerItemFields } from './usePartnerStore';
-
-function createSessionId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `partner-session-${crypto.randomUUID()}`;
-  }
-  return `partner-session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+import { createSessionId } from '../utils/sessionIds';
 
 interface PartnerChatState {
   messages: Message[];
@@ -53,7 +47,7 @@ export const usePartnerChatStore = create<PartnerChatState>()(
       selectedCharacterCardId: null,
       userInfo: {},
       sessions: [],
-      sessionId: createSessionId(),
+      sessionId: createSessionId('partner-session'),
       sessionTitle: '新聊天',
       activeRun: { runId: null, messageId: null },
       isSessionArchived: false,
@@ -86,7 +80,7 @@ export const usePartnerChatStore = create<PartnerChatState>()(
           input: '',
           isStreaming: false,
           expandedBlocks: {},
-          sessionId: createSessionId(),
+          sessionId: createSessionId('partner-session'),
           sessionTitle: '新聊天',
           isSessionArchived: false,
           contextCompaction: null,
@@ -96,6 +90,15 @@ export const usePartnerChatStore = create<PartnerChatState>()(
     {
       name: 'museai-partner-chat-storage',
       storage: createJSONStorage(() => createDiskStorage('partner-chat-store', 'museai-partner-chat-storage')),
+      merge: (persistedState, currentState) => {
+        const state = persistedState as Partial<PartnerChatState> | undefined;
+        return {
+          ...currentState,
+          selectedWorldBookId: state?.selectedWorldBookId ?? currentState.selectedWorldBookId,
+          selectedCharacterCardId: state?.selectedCharacterCardId ?? currentState.selectedCharacterCardId,
+          userInfo: state?.userInfo ?? currentState.userInfo,
+        };
+      },
       partialize: (state) => ({
         selectedWorldBookId: state.selectedWorldBookId,
         selectedCharacterCardId: state.selectedCharacterCardId,

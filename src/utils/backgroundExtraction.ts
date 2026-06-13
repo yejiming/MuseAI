@@ -10,7 +10,7 @@ export interface CharacterExtractionItem<T = unknown> {
   rawOutput?: string;
 }
 
-export const BACKGROUND_CHARACTER_CONCURRENCY = 5;
+const BACKGROUND_CHARACTER_CONCURRENCY = 5;
 
 export const splitCharacterNames = (value: string): string[] => {
   const seen = new Set<string>();

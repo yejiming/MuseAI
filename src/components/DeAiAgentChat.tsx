@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { Button, Tooltip, Input, Dropdown, message } from 'antd';
 import { BulbOutlined, CloseOutlined, HistoryOutlined, InfoCircleOutlined, PlayCircleOutlined, ReloadOutlined, RobotOutlined, StopOutlined, ToolOutlined, DeleteOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { Message, AgentToolEntry, AgentSessionSummary, AgentSessionRecord, SessionContextCompaction } from '../stores/useAgentStore';
 import { createStableContentKey, createStableToolKey } from '../utils/renderKeys';
+import { useStateGroup } from '../utils/reducerState';
 
 interface ChatStreamEvent {
   runId: string;
@@ -35,7 +36,6 @@ interface DeAiAgentChatProps {
   setMessages: (messages: Message[] | ((messages: Message[]) => Message[])) => void;
   activeRun: { runId: string | null; messageId: string | null };
   setActiveRun: (run: { runId: string | null; messageId: string | null }) => void;
-  autoTriggerContent?: string;
   onDone?: (lastAgentMessage: string) => void | string | Promise<void | string>;
   isRunning?: boolean;
   onRunningChange?: (running: boolean) => void;
@@ -47,7 +47,24 @@ interface StartOverride {
   allowedWritePaths?: string[];
 }
 
-const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({ 
+interface DeAiAgentChatUiState {
+  expandedBlocks: Record<string, boolean>;
+  fullSystemPrompt: string;
+  input: string;
+  sessionId: string;
+  sessionTitle: string;
+  sessions: AgentSessionSummary[];
+  contextCompaction: SessionContextCompaction | null;
+}
+
+const savedAtFormatter = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+const useDeAiAgentChatView = ({ 
   title, 
   agentId,
   systemPrompt, 
@@ -61,31 +78,47 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
   setMessages,
   activeRun,
   setActiveRun,
-  autoTriggerContent,
   onDone,
   isRunning,
   onRunningChange,
   onClose,
-}) => {
-  const [expandedBlocks, setExpandedBlocks] = useState<Record<string, boolean>>({});
+}: DeAiAgentChatProps) => {
+  const [uiState, patchUiState, setUiField] = useStateGroup<DeAiAgentChatUiState>(() => ({
+    expandedBlocks: {},
+    fullSystemPrompt: '',
+    input: '',
+    sessionId: `deai-${crypto.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(16).slice(2)}`}`,
+    sessionTitle: '新对话',
+    sessions: [],
+    contextCompaction: null,
+  }));
+  const {
+    expandedBlocks,
+    fullSystemPrompt,
+    input,
+    sessionId,
+    sessionTitle,
+    sessions,
+    contextCompaction,
+  } = uiState;
+  const setExpandedBlocks = useCallback((expandedBlocks: React.SetStateAction<Record<string, boolean>>) => setUiField('expandedBlocks', expandedBlocks), [setUiField]);
+  const setInput = useCallback((input: React.SetStateAction<string>) => setUiField('input', input), [setUiField]);
+  const setSessionId = useCallback((sessionId: string) => setUiField('sessionId', sessionId), [setUiField]);
+  const setSessionTitle = useCallback((sessionTitle: string) => setUiField('sessionTitle', sessionTitle), [setUiField]);
+  const setContextCompaction = useCallback((contextCompaction: SessionContextCompaction | null) => setUiField('contextCompaction', contextCompaction), [setUiField]);
   const stopRequestedRef = useRef(false);
   const currentThinkingIdRef = useRef<string | null>(null);
   const messagesRef = useRef(messages);
   const activeRunRef = useRef(activeRun);
+  const handleSendRef = useRef<(overrideInput?: string) => Promise<void>>(async () => {});
   const onDoneRef = useRef(onDone);
   const onRunningChangeRef = useRef(onRunningChange);
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const accumulatedContentRef = useRef('');
   const settings = useSettingsStore();
-  const [fullSystemPrompt, setFullSystemPrompt] = useState('');
-  const [input, setInput] = useState('');
   const hasStarted = messages.length > 0;
 
   const isRemover = agentId === 'remover';
-  const [sessionId, setSessionId] = useState(() => `deai-${crypto.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(16).slice(2)}`}`);
-  const [sessionTitle, setSessionTitle] = useState('新对话');
-  const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
-  const [contextCompaction, setContextCompaction] = useState<SessionContextCompaction | null>(null);
   const sessionIdRef = useRef(sessionId);
   const sessionTitleRef = useRef(sessionTitle);
   const contextCompactionRef = useRef<SessionContextCompaction | null>(contextCompaction);
@@ -98,13 +131,13 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
           workspacePath: settings.worksDirectory,
           selectedReferenceFiles: [],
         });
-        setFullSystemPrompt(full);
+        patchUiState({ fullSystemPrompt: full });
       } catch (e) {
         console.error(e);
       }
     };
     build();
-  }, [systemPrompt, settings.worksDirectory]);
+  }, [patchUiState, systemPrompt, settings.worksDirectory]);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { activeRunRef.current = activeRun; }, [activeRun]);
@@ -115,25 +148,25 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
   useEffect(() => { contextCompactionRef.current = contextCompaction; }, [contextCompaction]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
-  const setSyncedMessages = (updater: Message[] | ((messages: Message[]) => Message[])) => {
+  const setSyncedMessages = useCallback((updater: Message[] | ((messages: Message[]) => Message[])) => {
     setMessages((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       messagesRef.current = next;
       return next;
     });
-  };
+  }, [setMessages]);
 
-  const refreshSessions = async () => {
+  const refreshSessions = useCallback(async () => {
     if (!isRemover) return;
     try {
       const summaries = await invoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'deai-' });
-      setSessions(summaries);
+      patchUiState({ sessions: summaries });
     } catch (err) {
       console.error('读取历史会话失败:', err);
     }
-  };
+  }, [isRemover, patchUiState]);
 
-  const saveCurrentSession = async () => {
+  const saveCurrentSession = useCallback(async () => {
     if (!isRemover) return;
     const userMessages = messagesRef.current.filter((message) => message.role === 'user');
     if (userMessages.length === 0) {
@@ -156,7 +189,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
     } catch (err) {
       console.error('保存会话失败:', err);
     }
-  };
+  }, [isRemover, refreshSessions]);
 
   const openSession = async (id: string) => {
     try {
@@ -207,12 +240,6 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
     setSessionId(`deai-${crypto.randomUUID?.() || `session-${Date.now()}-${Math.random().toString(16).slice(2)}`}`);
     setSessionTitle('新对话');
   };
-
-  useEffect(() => {
-    if (isRemover) {
-      void refreshSessions();
-    }
-  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -345,7 +372,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
             if (typeof res === 'string' && res.trim() !== '') {
               // Using timeout to ensure state is clean before next send
               setTimeout(() => {
-                void handleSend(res);
+                void handleSendRef.current(res);
               }, 100);
             }
           };
@@ -369,7 +396,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
         unlistenFn();
       }
     };
-  }, []);
+  }, [saveCurrentSession, setActiveRun, setContextCompaction, setSyncedMessages]);
 
   const scrollToBottomOnce = () => {
     window.requestAnimationFrame(() => {
@@ -513,11 +540,7 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (autoTriggerContent && !isRunning) {
-      handleSend(autoTriggerContent);
-    }
-  }, [autoTriggerContent]);
+  handleSendRef.current = handleSend;
 
   const handleStop = async () => {
     stopRequestedRef.current = true;
@@ -645,6 +668,11 @@ const DeAiAgentChat: React.FC<DeAiAgentChatProps> = ({
                     void openSession(String(key));
                   }
                 },
+              }}
+              onOpenChange={(open) => {
+                if (open) {
+                  void refreshSessions();
+                }
               }}
               placement="bottomRight"
               trigger={['click']}
@@ -912,17 +940,25 @@ function estimateContextUsage({
   messages: Message[];
   draft: string;
 }) {
+  let userText = draft;
+  let assistantText = '';
+  let toolText = '';
+  for (const message of messages) {
+    if (message.role === 'user') {
+      userText += message.content;
+    }
+    if (message.role === 'agent') {
+      assistantText += message.content.replace(/\[\[TOOL:[^\]]+\]\]/g, '');
+    }
+    for (const tool of message.tools ?? []) {
+      toolText += `${tool.name}\n${tool.arguments || ''}\n${tool.result}`;
+    }
+  }
   const stats = {
     system: estimateTokens(buildEstimatedSystemPrompt(systemPrompt, workspacePath)),
-    user: estimateTokens([draft, ...messages.filter((message) => message.role === 'user').map((message) => message.content)].join('')),
-    assistant: estimateTokens(messages
-      .filter((message) => message.role === 'agent')
-      .map((message) => message.content.replace(/\[\[TOOL:[^\]]+\]\]/g, ''))
-      .join('')),
-    tool: estimateTokens(messages
-      .flatMap((message) => message.tools ?? [])
-      .map((tool) => `${tool.name}\n${tool.arguments || ''}\n${tool.result}`)
-      .join('')),
+    user: estimateTokens(userText),
+    assistant: estimateTokens(assistantText),
+    tool: estimateTokens(toolText),
   };
 
   return {
@@ -962,12 +998,9 @@ function formatSavedAt(value: number) {
   if (!value) {
     return '未保存';
   }
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value));
+  return savedAtFormatter.format(new Date(value));
 }
+
+const DeAiAgentChat: React.FC<DeAiAgentChatProps> = (props) => useDeAiAgentChatView(props);
 
 export default DeAiAgentChat;

@@ -1,13 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Alert, Button, Card, Empty, Form, Input, Modal, Select, Spin, Tag, Tabs, Tree, TreeSelect, message } from 'antd';
 import { BookOutlined, BranchesOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, StopOutlined, UserOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { useBookTravelStore, BookTravelEntryPoint, BookTravelUserCharacter } from '../stores/useBookTravelStore';
+import { useBookTravelStore, BookTravelAssembledMaterial, BookTravelEntryPoint, BookTravelUserCharacter } from '../stores/useBookTravelStore';
 import { usePartnerStore } from '../stores/usePartnerStore';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { resolveOutlineMaterial, resolvePartnerMaterials } from '../utils/bookTravelMaterials';
 import { getCharacterCardIdsForWorldBook, groupCharacterCardsByWorldBook } from '../utils/characterCardGroups';
+import { useStateGroup } from '../utils/reducerState';
 
 interface FileTreeNode {
   title: string;
@@ -16,6 +17,42 @@ interface FileTreeNode {
   selectable: boolean;
   children?: FileTreeNode[];
 }
+
+interface MaterialDetailDraft {
+  title: string;
+  worldModel: Record<string, unknown>;
+  entryPoints: BookTravelEntryPoint[];
+  characters: BookTravelUserCharacter[];
+  stableMemory: Record<string, unknown> | null;
+  volatileMemory: Record<string, unknown> | null;
+}
+
+interface BookTravelMaterialsUiState {
+  modalOpen: boolean;
+  outlineTree: FileTreeNode[];
+  selectedOutlinePath?: string;
+  selectedWorldBookId?: string;
+  selectedCharacterCardIds: string[];
+  progressOpen: boolean;
+  progressPhase: 'assembling' | 'entry' | 'done' | 'error' | 'cancelled';
+  assembleOutput: string;
+  entryOutput: string;
+  progressError: string;
+  elapsedMs: number;
+  detailDraft: MaterialDetailDraft;
+}
+
+const BOOK_TRAVEL_PROGRESS_DOT_BASE_STYLE: React.CSSProperties = {
+  width: 24,
+  height: 24,
+  borderRadius: '50%',
+  color: '#fff',
+  fontSize: 12,
+  fontWeight: 600,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
 
 /**
  * Robust JSON parser that extracts the first well-formed JSON object/array
@@ -105,6 +142,9 @@ const parseJSON = (raw: string) => {
 
 const TASK_TIMEOUT_MS = 600_000; // 600 seconds
 
+let editableRowKeySeed = 0;
+const createEditableRowKey = () => `editable-row-${editableRowKeySeed++}`;
+
 const formatElapsed = (ms: number) => {
   const totalSeconds = Math.floor(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -132,6 +172,28 @@ function isPlainObject(val: unknown): val is Record<string, unknown> {
   return typeof val === 'object' && val !== null && !Array.isArray(val);
 }
 
+function createMaterialDetailDraft(material: BookTravelAssembledMaterial | null): MaterialDetailDraft {
+  if (!material) {
+    return {
+      title: '',
+      worldModel: {},
+      entryPoints: [],
+      characters: [],
+      stableMemory: null,
+      volatileMemory: null,
+    };
+  }
+
+  return {
+    title: material.title,
+    worldModel: isPlainObject(material.assembledWorldModel) ? material.assembledWorldModel : {},
+    entryPoints: [...material.entryPoints],
+    characters: [...material.recommendedUserCharacters],
+    stableMemory: isPlainObject(material.stableMemory) ? material.stableMemory : null,
+    volatileMemory: isPlainObject(material.volatileMemory) ? material.volatileMemory : null,
+  };
+}
+
 /** Generic editor for a JSON object value (string, string[], nested object). */
 function EditableJsonValue({
   value,
@@ -142,6 +204,17 @@ function EditableJsonValue({
   onChange: (next: unknown) => void;
   depth?: number;
 }) {
+  const rowKeysRef = useRef<string[]>([]);
+  const getRowKeys = (length: number) => {
+    while (rowKeysRef.current.length < length) {
+      rowKeysRef.current.push(createEditableRowKey());
+    }
+    if (rowKeysRef.current.length > length) {
+      rowKeysRef.current.length = length;
+    }
+    return rowKeysRef.current;
+  };
+
   if (value === null || value === undefined) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -204,10 +277,11 @@ function EditableJsonValue({
   }
 
   if (isStringArray(value)) {
+    const rowKeys = getRowKeys(value.length);
     return (
       <div style={{ display: 'grid', gap: 8 }}>
         {value.map((item, idx) => (
-          <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div key={rowKeys[idx]} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <Input
               value={item}
               onChange={(e) => {
@@ -221,6 +295,7 @@ function EditableJsonValue({
               size="small"
               danger
               onClick={() => {
+                rowKeysRef.current = rowKeysRef.current.filter((_, i) => i !== idx);
                 const next = value.filter((_, i) => i !== idx);
                 onChange(next);
               }}
@@ -232,7 +307,10 @@ function EditableJsonValue({
         <Button
           size="small"
           icon={<PlusOutlined />}
-          onClick={() => onChange([...value, ''])}
+          onClick={() => {
+            rowKeysRef.current = [...rowKeysRef.current, createEditableRowKey()];
+            onChange([...value, '']);
+          }}
           style={{ width: 'fit-content', fontSize: 12 }}
         >
           添加条目
@@ -242,10 +320,11 @@ function EditableJsonValue({
   }
 
   if (Array.isArray(value)) {
+    const rowKeys = getRowKeys(value.length);
     return (
       <div style={{ display: 'grid', gap: 8 }}>
         {value.map((item, idx) => (
-          <div key={idx} style={{ paddingLeft: 12, borderLeft: '2px solid #f2e8dc' }}>
+          <div key={rowKeys[idx]} style={{ paddingLeft: 12, borderLeft: '2px solid #f2e8dc' }}>
             <EditableJsonValue
               value={item}
               onChange={(nextItem) => {
@@ -260,6 +339,7 @@ function EditableJsonValue({
               danger
               style={{ marginTop: 4, fontSize: 12 }}
               onClick={() => {
+                rowKeysRef.current = rowKeysRef.current.filter((_, i) => i !== idx);
                 const next = value.filter((_, i) => i !== idx);
                 onChange(next);
               }}
@@ -271,7 +351,10 @@ function EditableJsonValue({
         <Button
           size="small"
           icon={<PlusOutlined />}
-          onClick={() => onChange([...value, ''])}
+          onClick={() => {
+            rowKeysRef.current = [...rowKeysRef.current, createEditableRowKey()];
+            onChange([...value, '']);
+          }}
           style={{ width: 'fit-content', fontSize: 12 }}
         >
           添加条目
@@ -317,15 +400,47 @@ function EditableJsonValue({
 /*  Main component                                                      */
 /* ------------------------------------------------------------------ */
 
-const BookTravelMaterials: React.FC = () => {
+const useBookTravelMaterialsView = () => {
   const store = useBookTravelStore();
   const settings = useSettingsStore();
   const { worldBooks, characterCards } = usePartnerStore();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [outlineTree, setOutlineTree] = useState<FileTreeNode[]>([]);
-  const [selectedOutlinePath, setSelectedOutlinePath] = useState<string>();
-  const [selectedWorldBookId, setSelectedWorldBookId] = useState<string>();
-  const [selectedCharacterCardIds, setSelectedCharacterCardIds] = useState<string[]>([]);
+  const [uiState, patchUiState, setUiField] = useStateGroup<BookTravelMaterialsUiState>({
+    modalOpen: false,
+    outlineTree: [],
+    selectedOutlinePath: undefined,
+    selectedWorldBookId: undefined,
+    selectedCharacterCardIds: [],
+    progressOpen: false,
+    progressPhase: 'assembling',
+    assembleOutput: '',
+    entryOutput: '',
+    progressError: '',
+    elapsedMs: 0,
+    detailDraft: createMaterialDetailDraft(null),
+  });
+  const {
+    modalOpen,
+    outlineTree,
+    selectedOutlinePath,
+    selectedWorldBookId,
+    selectedCharacterCardIds,
+    progressOpen,
+    progressPhase,
+    assembleOutput,
+    entryOutput,
+    progressError,
+    elapsedMs,
+    detailDraft,
+  } = uiState;
+  const setModalOpen = (modalOpen: boolean) => setUiField('modalOpen', modalOpen);
+  const setOutlineTree = (outlineTree: FileTreeNode[]) => setUiField('outlineTree', outlineTree);
+  const setSelectedOutlinePath = (selectedOutlinePath: string | undefined) => setUiField('selectedOutlinePath', selectedOutlinePath);
+  const setSelectedWorldBookId = (selectedWorldBookId: string | undefined) => setUiField('selectedWorldBookId', selectedWorldBookId);
+  const setSelectedCharacterCardIds = (selectedCharacterCardIds: string[]) => setUiField('selectedCharacterCardIds', selectedCharacterCardIds);
+  const setProgressOpen = (progressOpen: boolean) => setUiField('progressOpen', progressOpen);
+  const setProgressPhase = (progressPhase: BookTravelMaterialsUiState['progressPhase']) => setUiField('progressPhase', progressPhase);
+  const setProgressError = (progressError: string) => setUiField('progressError', progressError);
+  const setElapsedMs = (elapsedMs: React.SetStateAction<number>) => setUiField('elapsedMs', elapsedMs);
   const characterCardGroups = groupCharacterCardsByWorldBook(worldBooks, characterCards);
   const characterCardIdSet = new Set(characterCards.map((card) => card.id));
   const characterCardTreeData = characterCardGroups.map((group) => ({
@@ -362,26 +477,36 @@ const BookTravelMaterials: React.FC = () => {
   };
 
   // Progress modal state
-  const [progressOpen, setProgressOpen] = useState(false);
-  const [progressPhase, setProgressPhase] = useState<'assembling' | 'entry' | 'done' | 'error' | 'cancelled'>('assembling');
-  const [assembleOutput, setAssembleOutput] = useState('');
-  const [entryOutput, setEntryOutput] = useState('');
-  const [progressError, setProgressError] = useState('');
-  const [elapsedMs, setElapsedMs] = useState(0);
-
   const activeRunIdRef = useRef<string | null>(null);
   const resolverRef = useRef<{ resolve: (content: string) => void; reject: (error: string) => void } | null>(null);
   const cancelledRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const characterKeysRef = useRef<string[]>([]);
 
-  // Editable detail states
-  const [detailTitle, setDetailTitle] = useState('');
-  const [editWorldModel, setEditWorldModel] = useState<Record<string, unknown>>({});
-  const [editEntryPoints, setEditEntryPoints] = useState<BookTravelEntryPoint[]>([]);
-  const [editCharacters, setEditCharacters] = useState<BookTravelUserCharacter[]>([]);
-  const [editStableMemory, setEditStableMemory] = useState<Record<string, unknown> | null>(null);
-  const [editVolatileMemory, setEditVolatileMemory] = useState<Record<string, unknown> | null>(null);
+  const detailTitle = detailDraft.title;
+  const editWorldModel = detailDraft.worldModel;
+  const editEntryPoints = detailDraft.entryPoints;
+  const editCharacters = detailDraft.characters;
+  const editStableMemory = detailDraft.stableMemory;
+  const editVolatileMemory = detailDraft.volatileMemory;
+  const setDetailDraft = (updater: MaterialDetailDraft | ((draft: MaterialDetailDraft) => MaterialDetailDraft)) => setUiField('detailDraft', updater);
+  const setDetailTitle = (title: string) => setDetailDraft((draft) => ({ ...draft, title }));
+  const setEditWorldModel = (worldModel: Record<string, unknown>) => setDetailDraft((draft) => ({ ...draft, worldModel }));
+  const setEditEntryPoints = (updater: BookTravelEntryPoint[] | ((prev: BookTravelEntryPoint[]) => BookTravelEntryPoint[])) => {
+    setDetailDraft((draft) => ({
+      ...draft,
+      entryPoints: typeof updater === 'function' ? updater(draft.entryPoints) : updater,
+    }));
+  };
+  const setEditCharacters = (updater: BookTravelUserCharacter[] | ((prev: BookTravelUserCharacter[]) => BookTravelUserCharacter[])) => {
+    setDetailDraft((draft) => ({
+      ...draft,
+      characters: typeof updater === 'function' ? updater(draft.characters) : updater,
+    }));
+  };
+  const setEditStableMemory = (stableMemory: Record<string, unknown> | null) => setDetailDraft((draft) => ({ ...draft, stableMemory }));
+  const setEditVolatileMemory = (volatileMemory: Record<string, unknown> | null) => setDetailDraft((draft) => ({ ...draft, volatileMemory }));
 
   const selectedMaterial = useMemo(() => {
     if (store.selectedMaterialId) {
@@ -392,22 +517,11 @@ const BookTravelMaterials: React.FC = () => {
 
   // Sync editable states when selected material changes
   useEffect(() => {
-    if (!selectedMaterial) {
-      setDetailTitle('');
-      setEditWorldModel({});
-      setEditEntryPoints([]);
-      setEditCharacters([]);
-      setEditStableMemory(null);
-      setEditVolatileMemory(null);
-      return;
-    }
-    setDetailTitle(selectedMaterial.title);
-    setEditWorldModel(isPlainObject(selectedMaterial.assembledWorldModel) ? selectedMaterial.assembledWorldModel : {});
-    setEditEntryPoints([...selectedMaterial.entryPoints]);
-    setEditCharacters([...selectedMaterial.recommendedUserCharacters]);
-    setEditStableMemory(isPlainObject(selectedMaterial.stableMemory) ? selectedMaterial.stableMemory : null);
-    setEditVolatileMemory(isPlainObject(selectedMaterial.volatileMemory) ? selectedMaterial.volatileMemory : null);
-  }, [selectedMaterial?.id]);
+    characterKeysRef.current = selectedMaterial
+      ? selectedMaterial.recommendedUserCharacters.map(() => createEditableRowKey())
+      : [];
+    setUiField('detailDraft', createMaterialDetailDraft(selectedMaterial));
+  }, [selectedMaterial, setUiField]);
 
   // Global listener for book-travel-stream events
   useEffect(() => {
@@ -420,9 +534,9 @@ const BookTravelMaterials: React.FC = () => {
 
       if (eventType === 'delta' && delta) {
         if (progressPhase === 'assembling') {
-          setAssembleOutput((prev) => prev + delta);
+          setUiField('assembleOutput', (prev) => prev + delta);
         } else if (progressPhase === 'entry') {
-          setEntryOutput((prev) => prev + delta);
+          setUiField('entryOutput', (prev) => prev + delta);
         }
       }
       if (eventType === 'done') {
@@ -438,7 +552,7 @@ const BookTravelMaterials: React.FC = () => {
       active = false;
       unlisten?.();
     };
-  }, [progressPhase]);
+  }, [progressPhase, setUiField]);
 
   const loadOutlineTree = async () => {
     try {
@@ -550,13 +664,15 @@ const BookTravelMaterials: React.FC = () => {
       return;
     }
 
-    setModalOpen(false);
-    setProgressOpen(true);
-    setProgressPhase('assembling');
-    setAssembleOutput('');
-    setEntryOutput('');
-    setProgressError('');
-    setElapsedMs(0);
+    patchUiState({
+      modalOpen: false,
+      progressOpen: true,
+      progressPhase: 'assembling',
+      assembleOutput: '',
+      entryOutput: '',
+      progressError: '',
+      elapsedMs: 0,
+    });
     cancelledRef.current = false;
 
     const startTime = Date.now();
@@ -586,6 +702,10 @@ const BookTravelMaterials: React.FC = () => {
 
       setProgressPhase('assembling');
       const assemblerConfig = settings.agentConfigs?.bookTravelMaterialAssembler || {};
+      if (cancelledRef.current) {
+        clearTimers();
+        return;
+      }
       const assembledRaw = await runStreamTask(
         'start_assemble_book_travel_materials_stream',
         buildRequest('material-assembler', settings.bookTravelMaterialAssemblerPrompt, assemblerConfig, materials, {}),
@@ -593,13 +713,12 @@ const BookTravelMaterials: React.FC = () => {
       const assembled = parseJSON(assembledRaw);
       const assembledWorldModel = assembled?.assembledWorldModel ?? assembled;
 
+      setProgressPhase('entry');
+      const entryConfig = settings.agentConfigs?.bookTravelEntryDirector || {};
       if (cancelledRef.current) {
         clearTimers();
         return;
       }
-
-      setProgressPhase('entry');
-      const entryConfig = settings.agentConfigs?.bookTravelEntryDirector || {};
       const entryRaw = await runStreamTask(
         'start_generate_book_travel_entry_setup_stream',
         buildRequest('entry-director', settings.bookTravelEntryDirectorPrompt, entryConfig, materials, {
@@ -628,11 +747,6 @@ const BookTravelMaterials: React.FC = () => {
           goal: character.goal || '',
         };
       });
-
-      if (cancelledRef.current) {
-        clearTimers();
-        return;
-      }
 
       const title = `${outline.title} · ${partnerMaterials.worldBook.title}`;
       const id = store.saveAssembledMaterial({
@@ -715,15 +829,24 @@ const BookTravelMaterials: React.FC = () => {
   };
 
   const removeCharacter = (index: number) => {
+    characterKeysRef.current = characterKeysRef.current.filter((_, i) => i !== index);
     setEditCharacters((prev) => prev.filter((_, i) => i !== index));
   };
 
   const addCharacter = () => {
+    characterKeysRef.current = [...characterKeysRef.current, createEditableRowKey()];
     setEditCharacters((prev) => [
       ...prev,
       { name: '新角色', identity: '', background: '', personality: '', goal: '' },
     ]);
   };
+
+  while (characterKeysRef.current.length < editCharacters.length) {
+    characterKeysRef.current.push(createEditableRowKey());
+  }
+  if (characterKeysRef.current.length > editCharacters.length) {
+    characterKeysRef.current.length = editCharacters.length;
+  }
 
   return (
     <div style={{ height: '100%', display: 'flex', background: '#faf9f5', overflow: 'hidden' }}>
@@ -895,7 +1018,7 @@ const BookTravelMaterials: React.FC = () => {
                     <div style={{ display: 'grid', gap: 12, padding: '8px 0' }}>
                       {editCharacters.map((character, idx) => (
                         <Card
-                          key={idx}
+                          key={characterKeysRef.current[idx]}
                           size="small"
                           style={{ borderRadius: 10, borderColor: '#f2e8dc', background: '#ffffff' }}
                           title={
@@ -1084,16 +1207,8 @@ const BookTravelMaterials: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <div
                 style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: '50%',
+                  ...BOOK_TRAVEL_PROGRESS_DOT_BASE_STYLE,
                   background: progressPhase === 'assembling' ? '#d97757' : progressPhase === 'entry' || progressPhase === 'done' ? '#52c41a' : '#d9d9d9',
-                  color: '#fff',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
                 }}
               >
                 {progressPhase === 'assembling' ? <Spin size="small" style={{ color: '#fff' }} /> : progressPhase === 'entry' || progressPhase === 'done' ? '✓' : '1'}
@@ -1115,16 +1230,8 @@ const BookTravelMaterials: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <div
                 style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: '50%',
+                  ...BOOK_TRAVEL_PROGRESS_DOT_BASE_STYLE,
                   background: progressPhase === 'entry' ? '#d97757' : progressPhase === 'done' ? '#52c41a' : '#d9d9d9',
-                  color: '#fff',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
                 }}
               >
                 {progressPhase === 'entry' ? <Spin size="small" style={{ color: '#fff' }} /> : progressPhase === 'done' ? '✓' : '2'}
@@ -1152,5 +1259,7 @@ const BookTravelMaterials: React.FC = () => {
     </div>
   );
 };
+
+const BookTravelMaterials: React.FC = () => useBookTravelMaterialsView();
 
 export default BookTravelMaterials;

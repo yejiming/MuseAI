@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import WorkspaceDirectory from '../components/WorkspaceDirectory';
 import MarkdownEditor from '../components/MarkdownEditor';
 import DeAiAgentChat from '../components/DeAiAgentChat';
@@ -8,6 +8,7 @@ import { Button, Empty, Modal, Popconfirm, Progress, Select, Tree, Typography, m
 import { DeleteOutlined, SettingOutlined, CheckCircleOutlined, RobotOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { ScoreDetailsModal } from '../components/ScoreDetailsModal';
+import { useStateGroup } from '../utils/reducerState';
 
 
 function extractSuggestionText(rawSuggestion: string): string {
@@ -40,6 +41,15 @@ const AI_SCORE_FIELDS = [
   { name: '机械般的正式感', max: 12.5 }
 ];
 
+const DEAI_AGENT_PANEL_BASE_STYLE: React.CSSProperties = {
+  borderLeft: '1px solid rgba(0, 0, 0, 0.04)',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+  position: 'relative',
+  background: '#fff',
+};
+
 const clampDimension = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 interface VersionInfo {
@@ -56,7 +66,27 @@ interface FileNode {
   children?: FileNode[];
 }
 
-const DeAi: React.FC = () => {
+interface DeAiUiState {
+  directoryWidth: number;
+  agentWidth: number;
+  isResizingDirectory: boolean;
+  isResizingAgent: boolean;
+  isDetectorSettingsOpen: boolean;
+  isRemoverSettingsOpen: boolean;
+  isScoreModalOpen: boolean;
+  referenceFilesLoaded: boolean;
+  allReferenceFiles: string[];
+  referenceTree: FileNode[];
+}
+
+const getVersionPath = (workPath: string, versionId: string) => {
+  const parts = workPath.split(/[\\/]/);
+  const fileName = parts.pop();
+  const parentDir = parts.join('/');
+  return `${parentDir}/.versions/${fileName}/${versionId}`;
+};
+
+const useDeAiView = () => {
   const { 
     selectedWorkFile, 
     selectedReferenceFile,
@@ -94,36 +124,48 @@ const DeAi: React.FC = () => {
     setIsRemoverVisible,
   } = useDeAiStore();
 
-  const [detectorInput, setDetectorInput] = useState<string | undefined>();
-  const [removerInput, setRemoverInput] = useState<string | undefined>();
-  const [directoryWidth, setDirectoryWidth] = useState(MIN_DIRECTORY_WIDTH);
-  const [agentWidth, setAgentWidth] = useState(DEFAULT_AGENT_WIDTH);
-  const [isResizingDirectory, setIsResizingDirectory] = useState(false);
-  const [isResizingAgent, setIsResizingAgent] = useState(false);
-  const [isDetectorSettingsOpen, setIsDetectorSettingsOpen] = useState(false);
-  const [isRemoverSettingsOpen, setIsRemoverSettingsOpen] = useState(false);
-  const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
-  const [referenceFilesLoaded, setReferenceFilesLoaded] = useState(false);
+  const [uiState, patchUiState, setUiField] = useStateGroup<DeAiUiState>({
+    directoryWidth: MIN_DIRECTORY_WIDTH,
+    agentWidth: DEFAULT_AGENT_WIDTH,
+    isResizingDirectory: false,
+    isResizingAgent: false,
+    isDetectorSettingsOpen: false,
+    isRemoverSettingsOpen: false,
+    isScoreModalOpen: false,
+    referenceFilesLoaded: false,
+    allReferenceFiles: [],
+    referenceTree: [],
+  });
+  const {
+    directoryWidth,
+    agentWidth,
+    isResizingDirectory,
+    isResizingAgent,
+    isDetectorSettingsOpen,
+    isRemoverSettingsOpen,
+    isScoreModalOpen,
+    referenceFilesLoaded,
+    allReferenceFiles,
+    referenceTree,
+  } = uiState;
+  const setDirectoryWidth = (directoryWidth: number) => setUiField('directoryWidth', directoryWidth);
+  const setAgentWidth = (agentWidth: number) => setUiField('agentWidth', agentWidth);
+  const setIsResizingDirectory = (isResizingDirectory: boolean) => setUiField('isResizingDirectory', isResizingDirectory);
+  const setIsResizingAgent = (isResizingAgent: boolean) => setUiField('isResizingAgent', isResizingAgent);
+  const setIsDetectorSettingsOpen = (isDetectorSettingsOpen: boolean) => setUiField('isDetectorSettingsOpen', isDetectorSettingsOpen);
+  const setIsRemoverSettingsOpen = (isRemoverSettingsOpen: boolean) => setUiField('isRemoverSettingsOpen', isRemoverSettingsOpen);
+  const setIsScoreModalOpen = (isScoreModalOpen: boolean) => setUiField('isScoreModalOpen', isScoreModalOpen);
   const directoryRef = useRef<HTMLDivElement>(null);
   const detectorTargetVersionIdRef = useRef<string | null>(null);
   const deAiDetectorPrompt = useSettingsStore(state => state.deAiDetectorPrompt) || defaultDeAiDetectorPrompt;
   const deAiRemoverPrompt = useSettingsStore(state => state.deAiRemoverPrompt) || defaultDeAiRemoverPrompt;
-  const getVersionPath = (workPath: string, versionId: string) => {
-    const parts = workPath.split(/[\\/]/);
-    const fileName = parts.pop();
-    const parentDir = parts.join('/');
-    return `${parentDir}/.versions/${fileName}/${versionId}`;
-  };
-
-  const [allReferenceFiles, setAllReferenceFiles] = useState<string[]>([]);
-  const [referenceTree, setReferenceTree] = useState<FileNode[]>([]);
   const activeVersion = activeVersionId ? versions.find((version: VersionInfo) => version.id === activeVersionId) : null;
   const persistedSuggestion = activeVersion?.suggestion?.trim() || null;
 
-  const syncActiveVersionResult = (version: VersionInfo | null) => {
+  const syncActiveVersionResult = useCallback((version: VersionInfo | null) => {
     setAiScore(version?.aiScore ?? null);
     setSuggestion(version?.suggestion?.trim() || null);
-  };
+  }, [setAiScore, setSuggestion]);
 
   const refreshVersions = async (nextActiveVersionId = activeVersionId) => {
     if (!selectedWorkFile) return [];
@@ -140,14 +182,18 @@ const DeAi: React.FC = () => {
   useEffect(() => {
     const fetchRef = async () => {
       try {
-        setReferenceFilesLoaded(false);
+        patchUiState({ referenceFilesLoaded: false });
         const dir = await invoke<string>('get_workspace_dir', { dirType: 'references' });
         
         const fetchTree = async (path: string): Promise<FileNode[]> => {
           const items = await invoke<FileNode[]>('list_dir', { path });
-          return Promise.all(items
-            .filter((item) => item.name !== '.versions')
-            .map(async (item) => (
+          const visibleItems: FileNode[] = [];
+          for (const item of items) {
+            if (item.name !== '.versions') {
+              visibleItems.push(item);
+            }
+          }
+          return Promise.all(visibleItems.map(async (item) => (
               item.is_dir
                 ? { ...item, children: await fetchTree(item.path) }
                 : item
@@ -167,16 +213,18 @@ const DeAi: React.FC = () => {
         };
 
         const tree = await fetchTree(dir);
-        setReferenceTree(tree);
-        setAllReferenceFiles(collectFiles(tree));
-        setReferenceFilesLoaded(true);
+        patchUiState({
+          referenceTree: tree,
+          allReferenceFiles: collectFiles(tree),
+          referenceFilesLoaded: true,
+        });
       } catch (e) {
         console.error(e);
-        setReferenceFilesLoaded(true);
+        patchUiState({ referenceFilesLoaded: true });
       }
     };
     fetchRef();
-  }, []);
+  }, [patchUiState]);
 
   useEffect(() => {
     if (!referenceFilesLoaded) return;
@@ -205,7 +253,7 @@ const DeAi: React.FC = () => {
       setActiveVersionId(null);
       syncActiveVersionResult(null);
     }
-  }, [selectedWorkFile, setVersions, setActiveVersionId, setAiScore, setSuggestion]);
+  }, [selectedWorkFile, setVersions, setActiveVersionId, syncActiveVersionResult]);
 
   const detectorReferenceText = selectedDetectorReferences.join('\n');
   const detectorStartContent = selectedWorkFile
@@ -214,6 +262,41 @@ const DeAi: React.FC = () => {
   const removerStartContent = selectedWorkFile
     ? `请根据以下修改意见，直接修改作品 ${activeVersionId ? getVersionPath(selectedWorkFile, activeVersionId) : selectedWorkFile}，降低AI味：\n${extractSuggestionText(suggestion || '')}`
     : '';
+  const detectorFooterLeft = useMemo(() => (
+    <Button
+      aria-label="选择检测范文"
+      className="de-ai-agent-settings-button"
+      icon={<SettingOutlined />}
+      onClick={() => setUiField('isDetectorSettingsOpen', true)}
+      shape="circle"
+      title="选择检测范文"
+      type={(selectedDetectorReferences.length > 0 || detectorSelectedHistoricalVersions.length > 0) ? 'primary' : 'default'}
+    />
+  ), [detectorSelectedHistoricalVersions.length, selectedDetectorReferences.length, setUiField]);
+  const removerFooterLeft = useMemo(() => (
+    <Button
+      aria-label="Agent 设置"
+      className="de-ai-agent-settings-button"
+      icon={<SettingOutlined />}
+      onClick={() => setUiField('isRemoverSettingsOpen', true)}
+      shape="circle"
+      title="Agent 设置"
+      type={removerSelectedHistoricalVersions.length > 0 ? 'primary' : 'default'}
+    />
+  ), [removerSelectedHistoricalVersions.length, setUiField]);
+
+  const historicalSuggestionVersionTreeData = useMemo(() => {
+    const nodes: { title: string; key: string }[] = [];
+    for (const v of versions) {
+      if (v.id !== activeVersionId && v.suggestion?.trim()) {
+        nodes.push({
+          title: `版本 ${new Date(v.timestamp).toLocaleString()} (AI味: ${v.aiScore ?? '--'})`,
+          key: v.id,
+        });
+      }
+    }
+    return nodes;
+  }, [activeVersionId, versions]);
 
   const buildDetectorPrompt = (versionId: string, historySuggestions: VersionInfo[]) => {
     let recentSuggestionText = '暂无历史修改建议。';
@@ -350,9 +433,9 @@ const DeAi: React.FC = () => {
     if (!isResizingDirectory) return;
     const handleMouseMove = (event: MouseEvent) => {
       const directoryLeft = directoryRef.current?.getBoundingClientRect().left ?? 0;
-      setDirectoryWidth(Math.max(event.clientX - directoryLeft, MIN_DIRECTORY_WIDTH));
+      setUiField('directoryWidth', Math.max(event.clientX - directoryLeft, MIN_DIRECTORY_WIDTH));
     };
-    const handleMouseUp = () => setIsResizingDirectory(false);
+    const handleMouseUp = () => setUiField('isResizingDirectory', false);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', handleMouseMove);
@@ -363,15 +446,15 @@ const DeAi: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizingDirectory]);
+  }, [isResizingDirectory, setUiField]);
 
   useEffect(() => {
     if (!isResizingAgent) return;
     const handleMouseMove = (event: MouseEvent) => {
       const nextWidth = Math.min(Math.max(window.innerWidth - event.clientX, MIN_AGENT_WIDTH), MAX_AGENT_WIDTH);
-      setAgentWidth(nextWidth);
+      setUiField('agentWidth', nextWidth);
     };
-    const handleMouseUp = () => setIsResizingAgent(false);
+    const handleMouseUp = () => setUiField('isResizingAgent', false);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', handleMouseMove);
@@ -382,7 +465,7 @@ const DeAi: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizingAgent]);
+  }, [isResizingAgent, setUiField]);
 
 
   const handleDetectorDone = async (lastAgentMessage: string) => {
@@ -465,11 +548,6 @@ const DeAi: React.FC = () => {
     }
 
     detectorTargetVersionIdRef.current = null;
-    setDetectorInput(undefined);
-  };
-
-  const handleRemoverDone = (_message: string) => {
-    setRemoverInput(undefined);
   };
 
   const handleDirectorySeparatorKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -531,7 +609,7 @@ const DeAi: React.FC = () => {
       >
         <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>选择带上的历史版本检测AI味建议</Typography.Text>
         <div className="de-ai-reference-picker" style={{ maxHeight: 300, overflowY: 'auto' }}>
-          {versions.filter(v => v.id !== activeVersionId && v.suggestion?.trim()).length > 0 ? (
+          {historicalSuggestionVersionTreeData.length > 0 ? (
             <Tree
               blockNode
               checkable
@@ -541,10 +619,7 @@ const DeAi: React.FC = () => {
                 setRemoverSelectedHistoricalVersions(keys.map(String));
               }}
               selectable={false}
-              treeData={versions.filter(v => v.id !== activeVersionId && v.suggestion?.trim()).map((v) => ({
-                title: `版本 ${new Date(v.timestamp).toLocaleString()} (AI味: ${v.aiScore ?? '--'})`,
-                key: v.id,
-              }))}
+              treeData={historicalSuggestionVersionTreeData}
             />
           ) : (
             <Empty description="暂无可用的历史版本建议" />
@@ -570,10 +645,18 @@ const DeAi: React.FC = () => {
                   checkable
                   checkedKeys={selectedDetectorReferences}
                   className="de-ai-reference-picker__tree"
-                  onCheck={(checkedKeys) => {
-                    const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
-                    setSelectedDetectorReferences(keys.map(String).filter((key) => allReferenceFiles.includes(key)));
-                  }}
+	                  onCheck={(checkedKeys) => {
+	                    const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
+	                    const allowedFiles = new Set(allReferenceFiles);
+	                    const nextFiles: string[] = [];
+	                    for (const key of keys) {
+	                      const file = String(key);
+	                      if (allowedFiles.has(file)) {
+	                        nextFiles.push(file);
+	                      }
+	                    }
+	                    setSelectedDetectorReferences(nextFiles);
+	                  }}
                   selectable={false}
                   treeData={mapReferenceTreeData(referenceTree)}
                 />
@@ -586,8 +669,8 @@ const DeAi: React.FC = () => {
           <div>
             <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>选择带上的历史版本检测AI味建议</Typography.Text>
             <div className="de-ai-reference-picker" style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6 }}>
-              {versions.filter(v => v.id !== activeVersionId && v.suggestion?.trim()).length > 0 ? (
-                <Tree
+	              {historicalSuggestionVersionTreeData.length > 0 ? (
+	                <Tree
                   blockNode
                   checkable
                   checkedKeys={detectorSelectedHistoricalVersions}
@@ -596,10 +679,7 @@ const DeAi: React.FC = () => {
                     setDetectorSelectedHistoricalVersions(keys.map(String));
                   }}
                   selectable={false}
-                  treeData={versions.filter(v => v.id !== activeVersionId && v.suggestion?.trim()).map((v) => ({
-                    title: `版本 ${new Date(v.timestamp).toLocaleString()} (AI味: ${v.aiScore ?? '--'})`,
-                    key: v.id,
-                  }))}
+	                  treeData={historicalSuggestionVersionTreeData}
                 />
               ) : (
                 <Empty description="暂无可用的历史版本建议" />
@@ -799,31 +879,20 @@ const DeAi: React.FC = () => {
               startContent={detectorStartContent}
               onBeforeStart={handleDetectorBeforeStart}
               startDisabled={!selectedWorkFile}
-              footerLeft={
-                <Button
-                  aria-label="选择检测范文"
-                  className="de-ai-agent-settings-button"
-                  icon={<SettingOutlined />}
-                  onClick={() => setIsDetectorSettingsOpen(true)}
-                  shape="circle"
-                  title="选择检测范文"
-                  type={(selectedDetectorReferences.length > 0 || detectorSelectedHistoricalVersions.length > 0) ? 'primary' : 'default'}
-                />
-              }
+              footerLeft={detectorFooterLeft}
               messages={detectorMessages}
               setMessages={setDetectorMessages}
               activeRun={detectorRun}
               setActiveRun={setDetectorRun}
               onRunningChange={setDetectorRunning}
               isRunning={detectorRunning}
-              autoTriggerContent={detectorInput}
               onDone={handleDetectorDone}
             />
           </div>
         )}
       </div>
       {isRemoverVisible && (
-        <div style={{ width: agentWidth, minWidth: agentWidth, borderLeft: '1px solid rgba(0, 0, 0, 0.04)', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', background: '#fff' }}>
+        <div style={{ ...DEAI_AGENT_PANEL_BASE_STYLE, width: agentWidth, minWidth: agentWidth }}>
           <div
             aria-label="调整 Agent 宽度"
             aria-orientation="vertical"
@@ -853,25 +922,13 @@ const DeAi: React.FC = () => {
               onStartBlocked={() => {
                 message.warning('请先完成AI味检测，获得修改意见后再启动去除AI味Agent');
               }}
-              footerLeft={
-                <Button
-                  aria-label="Agent 设置"
-                  className="de-ai-agent-settings-button"
-                  icon={<SettingOutlined />}
-                  onClick={() => setIsRemoverSettingsOpen(true)}
-                  shape="circle"
-                  title="Agent 设置"
-                  type={removerSelectedHistoricalVersions.length > 0 ? 'primary' : 'default'}
-                />
-              }
+              footerLeft={removerFooterLeft}
               messages={removerMessages}
               setMessages={setRemoverMessages}
               activeRun={removerRun}
               setActiveRun={setRemoverRun}
               onRunningChange={setRemoverRunning}
               isRunning={removerRunning}
-              autoTriggerContent={removerInput}
-              onDone={handleRemoverDone}
               onClose={() => setIsRemoverVisible(false)}
             />
           </div>
@@ -880,5 +937,7 @@ const DeAi: React.FC = () => {
     </div>
   );
 };
+
+const DeAi: React.FC = () => useDeAiView();
 
 export default DeAi;

@@ -92,7 +92,7 @@ export const ScoreRadarChart: React.FC<ScoreRadarChartProps> = ({ data, title = 
         },
       ],
     };
-  }, [data]);
+  }, [data, title]);
 
   return (
     <ReactECharts

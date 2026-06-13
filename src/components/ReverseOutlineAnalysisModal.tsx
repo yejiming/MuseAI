@@ -406,7 +406,7 @@ const SourceGroup: React.FC<SourceGroupProps> = ({ title, tree, selectedPaths, o
   </div>
 );
 
-const ReverseOutlineAnalysisModal: React.FC<ReverseOutlineAnalysisModalProps> = ({ open, onClose }) => {
+const useReverseOutlineAnalysisModalView = ({ open, onClose }: ReverseOutlineAnalysisModalProps) => {
   const settings = useSettingsStore();
   const [sourceLoadState, dispatchSourceLoad] = useReducer(sourceLoadReducer, undefined, createInitialSourceLoadState);
   const [viewState, dispatchView] = useReducer(
@@ -1004,5 +1004,7 @@ const ReverseOutlineAnalysisModal: React.FC<ReverseOutlineAnalysisModalProps> = 
     </Modal>
   );
 };
+
+const ReverseOutlineAnalysisModal: React.FC<ReverseOutlineAnalysisModalProps> = (props) => useReverseOutlineAnalysisModalView(props);
 
 export default ReverseOutlineAnalysisModal;

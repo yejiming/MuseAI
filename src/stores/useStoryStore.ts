@@ -2,13 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { createDiskStorage } from './diskStorage';
 import { Message, AgentSessionSummary, SessionContextCompaction } from './useAgentStore';
-
-function createSessionId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `story-session-${crypto.randomUUID()}`;
-  }
-  return `story-session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+import { createSessionId } from '../utils/sessionIds';
 
 interface StoryState {
   messages: Message[];
@@ -56,7 +50,7 @@ export const useStoryStore = create<StoryState>()(
       selectedWorldBookId: null,
       selectedCharacterCardIds: [],
       sessions: [],
-      sessionId: createSessionId(),
+      sessionId: createSessionId('story-session'),
       sessionTitle: '新故事',
       activeRun: { runId: null, messageId: null },
       isSessionArchived: false,
@@ -92,7 +86,7 @@ export const useStoryStore = create<StoryState>()(
           inputMode: 'speech',
           isStreaming: false,
           expandedBlocks: {},
-          sessionId: createSessionId(),
+          sessionId: createSessionId('story-session'),
           sessionTitle: '新故事',
           isSessionArchived: false,
           initialPlot: '',
@@ -104,6 +98,16 @@ export const useStoryStore = create<StoryState>()(
     {
       name: 'museai-story-storage',
       storage: createJSONStorage(() => createDiskStorage('story-store', 'museai-story-storage')),
+      merge: (persistedState, currentState) => {
+        const state = persistedState as Partial<StoryState> | undefined;
+        return {
+          ...currentState,
+          selectedWorldBookId: state?.selectedWorldBookId ?? currentState.selectedWorldBookId,
+          selectedCharacterCardIds: state?.selectedCharacterCardIds ?? currentState.selectedCharacterCardIds,
+          initialPlot: state?.initialPlot ?? currentState.initialPlot,
+          dynamicRoleLoadingEnabled: state?.dynamicRoleLoadingEnabled ?? currentState.dynamicRoleLoadingEnabled,
+        };
+      },
       partialize: (state) => ({
         selectedWorldBookId: state.selectedWorldBookId,
         selectedCharacterCardIds: state.selectedCharacterCardIds,

@@ -154,7 +154,11 @@ function formatUserInfo(userInfo: Record<string, unknown>): string {
 
 function buildAssistantHistoryMessages(message: Message): StoryModelMessage[] {
   const tools = message.tools ?? [];
-  const toolsById = new Map(tools.filter((tool) => tool.id).map((tool) => [tool.id!, tool]));
+  const toolsById = new Map(
+    tools.flatMap((tool): Array<[string, AgentToolEntry]> => (
+      tool.id ? [[tool.id, tool]] : []
+    ))
+  );
   const emittedToolIds = new Set<string>();
   const modelMessages: StoryModelMessage[] = [];
   const parts = message.content.split(/(\[\[TOOL:[^\]]+\]\])/);

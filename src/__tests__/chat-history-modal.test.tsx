@@ -195,4 +195,22 @@ describe('Chat history modal', () => {
       );
     });
   });
+
+  it('repairs an empty partner session id before saving', async () => {
+    usePartnerChatStore.setState({
+      sessionId: '',
+      messages: [{ id: 'm1', role: 'user', content: '记住这个世界', tools: [] }],
+      selectedWorldBookId: worldBook.id,
+      selectedCharacterCardId: characterCard.id,
+    });
+    render(<Chat />);
+
+    fireEvent.click(screen.getByRole('button', { name: /保存对话/ }));
+
+    await waitFor(() => {
+      const saveCall = invokeMock.mock.calls.find(([command]) => command === 'save_agent_session');
+      expect(saveCall?.[1].session.id).toMatch(/^partner-session-/);
+      expect(usePartnerChatStore.getState().sessionId).toBe(saveCall?.[1].session.id);
+    });
+  });
 });
