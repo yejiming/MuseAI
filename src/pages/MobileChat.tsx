@@ -358,6 +358,7 @@ const useMobileChatView = () => {
     try {
       const { runId } = await appInvoke<{ runId: string }>('start_chat_completion_stream', {
         request: {
+          agentId: 'partnerChat',
           modelInterface: settings.modelInterface,
           baseUrl: '', // Stripped, server-merged
           apiKey: '',  // Stripped, server-merged

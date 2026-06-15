@@ -203,6 +203,7 @@ describe('mobile archive flow', () => {
         'start_chat_completion_stream',
         expect.objectContaining({
           request: expect.objectContaining({
+            agentId: 'partnerChat',
             contextCompaction: compactedContext,
           }),
         }),

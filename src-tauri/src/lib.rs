@@ -101,6 +101,7 @@ fn build_full_system_prompt(
     selected_reference_files: Option<Vec<String>>,
 ) -> Result<String, String> {
     let request = models::ChatStreamRequest {
+        agent_id: None,
         model_interface: String::new(),
         base_url: String::new(),
         api_key: String::new(),

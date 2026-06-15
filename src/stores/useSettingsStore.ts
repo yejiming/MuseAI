@@ -546,6 +546,17 @@ export const defaultPartnerChatPrompt = `你将在此扮演一个特定的角色
 2. **严守世界观**：在对话中，你的认知、常识、所提到的地点和事件，必须严格局限在“世界书”定义的时空和规则内，不得出现任何脱离该世界的现代或无关信息。
 3. **自适应人物关系**：请认真研读“我（用户）的个人设定”。你的身份、职业、所处的社会阶层与用户的关系应当符合两张卡片的交叉定位。用符合人设的自然态度与用户对话（信任、防备、疏离或亲近）。
 4. **口语化与对话感**：始终使用符合角色性格的自然口语回复。避免书面化的冗长叙述，多用短句、对话和契合情境的微表情/微动作白描（可以使用括号标注动作或神态，例如：\`（轻挑眉梢）\`或\`（后退半步，警惕地看着你）\`）。
+5. **避免重复空转**：不要复述最近几轮已经表达过的措辞、情绪节拍、安抚承诺、关系确认或括号动作。若相同意思已经说过，请换一个真实的新角度，而不是换词重复。
+6. **每轮推进关系或情境**：每次回复至少提供一个新的有效增量，例如新的具体细节、一个贴合角色的问题、一个小决定点、一次情绪变化、一个可感知动作或对当前关系的细微推进。
+7. **绝对禁用词**：不要在回复中提及任何关于“我是AI”、“我是语言模型”、“作为写作助手”、“以下是大纲”等出戏的系统性词汇。你就是一个活在那个世界里的真实存在。`;
+
+const legacyPartnerChatPrompt = `你将在此扮演一个特定的角色与用户进行沉浸式互动对话。你并非写作助手，而是一个处于特定故事世界中的真实实体。
+
+## 核心行为约束
+1. **严格扮演角色**：你必须彻底融入角色卡中的人设。你的说话语气、言行举止、内心防备、口癖和情绪反应，必须百分之百符合“角色卡”的设定。
+2. **严守世界观**：在对话中，你的认知、常识、所提到的地点和事件，必须严格局限在“世界书”定义的时空和规则内，不得出现任何脱离该世界的现代或无关信息。
+3. **自适应人物关系**：请认真研读“我（用户）的个人设定”。你的身份、职业、所处的社会阶层与用户的关系应当符合两张卡片的交叉定位。用符合人设的自然态度与用户对话（信任、防备、疏离或亲近）。
+4. **口语化与对话感**：始终使用符合角色性格的自然口语回复。避免书面化的冗长叙述，多用短句、对话和契合情境的微表情/微动作白描（可以使用括号标注动作或神态，例如：\`（轻挑眉梢）\`或\`（后退半步，警惕地看着你）\`）。
 5. **绝对禁用词**：不要在回复中提及任何关于“我是AI”、“我是语言模型”、“作为写作助手”、“以下是大纲”等出戏的系统性词汇。你就是一个活在那个世界里的真实存在。`;
 
 export const defaultBackgroundWorldBookPrompt = `你是一个世界观与人物设定专家。你需要根据用户提供的参考文本，提取结构化世界书；如果任务要求，还要提取适合继续生成角色卡的角色姓名列表。
@@ -815,7 +826,7 @@ export const defaultAgentConfigs: Record<string, AgentConfig> = {
   remover: { temperature: 0.7, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' },
   outlineCreation: { temperature: 0.7, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'low' },
   outlineAssessment: { temperature: 0.7, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'low' },
-  partnerChat: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' },
+  partnerChat: { temperature: 0.7, maxOutputTokens: 1024, maxContextTokens: 128000, thinkingDepth: 'off' },
   reverseOutline: { concurrency: 5 },
   reverseOutlineShort: { temperature: 0, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' },
   reverseOutlineLongSummary: { temperature: 0, maxOutputTokens: 8192, maxContextTokens: 200000, thinkingDepth: 'off' },
@@ -1072,7 +1083,7 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'museai-settings-storage',
       storage: createJSONStorage(() => createDiskStorage('settings-store', 'museai-settings-storage')),
-      version: 17,
+      version: 18,
       partialize: (state) => {
         const { worksDirectory: _, ...rest } = state;
         return rest as SettingsState;
@@ -1086,7 +1097,7 @@ export const useSettingsStore = create<SettingsState>()(
           remover: { temperature: 0.7, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' as const },
           outlineCreation: { temperature: 0.7, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'low' as const },
           outlineAssessment: { temperature: 0.7, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'low' as const },
-          partnerChat: { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' as const },
+          partnerChat: { temperature: 0.7, maxOutputTokens: 1024, maxContextTokens: 128000, thinkingDepth: 'off' as const },
           reverseOutline: { concurrency: 5 },
           reverseOutlineShort: { temperature: 0, maxOutputTokens: 32000, maxContextTokens: 200000, thinkingDepth: 'off' as const },
           reverseOutlineLongSummary: { temperature: 0, maxOutputTokens: 8192, maxContextTokens: 200000, thinkingDepth: 'off' as const },
@@ -1137,6 +1148,19 @@ export const useSettingsStore = create<SettingsState>()(
           });
         }
 
+        if (version < 18) {
+          const oldPartnerChatDefault = { temperature: 0.7, maxOutputTokens: 4096, maxContextTokens: 128000, thinkingDepth: 'off' };
+          const current = state.agentConfigs?.partnerChat || {};
+          const isOldPartnerChatDefault =
+            current.temperature === oldPartnerChatDefault.temperature &&
+            current.maxOutputTokens === oldPartnerChatDefault.maxOutputTokens &&
+            current.maxContextTokens === oldPartnerChatDefault.maxContextTokens &&
+            current.thinkingDepth === oldPartnerChatDefault.thinkingDepth;
+          if (isOldPartnerChatDefault) {
+            migratedAgentConfigs.partnerChat = { ...defaultConfigs.partnerChat };
+          }
+        }
+
         const base = {
           ...state,
           agentConfigs: migratedAgentConfigs,
@@ -1172,7 +1196,9 @@ export const useSettingsStore = create<SettingsState>()(
           reverseOutlineLongFinalPrompt: !state.reverseOutlineLongFinalPrompt
             ? defaultReverseOutlineLongFinalPrompt
             : state.reverseOutlineLongFinalPrompt,
-          partnerChatPrompt: !state.partnerChatPrompt || state.partnerChatPrompt.includes('你是一个温柔、善解人意且富有才华的写作伴侣')
+          partnerChatPrompt: !state.partnerChatPrompt
+            || state.partnerChatPrompt === legacyPartnerChatPrompt
+            || state.partnerChatPrompt.includes('你是一个温柔、善解人意且富有才华的写作伴侣')
             ? defaultPartnerChatPrompt
             : state.partnerChatPrompt,
           backgroundWorldBookPrompt: !state.backgroundWorldBookPrompt

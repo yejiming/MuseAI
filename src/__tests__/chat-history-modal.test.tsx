@@ -68,6 +68,7 @@ const invokeMock = vi.fn(async (command: string, args?: any) => {
   }
   if (command === 'delete_agent_session') return null;
   if (command === 'summarize_text') return '新保存标题';
+  if (command === 'start_chat_completion_stream') return 'run-1';
   if (command === 'save_agent_session') return { id: args.session.id, title: args.session.title, savedAt: Date.now() };
   return undefined;
 });
@@ -211,6 +212,30 @@ describe('Chat history modal', () => {
       const saveCall = invokeMock.mock.calls.find(([command]) => command === 'save_agent_session');
       expect(saveCall?.[1].session.id).toMatch(/^partner-session-/);
       expect(usePartnerChatStore.getState().sessionId).toBe(saveCall?.[1].session.id);
+    });
+  });
+
+  it('passes partnerChat agent id when sending desktop chat messages', async () => {
+    usePartnerChatStore.setState({
+      input: '今晚聊聊雾城',
+      selectedWorldBookId: worldBook.id,
+      selectedCharacterCardId: characterCard.id,
+    });
+    const { container } = render(<Chat />);
+
+    const sendButton = container.querySelector('.de-ai-agent-run-button') as HTMLButtonElement | null;
+    expect(sendButton).not.toBeNull();
+    fireEvent.click(sendButton!);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        'start_chat_completion_stream',
+        expect.objectContaining({
+          request: expect.objectContaining({
+            agentId: 'partnerChat',
+          }),
+        }),
+      );
     });
   });
 });

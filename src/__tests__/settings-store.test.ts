@@ -20,6 +20,7 @@ import {
   defaultBookTravelSceneWriterPrompt,
   defaultBookTravelMemoryKeeperPrompt,
   defaultBookTravelEndingJudgePrompt,
+  defaultAgentConfigs,
   useSettingsStore,
 } from '../stores/useSettingsStore';
 
@@ -92,6 +93,19 @@ describe('Settings store default exports', () => {
   it('defaultPartnerChatPrompt should contain roleplay constraints', () => {
     expect(defaultPartnerChatPrompt).toContain('严格扮演角色');
     expect(defaultPartnerChatPrompt).toContain('口语化与对话感');
+    expect(defaultPartnerChatPrompt).toContain('避免重复空转');
+    expect(defaultPartnerChatPrompt).toContain('每轮推进关系或情境');
+    expect(defaultAgentConfigs.partnerChat.maxOutputTokens).toBe(1024);
+  });
+
+  it('resetPartnerChatPrompt should restore repeat-resistant default prompt', () => {
+    const store = useSettingsStore.getState();
+
+    store.setPartnerChatPrompt('自定义伴侣提示词');
+    store.resetPartnerChatPrompt();
+
+    expect(useSettingsStore.getState().partnerChatPrompt).toBe(defaultPartnerChatPrompt);
+    expect(useSettingsStore.getState().partnerChatPrompt).toContain('避免重复空转');
   });
 
   it('defaultStoryAgentPrompt should contain DM narrative constraints', () => {

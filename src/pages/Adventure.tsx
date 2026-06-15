@@ -42,6 +42,7 @@ import { getCharacterCardIdsForWorldBook, groupCharacterCardsByWorldBook } from 
 import { createStableContentKey, createStableToolKey } from '../utils/renderKeys';
 import { useStateGroup } from '../utils/reducerState';
 import { ensureSessionId } from '../utils/sessionIds';
+import { getEffectiveMessagesForContextStats } from '../utils/contextCompaction';
 
 interface ChatStreamEvent {
   runId: string;
@@ -1050,7 +1051,8 @@ const useAdventureView = () => {
   };
 
   // Context Stats
-  const contextStats = estimateContextUsage(effectiveSystemPrompt, messages, input);
+  const effectiveContextMessages = getEffectiveMessagesForContextStats(messages, contextCompaction);
+  const contextStats = estimateContextUsage(effectiveSystemPrompt, effectiveContextMessages, input);
   const maxContext = storyAgentConfig.maxContextTokens ?? 200000;
   const contextPercent = maxContext > 0
     ? Math.min(100, Math.round((contextStats.total / maxContext) * 100))

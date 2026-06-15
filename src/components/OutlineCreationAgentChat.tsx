@@ -20,6 +20,7 @@ import {
 import { useOutlineStore } from '../stores/useOutlineStore';
 import { createStableContentKey, createStableToolKey } from '../utils/renderKeys';
 import { useStateGroup } from '../utils/reducerState';
+import { getEffectiveMessagesForContextStats } from '../utils/contextCompaction';
 
 interface ChatStreamEvent {
   runId: string;
@@ -689,12 +690,13 @@ const useOutlineCreationAgentChatView = ({ onClose, title = '大纲制作Agent' 
 
 
 
+  const effectiveContextMessages = getEffectiveMessagesForContextStats(messages, contextCompaction);
   const contextStats = estimateContextUsage({
     systemPrompt: systemPrompt,
     workspacePath: outlineDir,
     selectedReferenceFiles,
     skills,
-    messages,
+    messages: effectiveContextMessages,
     draft: input,
   });
   const contextUsed = contextStats.total;
@@ -740,7 +742,7 @@ const useOutlineCreationAgentChatView = ({ onClose, title = '大纲制作Agent' 
       <div className="agent-context-popover__divider" />
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">消息数：</span>
-        <span className="agent-context-popover__value">{messages.length} 条</span>
+        <span className="agent-context-popover__value">{contextStats.messageCount} 条</span>
       </div>
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">总 token：</span>
@@ -1356,6 +1358,7 @@ function estimateContextUsage({
 
   return {
     ...stats,
+    messageCount: messages.length,
     total: stats.system + stats.user + stats.assistant + stats.tool,
   };
 }

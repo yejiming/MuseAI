@@ -32,6 +32,7 @@ import {
 } from './storyAgent';
 import { resolveBookTravelProgressMaterial } from '../utils/sessionHistory';
 import { ensureSessionId } from '../utils/sessionIds';
+import { getEffectiveMessagesForContextStats } from '../utils/contextCompaction';
 
 interface ChatStreamEvent {
   runId: string;
@@ -1380,7 +1381,8 @@ const useStoryView = () => {
   };
 
   // Context Stats
-  const contextStats = estimateContextUsage(effectiveSystemPrompt, messages, input);
+  const effectiveContextMessages = getEffectiveMessagesForContextStats(messages, contextCompaction);
+  const contextStats = estimateContextUsage(effectiveSystemPrompt, effectiveContextMessages, input);
   const maxContext = storyAgentConfig.maxContextTokens ?? 200000;
   const contextPercent = maxContext > 0
     ? Math.min(100, Math.round((contextStats.total / maxContext) * 100))

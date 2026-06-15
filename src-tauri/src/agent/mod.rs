@@ -362,16 +362,18 @@ async fn prepare_session_context_compaction(
     system_prompt: &str,
     options: &AgentRunOptions,
 ) -> Result<Option<SessionContextCompaction>, String> {
-    let Some(plan) = plan_context_compaction(
+    let Some(plan) = plan_context_compaction_for_agent(
         system_prompt,
         &request.messages,
         request.context_compaction.as_ref(),
         request.max_context_tokens,
+        request.agent_id.as_deref(),
     ) else {
         return Ok(request.context_compaction.clone());
     };
 
-    let summary = summarize_context_messages(request, &plan.messages_to_summarize).await;
+    let summary =
+        summarize_context_messages(request, &plan.messages_to_summarize, plan.summary_style).await;
     let compaction = SessionContextCompaction {
         summary,
         compacted_through_message_id: plan.compacted_through_message_id,
@@ -386,8 +388,15 @@ async fn prepare_session_context_compaction(
 async fn summarize_context_messages(
     request: &ChatStreamRequest,
     messages: &[ChatMessage],
+    summary_style: ContextSummaryStyle,
 ) -> String {
-    let fallback = || fallback_context_summary(messages);
+    let fallback = || {
+        if summary_style == ContextSummaryStyle::Generic {
+            fallback_context_summary(messages)
+        } else {
+            fallback_context_summary_with_style(messages, summary_style)
+        }
+    };
     let flat = flatten_context_messages(messages);
     if flat.trim().is_empty()
         || request.api_key.trim().is_empty()
@@ -396,12 +405,7 @@ async fn summarize_context_messages(
         return fallback();
     }
 
-    let system_prompt = concat!(
-        "请把这段 MuseAI 当前会话的旧上下文压缩成简洁摘要，用中文输出。\n",
-        "必须保留：用户目标、已确认要求、当前任务进度、重要文件/路径/版本、关键工具结果、已失败或被否定的方向、后续待处理问题。\n",
-        "必须删除：冗长工具输出、重复寒暄、长代码全文、无关细节。\n",
-        "输出只给摘要正文，不要回答用户，不要新增事实。"
-    );
+    let system_prompt = context_summary_system_prompt(summary_style);
     let user_prompt = format!(
         "需要压缩的旧上下文如下：\n\n{}",
         truncate_chars(&flat, 24_000)

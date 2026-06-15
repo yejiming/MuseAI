@@ -60,6 +60,7 @@ pub struct ChatToolCall {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatStreamRequest {
+    pub agent_id: Option<String>,
     pub model_interface: String,
     pub base_url: String,
     pub api_key: String,

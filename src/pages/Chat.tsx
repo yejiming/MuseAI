@@ -31,6 +31,7 @@ import { parseArchiveAnalysisResponse } from '../utils/archiveAnalysis';
 import { createStableContentKey } from '../utils/renderKeys';
 import { useStateGroup } from '../utils/reducerState';
 import { ensureSessionId } from '../utils/sessionIds';
+import { getEffectiveMessagesForContextStats } from '../utils/contextCompaction';
 
 interface ChatStreamEvent {
   runId: string;
@@ -186,6 +187,7 @@ const estimateContextUsage = (systemPrompt: string, messages: Message[], draft: 
   };
   return {
     ...stats,
+    messageCount: messages.length,
     total: stats.system + stats.user + stats.assistant,
   };
 };
@@ -493,6 +495,7 @@ const useChatView = () => {
 
       const runId = await invoke<string>('start_chat_completion_stream', {
         request: {
+          agentId: 'partnerChat',
           modelInterface: settings.modelInterface,
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
@@ -589,6 +592,7 @@ const useChatView = () => {
 
         const runId = await invoke<string>('start_chat_completion_stream', {
           request: {
+            agentId: 'partnerChat',
             modelInterface: settings.modelInterface,
             baseUrl: settings.llmBaseUrl,
             apiKey: settings.llmApiKey,
@@ -652,6 +656,7 @@ const useChatView = () => {
 
       const runId = await invoke<string>('start_chat_completion_stream', {
         request: {
+          agentId: 'partnerChat',
           modelInterface: settings.modelInterface,
           baseUrl: settings.llmBaseUrl,
           apiKey: settings.llmApiKey,
@@ -857,7 +862,8 @@ const useChatView = () => {
   };
 
   // Context ring stats
-  const contextStats = estimateContextUsage(effectiveSystemPrompt, messages, input);
+  const effectiveContextMessages = getEffectiveMessagesForContextStats(messages, contextCompaction);
+  const contextStats = estimateContextUsage(effectiveSystemPrompt, effectiveContextMessages, input);
   const maxContext = settings.agentConfigs?.partnerChat?.maxContextTokens ?? 200000;
   const contextPercent = maxContext > 0
     ? Math.min(100, Math.round((contextStats.total / maxContext) * 100))
@@ -883,7 +889,7 @@ const useChatView = () => {
       <div className="agent-context-popover__divider" />
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">消息数：</span>
-        <span className="agent-context-popover__value">{messages.length} 条</span>
+        <span className="agent-context-popover__value">{contextStats.messageCount} 条</span>
       </div>
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">总 token：</span>

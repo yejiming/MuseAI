@@ -22,6 +22,7 @@ MuseAI 是一款面向沉浸式角色互动的本地 AI 应用。你可以创建
 - [界面一览](#界面一览)
 - [数据存储说明](#数据存储说明)
 - [常见问题](#常见问题)
+- [友情链接](#友情链接)
 
 ---
 
@@ -333,6 +334,14 @@ A：
 **Q：模型费用怎么算？**
 
 A：MuseAI 本身完全免费，AI 功能的费用由你使用的 API 服务商根据实际调用量直接计费。大部分服务商采用按 Token 计费的模式（可以理解为按字数收费），具体价格请参考各服务商官网。你可以在设置页中为不同模块配置不同的模型，比如用便宜快速的模型做日常聊天，用高质量模型做关键剧情和设定分析。
+
+---
+
+## 友情链接
+
+- [taichuy/1flowbase](https://github.com/taichuy/1flowbase)：一个适合快速搭建 AI 应用与工作流基础能力的开源项目。
+- [zhu1090093659/deepseek-pp](https://github.com/zhu1090093659/deepseek-pp)：围绕 DeepSeek 使用体验与能力扩展的开源项目。
+- [FrontAgent/FrontAgent](https://github.com/FrontAgent/FrontAgent)：面向前端开发场景的 AI Agent 开源项目。
 
 ---
 

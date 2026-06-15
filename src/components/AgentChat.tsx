@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { createStableContentKey, createStableToolKey } from '../utils/renderKeys';
 import { useStateGroup } from '../utils/reducerState';
+import { getEffectiveMessagesForContextStats } from '../utils/contextCompaction';
 import {
   useAgentStore,
   Message,
@@ -617,12 +618,13 @@ const useAgentChatView = ({ onClose, title = '写文章Agent' }: AgentChatProps)
     build();
   }, [effectiveSystemPrompt, settings.worksDirectory, selectedReferenceFiles]);
 
+  const effectiveContextMessages = getEffectiveMessagesForContextStats(messages, contextCompaction);
   const contextStats = estimateContextUsage({
     systemPrompt: effectiveSystemPrompt,
     workspacePath: settings.worksDirectory,
     selectedReferenceFiles,
     skills,
-    messages,
+    messages: effectiveContextMessages,
     draft: input,
   });
   const contextUsed = contextStats.total;
@@ -675,7 +677,7 @@ const useAgentChatView = ({ onClose, title = '写文章Agent' }: AgentChatProps)
       <div className="agent-context-popover__divider" />
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">消息数：</span>
-        <span className="agent-context-popover__value">{messages.length} 条</span>
+        <span className="agent-context-popover__value">{contextStats.messageCount} 条</span>
       </div>
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">总 token：</span>
@@ -1261,6 +1263,7 @@ function estimateContextUsage({
 
   return {
     ...stats,
+    messageCount: messages.length,
     total: stats.system + stats.user + stats.assistant + stats.tool,
   };
 }

@@ -22,6 +22,7 @@ It is not just a chatbot, and it is not only a writing tool. MuseAI is a local A
 - [Interface Preview](#interface-preview)
 - [Local Data Storage](#local-data-storage)
 - [FAQ](#faq)
+- [Friendly Links](#friendly-links)
 
 ---
 
@@ -333,6 +334,14 @@ A:
 **Q: How are model costs calculated?**
 
 A: MuseAI itself is free. AI usage costs are billed by the provider you configure, usually by tokens. You can use cheaper, faster models for daily chat and stronger models for important story or setting analysis.
+
+---
+
+## Friendly Links
+
+- [taichuy/1flowbase](https://github.com/taichuy/1flowbase): An open-source project for quickly building AI app and workflow foundations.
+- [zhu1090093659/deepseek-pp](https://github.com/zhu1090093659/deepseek-pp): An open-source project focused on improving and extending the DeepSeek experience.
+- [FrontAgent/FrontAgent](https://github.com/FrontAgent/FrontAgent): An open-source AI agent project for frontend development workflows.
 
 ---
 

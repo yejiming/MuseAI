@@ -9,6 +9,7 @@ import { useSettingsStore } from '../stores/useSettingsStore';
 import { Message, AgentToolEntry, AgentSessionSummary, AgentSessionRecord, SessionContextCompaction } from '../stores/useAgentStore';
 import { createStableContentKey, createStableToolKey } from '../utils/renderKeys';
 import { useStateGroup } from '../utils/reducerState';
+import { getEffectiveMessagesForContextStats } from '../utils/contextCompaction';
 
 interface ChatStreamEvent {
   runId: string;
@@ -572,10 +573,11 @@ const useDeAiAgentChatView = ({
     setExpandedBlocks((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const effectiveContextMessages = getEffectiveMessagesForContextStats(messages, contextCompaction);
   const contextStats = estimateContextUsage({
     systemPrompt: fullSystemPrompt,
     workspacePath: settings.worksDirectory,
-    messages,
+    messages: effectiveContextMessages,
     draft: input,
   });
   const contextUsed = contextStats.total;
@@ -600,7 +602,7 @@ const useDeAiAgentChatView = ({
       <div className="agent-context-popover__divider" />
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">消息数：</span>
-        <span className="agent-context-popover__value">{messages.length} 条</span>
+        <span className="agent-context-popover__value">{contextStats.messageCount} 条</span>
       </div>
       <div className="agent-context-popover__row">
         <span className="agent-context-popover__label">总 token：</span>
@@ -963,6 +965,7 @@ function estimateContextUsage({
 
   return {
     ...stats,
+    messageCount: messages.length,
     total: stats.system + stats.user + stats.assistant + stats.tool,
   };
 }
