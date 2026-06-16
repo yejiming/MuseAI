@@ -48,6 +48,7 @@ pub async fn run_openai_agent_loop(
             "tool_choice": "auto",
         });
         body["stream_options"] = json!({ "include_usage": true });
+        apply_openai_sampling_controls(&mut body, request);
 
         // 根据 thinking_depth 设置思考参数
         // enable_thinking: Qwen3 等支持；reasoning_effort: OpenAI o系列 / OpenRouter 支持
@@ -125,6 +126,19 @@ pub async fn run_openai_agent_loop(
 
     Err(String::from("Agent 工具循环异常结束"))
 }
+
+fn apply_openai_sampling_controls(body: &mut Value, request: &ChatStreamRequest) {
+    if let Some(frequency_penalty) = request.frequency_penalty {
+        body["frequency_penalty"] = json!(frequency_penalty);
+    }
+    if let Some(presence_penalty) = request.presence_penalty {
+        body["presence_penalty"] = json!(presence_penalty);
+    }
+    if let Some(top_p) = request.top_p {
+        body["top_p"] = json!(top_p);
+    }
+}
+
 async fn stream_openai_round(
     app: &AppHandle,
     run_id: &str,
@@ -1465,6 +1479,48 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn openai_sampling_controls_use_openai_parameter_names() {
+        let request = ChatStreamRequest {
+            agent_id: Some("partnerChat".to_string()),
+            model_interface: "OpenAI-compatible".to_string(),
+            base_url: "http://localhost".to_string(),
+            api_key: "key".to_string(),
+            model: "model".to_string(),
+            temperature: Some(0.7),
+            max_output_tokens: Some(1024),
+            max_context_tokens: Some(128000),
+            compaction_turn_threshold: Some(20),
+            frequency_penalty: Some(0.3),
+            presence_penalty: Some(0.2),
+            top_p: Some(0.9),
+            thinking_depth: Some("off".to_string()),
+            system_prompt: "系统提示词".to_string(),
+            workspace_path: None,
+            messages: vec![ChatMessage {
+                id: Some("m1".to_string()),
+                role: "user".to_string(),
+                content: "你好".to_string(),
+                tool_call_id: None,
+                tool_calls: None,
+                thinking_blocks: None,
+            }],
+            context_compaction: None,
+            selected_reference_files: None,
+            allowed_tools: None,
+            allowed_write_paths: None,
+            role_play_context: None,
+        };
+        let mut body = json!({});
+
+        apply_openai_sampling_controls(&mut body, &request);
+
+        assert!((body["frequency_penalty"].as_f64().unwrap() - 0.3).abs() < 0.0001);
+        assert!((body["presence_penalty"].as_f64().unwrap() - 0.2).abs() < 0.0001);
+        assert!((body["top_p"].as_f64().unwrap() - 0.9).abs() < 0.0001);
+        assert!(body.get("repetition_penalty").is_none());
     }
 
     #[test]

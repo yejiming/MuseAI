@@ -4,6 +4,7 @@ import { Modal } from 'antd';
 import Chat from '../pages/Chat';
 import { usePartnerChatStore } from '../stores/usePartnerChatStore';
 import { usePartnerStore } from '../stores/usePartnerStore';
+import { useSettingsStore } from '../stores/useSettingsStore';
 
 const worldBook = {
   id: 'wb-chat-1',
@@ -126,6 +127,17 @@ function resetStores() {
     isSessionArchived: false,
     contextCompaction: null,
   });
+  useSettingsStore.setState({
+    agentConfigs: {
+      ...useSettingsStore.getState().agentConfigs,
+      partnerChat: {
+        ...useSettingsStore.getState().agentConfigs.partnerChat,
+        frequencyPenalty: 0.55,
+        presencePenalty: 0.45,
+        topP: 0.75,
+      },
+    },
+  });
   invokeMock.mockClear();
 }
 
@@ -233,6 +245,9 @@ describe('Chat history modal', () => {
         expect.objectContaining({
           request: expect.objectContaining({
             agentId: 'partnerChat',
+            frequencyPenalty: 0.55,
+            presencePenalty: 0.45,
+            topP: 0.75,
           }),
         }),
       );

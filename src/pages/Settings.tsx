@@ -137,6 +137,7 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
   const defaultConfig = React.useMemo(() => defaultAgentConfigs[agentId] || {}, [agentId]);
   const agentConfig = store.agentConfigs?.[agentId] || defaultConfig;
   const supportsCompactionTurnThreshold = agentId === 'partnerChat' || agentId === 'storyAgent' || agentId === 'storyDynamicAgent';
+  const supportsSamplingControls = supportsCompactionTurnThreshold;
 
   React.useEffect(() => {
     const values: Record<string, unknown> = {
@@ -149,8 +150,13 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
     if (supportsCompactionTurnThreshold) {
       values.compactionTurnThreshold = agentConfig.compactionTurnThreshold ?? defaultConfig.compactionTurnThreshold ?? 20;
     }
+    if (supportsSamplingControls) {
+      values.frequencyPenalty = agentConfig.frequencyPenalty ?? defaultConfig.frequencyPenalty ?? 0.3;
+      values.presencePenalty = agentConfig.presencePenalty ?? defaultConfig.presencePenalty ?? 0.2;
+      values.topP = agentConfig.topP ?? defaultConfig.topP ?? 0.9;
+    }
     form.setFieldsValue(values);
-  }, [agentConfig, currentPrompt, defaultConfig, form, supportsCompactionTurnThreshold]);
+  }, [agentConfig, currentPrompt, defaultConfig, form, supportsCompactionTurnThreshold, supportsSamplingControls]);
 
   const handleSave = (values: any) => {
     if (showModelControls) {
@@ -160,6 +166,11 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
         maxContextTokens: values.maxContextTokens,
         thinkingDepth: values.thinkingDepth,
         ...(supportsCompactionTurnThreshold ? { compactionTurnThreshold: values.compactionTurnThreshold ?? 20 } : {}),
+        ...(supportsSamplingControls ? {
+          frequencyPenalty: values.frequencyPenalty ?? 0.3,
+          presencePenalty: values.presencePenalty ?? 0.2,
+          topP: values.topP ?? 0.9,
+        } : {}),
       };
       store.setAgentConfig(agentId, nextConfig);
     }
@@ -178,6 +189,11 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
     if (supportsCompactionTurnThreshold) {
       values.compactionTurnThreshold = defaultConfig.compactionTurnThreshold ?? 20;
     }
+    if (supportsSamplingControls) {
+      values.frequencyPenalty = defaultConfig.frequencyPenalty ?? 0.3;
+      values.presencePenalty = defaultConfig.presencePenalty ?? 0.2;
+      values.topP = defaultConfig.topP ?? 0.9;
+    }
     form.setFieldsValue(values);
     if (showModelControls) {
       const nextConfig = {
@@ -186,6 +202,11 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
         maxContextTokens: defaultConfig.maxContextTokens,
         thinkingDepth: defaultConfig.thinkingDepth,
         ...(supportsCompactionTurnThreshold ? { compactionTurnThreshold: defaultConfig.compactionTurnThreshold ?? 20 } : {}),
+        ...(supportsSamplingControls ? {
+          frequencyPenalty: defaultConfig.frequencyPenalty ?? 0.3,
+          presencePenalty: defaultConfig.presencePenalty ?? 0.2,
+          topP: defaultConfig.topP ?? 0.9,
+        } : {}),
       };
       store.setAgentConfig(agentId, nextConfig);
     }
@@ -227,38 +248,72 @@ const AgentSettingCard: React.FC<AgentSettingCardProps> = ({
         requiredMark={false}
       >
         {showModelControls && (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: supportsCompactionTurnThreshold ? 'repeat(5, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))',
-              gap: '16px',
-              marginBottom: '20px'
-            }}
-          >
-            <Form.Item label="温度" name="temperature" style={{ marginBottom: 0 }}>
-              <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item label="最大输出 Token" name="maxOutputTokens" style={{ marginBottom: 0 }}>
-              <InputNumber min={1} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item label="最大上下文 Token" name="maxContextTokens" style={{ marginBottom: 0 }}>
-              <InputNumber min={1} step={1024} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item label="思考深度 (Depth)" name="thinkingDepth" style={{ marginBottom: 0 }}>
-              <Select
-                style={{ width: '100%' }}
-                options={effortLevelOptions.map((opt) => ({ value: opt.id, label: opt.label }))}
-              />
-            </Form.Item>
+          <div style={{ marginBottom: '20px' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                gap: '16px',
+                marginBottom: supportsCompactionTurnThreshold ? '16px' : 0
+              }}
+            >
+              <Form.Item label="温度" name="temperature" style={{ marginBottom: 0 }}>
+                <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item label="最大输出 Token" name="maxOutputTokens" style={{ marginBottom: 0 }}>
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item label="最大上下文 Token" name="maxContextTokens" style={{ marginBottom: 0 }}>
+                <InputNumber min={1} step={1024} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item label="思考深度 (Depth)" name="thinkingDepth" style={{ marginBottom: 0 }}>
+                <Select
+                  style={{ width: '100%' }}
+                  options={effortLevelOptions.map((opt) => ({ value: opt.id, label: opt.label }))}
+                />
+              </Form.Item>
+            </div>
             {supportsCompactionTurnThreshold && (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                  gap: '16px'
+                }}
+              >
               <Form.Item
                 label="自动压缩轮数"
                 name="compactionTurnThreshold"
-                tooltip="控制用户对话轮数超过多少后，后端自动压缩早期上下文。默认 20；数值越大，保留原文越久，但 Token 成本更高。"
+                tooltip="MuseAI 内部上下文管理参数，OpenAI 接口和 Anthropic 接口都会使用。控制用户对话轮数超过多少后，后端自动压缩早期上下文；数值越大，保留原文越久，但 Token 成本更高。"
                 style={{ marginBottom: 0 }}
               >
                 <InputNumber min={2} max={200} step={1} style={{ width: '100%' }} />
               </Form.Item>
+                <Form.Item
+                  label="频率惩罚"
+                  name="frequencyPenalty"
+                  tooltip="对应 OpenAI 的 frequency_penalty，适用于 OpenAI-compatible 接口，用来降低重复词句的概率。Anthropic 接口不支持，MuseAI 不会向 Anthropic 请求发送此参数。"
+                  style={{ marginBottom: 0 }}
+                >
+                  <InputNumber min={-2} max={2} step={0.1} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item
+                  label="存在惩罚"
+                  name="presencePenalty"
+                  tooltip="对应 OpenAI 的 presence_penalty，适用于 OpenAI-compatible 接口，用来鼓励模型引入新内容、减少反复围绕旧话题。Anthropic 接口不支持，MuseAI 不会向 Anthropic 请求发送此参数。"
+                  style={{ marginBottom: 0 }}
+                >
+                  <InputNumber min={-2} max={2} step={0.1} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item
+                  label="Top P"
+                  name="topP"
+                  tooltip="对应 OpenAI 的 top_p，适用于 OpenAI-compatible 接口，用来控制候选词概率范围。Anthropic 部分模型曾支持，但新 Opus 模型不支持非默认采样参数；MuseAI 不会向 Anthropic 请求发送此参数。"
+                  style={{ marginBottom: 0 }}
+                >
+                  <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
+                </Form.Item>
+              </div>
             )}
           </div>
         )}

@@ -98,6 +98,9 @@ describe('Settings store default exports', () => {
     expect(defaultPartnerChatPrompt).toContain('每轮推进关系或情境');
     expect(defaultAgentConfigs.partnerChat.maxOutputTokens).toBe(1024);
     expect(defaultAgentConfigs.partnerChat.compactionTurnThreshold).toBe(20);
+    expect(defaultAgentConfigs.partnerChat.frequencyPenalty).toBe(0.3);
+    expect(defaultAgentConfigs.partnerChat.presencePenalty).toBe(0.2);
+    expect(defaultAgentConfigs.partnerChat.topP).toBe(0.9);
   });
 
   it('resetPartnerChatPrompt should restore repeat-resistant default prompt', () => {
@@ -129,6 +132,9 @@ describe('Settings store default exports', () => {
       maxOutputTokens: 4096,
       maxContextTokens: 128000,
       compactionTurnThreshold: 20,
+      frequencyPenalty: 0.3,
+      presencePenalty: 0.2,
+      topP: 0.9,
       thinkingDepth: 'off',
     });
     expect(agentConfigs.storyDynamicAgent).toEqual({
@@ -136,11 +142,14 @@ describe('Settings store default exports', () => {
       maxOutputTokens: 4096,
       maxContextTokens: 128000,
       compactionTurnThreshold: 20,
+      frequencyPenalty: 0.3,
+      presencePenalty: 0.2,
+      topP: 0.9,
       thinkingDepth: 'off',
     });
   });
 
-  it('fills compaction turn threshold only for chat and story agents', () => {
+  it('fills compaction and sampling controls only for chat and story agents', () => {
     const normalized = applyCompactionTurnThresholdDefaults({
       partnerChat: { temperature: 0.4 },
       storyAgent: { compactionTurnThreshold: 32 },
@@ -152,10 +161,20 @@ describe('Settings store default exports', () => {
     expect(defaultAgentConfigs.storyAgent.compactionTurnThreshold).toBe(20);
     expect(defaultAgentConfigs.storyDynamicAgent.compactionTurnThreshold).toBe(20);
     expect(defaultAgentConfigs.writer.compactionTurnThreshold).toBeUndefined();
-    expect(normalized.partnerChat).toEqual({ temperature: 0.4, compactionTurnThreshold: 20 });
+    expect(defaultAgentConfigs.writer.frequencyPenalty).toBeUndefined();
+    expect(normalized.partnerChat).toEqual({
+      temperature: 0.4,
+      compactionTurnThreshold: 20,
+      frequencyPenalty: 0.3,
+      presencePenalty: 0.2,
+      topP: 0.9,
+    });
     expect(normalized.storyAgent.compactionTurnThreshold).toBe(32);
+    expect(normalized.storyAgent.frequencyPenalty).toBe(0.3);
     expect(normalized.storyDynamicAgent.compactionTurnThreshold).toBe(20);
+    expect(normalized.storyDynamicAgent.topP).toBe(0.9);
     expect(normalized.writer.compactionTurnThreshold).toBeUndefined();
+    expect(normalized.writer.frequencyPenalty).toBeUndefined();
   });
 
   it('should keep background extraction defaults separate for world book and character card', () => {
