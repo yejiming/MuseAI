@@ -275,33 +275,68 @@ export function listenStream(
     };
   }
 
-  // Mobile SSE
+  // Mobile SSE via fetch (allows custom headers for secure token transmission)
   const token = getMobileToken();
-  const url = `${window.location.origin}/api/mobile/stream?runId=${encodeURIComponent(runId)}&token=${encodeURIComponent(token)}`;
-  const eventSource = new EventSource(url);
+  const url = `${window.location.origin}/api/mobile/stream?runId=${encodeURIComponent(runId)}`;
 
-  eventSource.onmessage = (event) => {
+  let aborted = false;
+  const abortController = new AbortController();
+
+  (async () => {
     try {
-      const payload = JSON.parse(event.data);
-      onEvent({ payload });
-      if (payload.eventType === 'done') {
-        onComplete?.();
-        eventSource.close();
-      } else if (payload.eventType === 'error') {
-        onError?.(payload.message || 'Stream error');
-        eventSource.close();
+      const response = await fetch(url, {
+        headers: {
+          'X-Mobile-Token': token,
+          'Accept': 'text/event-stream',
+        },
+        signal: abortController.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (reader && !aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const payload = JSON.parse(line.slice(6));
+              onEvent({ payload });
+              if (payload.eventType === 'done') {
+                onComplete?.();
+                aborted = true;
+                break;
+              } else if (payload.eventType === 'error') {
+                onError?.(payload.message || 'Stream error');
+                aborted = true;
+                break;
+              }
+            } catch (err) {
+              onError?.(err);
+            }
+          }
+        }
       }
     } catch (err) {
-      onError?.(err);
+      if (!aborted) {
+        onError?.(err);
+      }
     }
-  };
-
-  eventSource.onerror = (err) => {
-    onError?.(err);
-    eventSource.close();
-  };
+  })();
 
   return () => {
-    eventSource.close();
+    aborted = true;
+    abortController.abort();
   };
 }
