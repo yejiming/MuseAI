@@ -377,7 +377,7 @@ const useSettingsView = () => {
   const [isAddModalVisible, setIsAddModalVisible] = React.useState(false);
   const [isTesting, setIsTesting] = React.useState(false);
   const [testResult, setTestResult] = React.useState<{ success: boolean; msg: string } | null>(null);
-  const [mobileStatus, setMobileStatus] = React.useState<{ isRunning: boolean; url: string | null; error: string | null } | null>(null);
+  const [mobileStatus, setMobileStatus] = React.useState<{ isRunning: boolean; url: string | null; token: string | null; error: string | null } | null>(null);
 
   React.useEffect(() => {
     invoke('get_mobile_service_status')
@@ -737,6 +737,18 @@ const useSettingsView = () => {
                             {mobileStatus.url}
                           </Text>
                         </div>
+                        {mobileStatus.token && (
+                          <div style={{ marginTop: 6 }}>
+                            <Text style={{ fontSize: 12, color: '#8c857b', display: 'block', lineHeight: 1.5 }}>
+                              访问令牌（已包含在上方网址中，手机首次打开后会自动保存；如需手动配置可复制此令牌）：
+                            </Text>
+                            <div style={{ marginTop: 4 }}>
+                              <Text copyable style={{ fontSize: 13, color: '#8c857b', fontFamily: 'monospace' }}>
+                                {mobileStatus.token}
+                              </Text>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                     {mobileStatus.error && (
