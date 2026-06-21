@@ -1,6 +1,13 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MessageOutlined, FireOutlined, HeartOutlined, WifiOutlined } from '@ant-design/icons';
+import { appInvoke, clearMobileToken, getMobileToken, setMobileToken } from '../utils/runtime';
+import { usePartnerChatStore } from '../stores/usePartnerChatStore';
+import { usePartnerStore } from '../stores/usePartnerStore';
+import { useStoryStore } from '../stores/useStoryStore';
+import type { AgentSessionSummary } from '../stores/useAgentStore';
+
+type ConnectionStatus = 'waiting' | 'verifying' | 'verified' | 'invalid';
 
 const MOBILE_HOME_ENTRY_BUTTON_STYLE: React.CSSProperties = {
   backgroundColor: '#fff',
@@ -30,6 +37,65 @@ const MOBILE_HOME_ENTRY_ICON_STYLE: React.CSSProperties = {
 
 const MobileHome: React.FC = () => {
   const navigate = useNavigate();
+  const [tokenInput, setTokenInput] = useState('');
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('waiting');
+  const isVerified = connectionStatus === 'verified';
+  const isVerifying = connectionStatus === 'verifying';
+
+  const verifyToken = useCallback(async (token: string) => {
+    const normalizedToken = token.trim();
+    if (!normalizedToken) {
+      setConnectionStatus('waiting');
+      return;
+    }
+
+    setConnectionStatus('verifying');
+    setMobileToken(normalizedToken);
+
+    try {
+      await Promise.all([
+        usePartnerStore.persist.rehydrate(),
+        usePartnerChatStore.persist.rehydrate(),
+        useStoryStore.persist.rehydrate(),
+      ]);
+      const [chatSessions, storySessions] = await Promise.all([
+        appInvoke<AgentSessionSummary[]>('list_agent_sessions', {
+          prefix: 'partner-session-',
+        }),
+        appInvoke<AgentSessionSummary[]>('list_agent_sessions', {
+          prefix: 'story-session-',
+          sessionKind: 'story',
+        }),
+      ]);
+      usePartnerChatStore.getState().setSessions(chatSessions);
+      useStoryStore.getState().setSessions(storySessions);
+      setConnectionStatus('verified');
+    } catch {
+      clearMobileToken();
+      setConnectionStatus('invalid');
+    }
+  }, []);
+
+  useEffect(() => {
+    const existingToken = getMobileToken();
+    if (existingToken) {
+      setTokenInput(existingToken);
+      void verifyToken(existingToken);
+    }
+  }, [verifyToken]);
+
+  const statusText = {
+    waiting: '连接状态：等待验证',
+    verifying: '连接状态：正在验证…',
+    verified: '连接状态：已验证',
+    invalid: '连接状态：验证失败',
+  }[connectionStatus];
+
+  const entryButtonStyle: React.CSSProperties = {
+    ...MOBILE_HOME_ENTRY_BUTTON_STYLE,
+    cursor: isVerified ? 'pointer' : 'not-allowed',
+    opacity: isVerified ? 1 : 0.52,
+  };
 
   return (
     <div style={{
@@ -49,12 +115,56 @@ const MobileHome: React.FC = () => {
         border: '1px solid rgba(217, 119, 87, 0.05)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
-          <WifiOutlined style={{ fontSize: '20px', color: '#d97757', marginRight: '8px' }} />
-          <span style={{ fontSize: '15px', fontWeight: 600, color: '#33312e' }}>连接状态：已连接</span>
+          <WifiOutlined style={{ fontSize: '20px', color: isVerified ? '#52c41a' : '#d97757', marginRight: '8px' }} />
+          <output aria-live="polite" style={{ fontSize: '15px', fontWeight: 600, color: '#33312e' }}>
+            {statusText}
+          </output>
         </div>
         <p style={{ fontSize: '13px', color: '#8c8880', margin: 0, lineHeight: 1.5 }}>
-          您已通过局域网成功访问 MuseAI 写作助手。您可以在手机上随时与伴侣畅聊或继续未完的故事冒险，所有更改将实时同步回电脑端。
+          {isVerified
+            ? '访问令牌验证成功。您可以在手机上与伴侣畅聊或继续故事冒险，所有更改将同步回电脑端。'
+            : '请输入电脑端设置页面显示的访问令牌，验证通过后即可使用移动端功能。'}
         </p>
+        {!isVerified && (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void verifyToken(tokenInput);
+            }}
+            style={{ marginTop: '16px' }}
+          >
+            <label htmlFor="mobile-access-token" style={{ display: 'block', marginBottom: '6px', fontSize: '13px', fontWeight: 600, color: '#5c5751' }}>
+              访问令牌
+            </label>
+            <input
+              id="mobile-access-token"
+              type="password"
+              value={tokenInput}
+              onChange={(event) => {
+                setTokenInput(event.target.value);
+                if (connectionStatus === 'invalid') {
+                  setConnectionStatus('waiting');
+                }
+              }}
+              disabled={isVerifying}
+              autoComplete="off"
+              placeholder="粘贴访问令牌"
+              className={`mobile-token-input${connectionStatus === 'invalid' ? ' mobile-token-input--invalid' : ''}`}
+            />
+            {connectionStatus === 'invalid' && (
+              <p role="alert" style={{ margin: '7px 0 0', color: '#b33a3a', fontSize: '12px' }}>
+                访问令牌无效，请检查后重试
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={isVerifying || !tokenInput.trim()}
+              className="mobile-token-submit"
+            >
+              {isVerifying ? '正在验证…' : '验证并连接'}
+            </button>
+          </form>
+        )}
       </div>
 
       {/* Navigation Cards */}
@@ -64,8 +174,9 @@ const MobileHome: React.FC = () => {
         {/* Chat Entry */}
         <button
           type="button"
+          disabled={!isVerified}
           onClick={() => navigate('/chat')}
-          style={MOBILE_HOME_ENTRY_BUTTON_STYLE}
+          style={entryButtonStyle}
         >
           <div style={MOBILE_HOME_ENTRY_ICON_STYLE}>
             <MessageOutlined style={{ fontSize: '22px', color: '#d97757' }} />
@@ -79,8 +190,9 @@ const MobileHome: React.FC = () => {
         {/* Story Entry */}
         <button
           type="button"
+          disabled={!isVerified}
           onClick={() => navigate('/story')}
-          style={MOBILE_HOME_ENTRY_BUTTON_STYLE}
+          style={entryButtonStyle}
         >
           <div style={MOBILE_HOME_ENTRY_ICON_STYLE}>
             <FireOutlined style={{ fontSize: '22px', color: '#d97757' }} />
@@ -94,8 +206,9 @@ const MobileHome: React.FC = () => {
         {/* Bond Entry */}
         <button
           type="button"
+          disabled={!isVerified}
           onClick={() => navigate('/bond')}
-          style={MOBILE_HOME_ENTRY_BUTTON_STYLE}
+          style={entryButtonStyle}
         >
           <div style={MOBILE_HOME_ENTRY_ICON_STYLE}>
             <HeartOutlined style={{ fontSize: '22px', color: '#d97757' }} />

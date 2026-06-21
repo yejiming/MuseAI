@@ -1,3 +1,6 @@
+use crate::agent::sessions::{
+    list_agent_sessions_in_dir, load_agent_session_from_dir, save_agent_session_in_dir,
+};
 use crate::models::{ChatStreamEvent, ChatStreamRequest};
 use crate::utils::resolve_document_dir;
 use crate::ActiveStreams;
@@ -430,77 +433,30 @@ async fn list_sessions<R: Runtime>(
     State(app): State<AppHandle<R>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Response, (StatusCode, String)> {
-    let prefix = params.get("prefix").cloned();
-    if let Some(ref p) = prefix {
-        if p != "partner-session-" && p != "story-session-" {
-            return Err((StatusCode::BAD_REQUEST, "不合法的会话前缀".to_string()));
-        }
+    let prefix = params
+        .get("prefix")
+        .map(String::as_str)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "缺少会话前缀".to_string()))?;
+    if prefix != "partner-session-" && prefix != "story-session-" {
+        return Err((StatusCode::BAD_REQUEST, "不合法的会话前缀".to_string()));
     }
-
-    // Adapt to call generic or inner list_agent_sessions.
-    // list_agent_sessions requires AppHandle<R> (wait, list_agent_sessions was not generic, it takes AppHandle.
-    // In Tauri, tauri::AppHandle is alias for AppHandle<Wry> unless generic.
-    // Wait, let's see: in sessions.rs, `list_agent_sessions` has the signature `list_agent_sessions(app: AppHandle)`.
-    // Does it take R: Runtime? Let's check `sessions.rs` around line 15: `pub fn list_agent_sessions(app: AppHandle, prefix: Option<String>)`.
-    // If sessions.rs takes `AppHandle` (which is `AppHandle<Wry>`), then we can't easily pass `AppHandle<R>` to it unless we either
-    // cast it, or make those functions generic as well.
-    // Wait! Can we get `AppHandle<Wry>` from `AppHandle<R>`?
-    // No, but wait, `list_agent_sessions` only needs the document directory from `app.path().document_dir()`.
-    // If we just extract the directory in the handler and write equivalent logic, or if we map the handle?
-    // Wait, let's look at `list_agent_sessions` implementation in sessions.rs. It only uses `agent_sessions_dir(&app)`.
-    // Let's check: if we just implement the session operations in `mobile_server.rs` by directly reading/writing files under `~/Documents/MuseAI/agent-sessions/`,
-    // it will be completely generic, require ZERO Tauri runtime casts, and be 100% robust and fast!
-    // Yes! That's incredibly elegant. We don't even need to call `list_agent_sessions`, `load_agent_session`, `save_agent_session`, `delete_agent_session` from the command modules!
-    // We can just implement the directory reading and JSON loading/saving directly in `mobile_server.rs`!
-    // Let's write the direct file operations for sessions:
+    let session_kind = if prefix == "story-session-" {
+        let requested = params
+            .get("sessionKind")
+            .map(String::as_str)
+            .unwrap_or("story");
+        if requested != "story" {
+            return Err((StatusCode::BAD_REQUEST, "不合法的会话类型".to_string()));
+        }
+        Some("story")
+    } else {
+        None
+    };
     let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let dir = doc_dir.join("MuseAI").join("agent-sessions");
-    fs::create_dir_all(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let mut summaries = Vec::new();
-    for entry in
-        fs::read_dir(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        let path = entry.path();
-        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
-            continue;
-        }
-        let text = match fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        let record = match serde_json::from_str::<crate::models::AgentSessionRecord>(&text) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        if let Some(ref p) = prefix {
-            if !record.id.starts_with(p) {
-                continue;
-            }
-        }
-        if (record.id.starts_with("partner-session-") || record.id.starts_with("story-session-"))
-            && record.session_kind.as_deref() != Some("bookTravel")
-            && record.is_archived != Some(true)
-        {
-            continue;
-        }
-        summaries.push(crate::models::AgentSessionSummary {
-            id: record.id,
-            title: record.title,
-            saved_at: record.saved_at,
-            session_kind: record.session_kind,
-            character_card_id: record.character_card_id,
-            character_card_ids: record.character_card_ids,
-            selected_world_book_id: record.selected_world_book_id,
-            dynamic_role_loading_enabled: record.dynamic_role_loading_enabled,
-        });
-    }
-
-    summaries.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
+    let summaries = list_agent_sessions_in_dir(&dir, Some(prefix), session_kind)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let body = serde_json::to_string(&summaries)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -527,11 +483,15 @@ async fn load_session<R: Runtime>(
 
     let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let path = doc_dir
-        .join("MuseAI")
-        .join("agent-sessions")
-        .join(format!("{}.json", id));
-    let text = fs::read_to_string(path).map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+    let dir = doc_dir.join("MuseAI").join("agent-sessions");
+    let record = load_agent_session_from_dir(&dir, &id).map_err(|e| (StatusCode::NOT_FOUND, e))?;
+    if id.starts_with("story-session-")
+        && !matches!(record.session_kind.as_deref(), None | Some("story"))
+    {
+        return Err((StatusCode::FORBIDDEN, "禁止访问穿书会话".to_string()));
+    }
+    let text = serde_json::to_string(&record)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Response::builder()
         .header(header::CONTENT_TYPE, "application/json")
@@ -556,28 +516,23 @@ async fn save_session<R: Runtime>(
             "禁止保存非伴侣或故事会话".to_string(),
         ));
     }
+    if record.id.starts_with("story-session-") {
+        match record.session_kind.as_deref() {
+            None => record.session_kind = Some("story".to_string()),
+            Some("story") => {}
+            Some(_) => {
+                return Err((StatusCode::FORBIDDEN, "禁止保存穿书会话".to_string()));
+            }
+        }
+    } else if record.session_kind.is_some() {
+        return Err((StatusCode::BAD_REQUEST, "聊天会话不应包含会话类型".to_string()));
+    }
 
     let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let dir = doc_dir.join("MuseAI").join("agent-sessions");
-    fs::create_dir_all(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    record.saved_at = current_timestamp_millis();
-    let path = dir.join(format!("{}.json", record.id));
-    let text = serde_json::to_string_pretty(&record)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    fs::write(path, text).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let summary = crate::models::AgentSessionSummary {
-        id: record.id.clone(),
-        title: record.title.clone(),
-        saved_at: record.saved_at,
-        session_kind: record.session_kind,
-        character_card_id: record.character_card_id,
-        character_card_ids: record.character_card_ids,
-        selected_world_book_id: record.selected_world_book_id,
-        dynamic_role_loading_enabled: record.dynamic_role_loading_enabled,
-    };
+    let summary = save_agent_session_in_dir(&dir, record)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     let resp_body = serde_json::to_string(&summary)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -1978,6 +1933,44 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_mobile_save_rejects_book_travel_session() {
+        let app = create_mock_app();
+        let router = create_mobile_router(app);
+        let token = get_mobile_access_token();
+        let body = json!({
+            "id": "story-session-book-travel",
+            "title": "穿书记录",
+            "savedAt": 0,
+            "sessionKind": "bookTravel",
+            "messages": [],
+            "selectedReferenceFiles": [],
+            "selectedOutlineFile": null,
+            "todos": [],
+            "contextCompaction": null,
+            "isArchived": false,
+            "characterCardId": null,
+            "characterCardIds": [],
+            "selectedWorldBookId": null,
+            "dynamicRoleLoadingEnabled": false,
+            "bookTravelState": {}
+        });
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/mobile/sessions")
+                    .header("X-Mobile-Token", token)
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

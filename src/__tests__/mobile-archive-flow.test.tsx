@@ -156,6 +156,7 @@ describe('mobile archive flow', () => {
             selectedReferenceFiles: [],
             todos: [],
             isArchived: false,
+            sessionKind: 'story',
             characterCardIds: [characterCard.id, secondCharacterCard.id],
             contextCompaction: compactedContext,
           }),
@@ -175,6 +176,85 @@ describe('mobile archive flow', () => {
     const analyzeIndex = appInvokeMock.mock.calls.findIndex(([command]) => command === 'analyze_character_memory');
     expect(saveIndex).toBeLessThan(analyzeIndex);
     expect(await screen.findByDisplayValue('归档标题')).toBeInTheDocument();
+  });
+
+  it('returns mobile chat to role and world-book selection when creating a new session', async () => {
+    usePartnerChatStore.setState({
+      messages: [{ id: 'm1', role: 'user', content: '你好', tools: [] }],
+      selectedWorldBookId: 'world-1',
+      selectedCharacterCardId: characterCard.id,
+      sessionId: 'partner-session-existing',
+      sessionTitle: '旧聊天',
+    });
+
+    render(<MobileChat />);
+    fireEvent.click(screen.getByRole('button', { name: /新建/ }));
+
+    expect(await screen.findByText('请选择要交谈的智能伴侣')).toBeInTheDocument();
+    expect(usePartnerChatStore.getState().selectedCharacterCardId).toBeNull();
+    expect(usePartnerChatStore.getState().selectedWorldBookId).toBeNull();
+  });
+
+  it('requests complete chat history and story-only adventure history', async () => {
+    usePartnerChatStore.setState({
+      selectedCharacterCardId: null,
+      selectedWorldBookId: null,
+      sessions: [],
+    });
+    useStoryStore.setState({
+      messages: [],
+      sessions: [],
+    });
+
+    render(
+      <>
+        <MobileChat />
+        <MobileStory />
+      </>,
+    );
+
+    await waitFor(() => {
+      expect(appInvokeMock).toHaveBeenCalledWith('list_agent_sessions', {
+        prefix: 'partner-session-',
+      });
+      expect(appInvokeMock).toHaveBeenCalledWith('list_agent_sessions', {
+        prefix: 'story-session-',
+        sessionKind: 'story',
+      });
+    });
+  });
+
+  it('does not save sessions that contain no user messages', async () => {
+    usePartnerChatStore.setState({
+      messages: [{ id: 'm1', role: 'agent', content: '', tools: [] }],
+      selectedCharacterCardId: characterCard.id,
+      sessionId: 'partner-session-placeholder',
+      isSessionArchived: false,
+    });
+
+    const { unmount } = render(<MobileChat />);
+    fireEvent.click(screen.getByText('封存记忆并归档会话'));
+
+    await waitFor(() => {
+      expect(appInvokeMock).not.toHaveBeenCalledWith('save_agent_session', expect.anything());
+    });
+    unmount();
+
+    appInvokeMock.mockClear();
+    useStoryStore.setState({
+      messages: [{ id: 'm2', role: 'agent', content: '', tools: [] }],
+      selectedCharacterCardIds: [characterCard.id],
+      sessionId: 'story-session-placeholder',
+      isSessionArchived: false,
+    });
+
+    render(<MobileStory />);
+    fireEvent.click(screen.getByText('提炼记忆并锁定存档'));
+    fireEvent.click(await screen.findByText('开始分析封存'));
+
+    await waitFor(() => {
+      expect(appInvokeMock).not.toHaveBeenCalledWith('save_agent_session', expect.anything());
+    });
   });
 
   it('passes mobile chat context compaction back into the next stream request', async () => {

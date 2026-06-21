@@ -196,14 +196,17 @@ const useMobileStoryView = () => {
 
   // Load session list on mount
   useEffect(() => {
-    appInvoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'story-session-' })
+    appInvoke<AgentSessionSummary[]>('list_agent_sessions', {
+      prefix: 'story-session-',
+      sessionKind: 'story',
+    })
       .then((list) => setSessions(list))
       .catch((e) => console.error('加载故事列表失败:', e));
   }, [setSessions]);
 
   const saveCurrentSession = async (customMessages?: Message[], title = sessionTitle) => {
     const list = customMessages || messagesRef.current;
-    if (list.length === 0) return false;
+    if (!list.some((item) => item.role === 'user')) return false;
     const currentSessionId = ensureSessionId(sessionId, 'story-session');
     if (currentSessionId !== sessionId) {
       setSessionId(currentSessionId);
@@ -214,6 +217,7 @@ const useMobileStoryView = () => {
         title,
         messages: list,
         savedAt: Date.now(),
+        sessionKind: 'story',
         selectedReferenceFiles: [],
         selectedOutlineFile: null,
         todos: [],
@@ -226,7 +230,10 @@ const useMobileStoryView = () => {
       await appInvoke<AgentSessionSummary>('save_agent_session', { session: record });
       
       // Update session summary list
-      const listRes = await appInvoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'story-session-' });
+      const listRes = await appInvoke<AgentSessionSummary[]>('list_agent_sessions', {
+        prefix: 'story-session-',
+        sessionKind: 'story',
+      });
       setSessions(listRes);
       return true;
     } catch (e) {
@@ -311,7 +318,10 @@ const useMobileStoryView = () => {
           if (sessionId === id) {
             createNewSession();
           }
-          const listRes = await appInvoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'story-session-' });
+          const listRes = await appInvoke<AgentSessionSummary[]>('list_agent_sessions', {
+            prefix: 'story-session-',
+            sessionKind: 'story',
+          });
           setSessions(listRes);
         } catch (e) {
           message.error('删除故事会话失败');
@@ -682,7 +692,10 @@ const useMobileStoryView = () => {
       message.success('记忆封存成功！故事已锁定归档。');
 
       // Reload sessions
-      const listRes = await appInvoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'story-session-' });
+      const listRes = await appInvoke<AgentSessionSummary[]>('list_agent_sessions', {
+        prefix: 'story-session-',
+        sessionKind: 'story',
+      });
       setSessions(listRes);
 
       // Reload partner store

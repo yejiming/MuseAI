@@ -61,6 +61,26 @@ export const getMobileToken = (): string => {
   return localStorage.getItem('mobile_token') || '';
 };
 
+export const setMobileToken = (token: string): void => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('mobile_token', token);
+  }
+};
+
+export const clearMobileToken = (): void => {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('mobile_token');
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('token')) {
+      params.delete('token');
+      const query = params.toString();
+      const pathname = window.location.pathname || '/';
+      const hash = window.location.hash || '';
+      window.history.replaceState(null, '', `${pathname}${query ? `?${query}` : ''}${hash}`);
+    }
+  }
+};
+
 // Auto-extract and save token if present in URL
 if (typeof window !== 'undefined') {
   const token = new URLSearchParams(window.location.search).get('token');
@@ -93,8 +113,11 @@ export async function appInvoke<T>(cmd: string, args?: any): Promise<T> {
       return res.json() as Promise<T>;
     }
     case 'list_agent_sessions': {
-      const prefix = args?.prefix ? `?prefix=${encodeURIComponent(args.prefix)}` : '';
-      const res = await fetch(getUrl(`/api/mobile/sessions${prefix}`), { headers, cache: 'no-store' });
+      const params = new URLSearchParams();
+      if (args?.prefix) params.set('prefix', args.prefix);
+      if (args?.sessionKind) params.set('sessionKind', args.sessionKind);
+      const query = params.toString();
+      const res = await fetch(getUrl(`/api/mobile/sessions${query ? `?${query}` : ''}`), { headers, cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       return res.json() as Promise<T>;
     }

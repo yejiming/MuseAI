@@ -179,7 +179,7 @@ const useMobileChatView = () => {
 
   const saveCurrentSession = async (customMessages?: Message[], title = sessionTitle) => {
     const list = customMessages || messagesRef.current;
-    if (list.length === 0) return false;
+    if (!list.some((item) => item.role === 'user')) return false;
     const currentSessionId = ensureSessionId(sessionId, 'partner-session');
     if (currentSessionId !== sessionId) {
       setSessionId(currentSessionId);
@@ -292,6 +292,12 @@ const useMobileChatView = () => {
         }
       }
     });
+  };
+
+  const handleCreateNewSession = () => {
+    createNewSession();
+    setSelectedCharacterCardId(null);
+    setSelectedWorldBookId(null);
   };
 
   const handleSend = async () => {
@@ -598,7 +604,7 @@ const useMobileChatView = () => {
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          onClick={createNewSession}
+          onClick={handleCreateNewSession}
           style={{ backgroundColor: '#d97757', borderColor: '#d97757', flexShrink: 0 }}
         >
           新建

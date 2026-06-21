@@ -159,7 +159,10 @@ const MobileBond: React.FC = () => {
       }
 
       try {
-        const summaries = await appInvoke<AgentSessionSummary[]>('list_agent_sessions', { prefix: 'story-session-' });
+        const summaries = await appInvoke<AgentSessionSummary[]>('list_agent_sessions', {
+          prefix: 'story-session-',
+          sessionKind: 'story',
+        });
         patchUiState({ adventures: summaries });
       } catch (err) {
         console.error('加载冒险足迹失败:', err);

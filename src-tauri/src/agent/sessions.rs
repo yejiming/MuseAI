@@ -99,6 +99,51 @@ pub fn list_agent_sessions(
     session_kind: Option<String>,
 ) -> Result<Vec<AgentSessionSummary>, String> {
     let dir = agent_sessions_dir(&app)?;
+    list_agent_sessions_in_dir(&dir, prefix.as_deref(), session_kind.as_deref())
+}
+
+pub(crate) fn session_matches_filters(
+    record: &AgentSessionRecord,
+    prefix: Option<&str>,
+    session_kind: Option<&str>,
+) -> bool {
+    if let Some(prefix) = prefix {
+        if !record.id.starts_with(prefix) {
+            return false;
+        }
+    }
+    if let Some(session_kind) = session_kind {
+        let record_kind = record.session_kind.as_deref();
+        let matches = if session_kind == "story" {
+            record_kind == Some("story") || record_kind.is_none()
+        } else {
+            record_kind == Some(session_kind)
+        };
+        if !matches {
+            return false;
+        }
+    }
+    true
+}
+
+fn session_summary(record: &AgentSessionRecord) -> AgentSessionSummary {
+    AgentSessionSummary {
+        id: record.id.clone(),
+        title: record.title.clone(),
+        saved_at: record.saved_at,
+        session_kind: record.session_kind.clone(),
+        character_card_id: record.character_card_id.clone(),
+        character_card_ids: record.character_card_ids.clone(),
+        selected_world_book_id: record.selected_world_book_id.clone(),
+        dynamic_role_loading_enabled: record.dynamic_role_loading_enabled,
+    }
+}
+
+pub(crate) fn list_agent_sessions_in_dir(
+    dir: &Path,
+    prefix: Option<&str>,
+    session_kind: Option<&str>,
+) -> Result<Vec<AgentSessionSummary>, String> {
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     let mut summaries = Vec::new();
@@ -116,64 +161,52 @@ pub fn list_agent_sessions(
         let Ok(record) = serde_json::from_str::<AgentSessionRecord>(&text) else {
             continue;
         };
-        if let Some(ref p) = prefix {
-            if !record.id.starts_with(p) {
-                continue;
-            }
+        if !session_matches_filters(&record, prefix, session_kind) {
+            continue;
         }
-        if let Some(ref sk) = session_kind {
-            let record_sk = record.session_kind.as_deref();
-            let matches = if sk == "story" {
-                record_sk == Some("story") || record_sk.is_none()
-            } else {
-                record_sk == Some(sk)
-            };
-            if !matches {
-                continue;
-            }
-        }
-        summaries.push(AgentSessionSummary {
-            id: record.id,
-            title: record.title,
-            saved_at: record.saved_at,
-            session_kind: record.session_kind,
-            character_card_id: record.character_card_id,
-            character_card_ids: record.character_card_ids,
-            selected_world_book_id: record.selected_world_book_id,
-            dynamic_role_loading_enabled: record.dynamic_role_loading_enabled,
-        });
+        summaries.push(session_summary(&record));
     }
 
     summaries.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
     Ok(summaries)
 }
+
 #[tauri::command]
 pub fn load_agent_session(app: AppHandle, id: String) -> Result<AgentSessionRecord, String> {
-    let path = agent_session_path(&app, &id)?;
+    let dir = agent_sessions_dir(&app)?;
+    load_agent_session_from_dir(&dir, &id)
+}
+
+pub(crate) fn load_agent_session_from_dir(
+    dir: &Path,
+    id: &str,
+) -> Result<AgentSessionRecord, String> {
+    let safe_id = sanitize_session_id(id)?;
+    let path = dir.join(format!("{}.json", safe_id));
     let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
+
 #[tauri::command]
 pub fn save_agent_session(
     app: AppHandle,
-    mut session: AgentSessionRecord,
+    session: AgentSessionRecord,
 ) -> Result<AgentSessionSummary, String> {
     let dir = agent_sessions_dir(&app)?;
+    save_agent_session_in_dir(&dir, session)
+}
+
+pub(crate) fn save_agent_session_in_dir(
+    dir: &Path,
+    mut session: AgentSessionRecord,
+) -> Result<AgentSessionSummary, String> {
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     session.saved_at = now_millis()?;
-    let path = agent_session_path(&app, &session.id)?;
+    let safe_id = sanitize_session_id(&session.id)?;
+    let path = dir.join(format!("{}.json", safe_id));
     let text = serde_json::to_string_pretty(&session).map_err(|e| e.to_string())?;
     fs::write(path, text).map_err(|e| e.to_string())?;
-    Ok(AgentSessionSummary {
-        id: session.id,
-        title: session.title,
-        saved_at: session.saved_at,
-        session_kind: session.session_kind,
-        character_card_id: session.character_card_id,
-        character_card_ids: session.character_card_ids,
-        selected_world_book_id: session.selected_world_book_id,
-        dynamic_role_loading_enabled: session.dynamic_role_loading_enabled,
-    })
+    Ok(session_summary(&session))
 }
 #[tauri::command]
 pub async fn summarize_text(request: SummarizeRequest) -> Result<String, String> {
@@ -3267,11 +3300,11 @@ mod tests {
         format_reverse_outline_send_error, long_final_prompt, long_summary_prompt,
         parse_background_character_card_response, parse_background_stage_one_response,
         resolve_reverse_outline_sources, reverse_outline_char_count,
-        sanitize_reverse_outline_title, save_reverse_outline_for_root,
-        short_reverse_outline_prompt, ReverseOutlineSegment, ReverseOutlineSourceDoc,
-        ReverseOutlineSummaryBatch,
+        sanitize_reverse_outline_title, save_agent_session_in_dir, save_reverse_outline_for_root,
+        session_matches_filters, short_reverse_outline_prompt, ReverseOutlineSegment,
+        ReverseOutlineSourceDoc, ReverseOutlineSummaryBatch,
     };
-    use crate::models::{AnalyzeMemoryRequest, TestConnectionRequest};
+    use crate::models::{AgentSessionRecord, AnalyzeMemoryRequest, TestConnectionRequest};
     use serde_json::Value;
     use std::env;
     use std::fs;
@@ -3352,6 +3385,89 @@ mod tests {
             .expect("time should be after epoch")
             .as_millis();
         env::temp_dir().join(format!("museai_agent_log_test_{}_{}", millis, name))
+    }
+
+    fn session_record(
+        id: &str,
+        session_kind: Option<&str>,
+        is_archived: bool,
+    ) -> AgentSessionRecord {
+        AgentSessionRecord {
+            id: id.to_string(),
+            title: id.to_string(),
+            saved_at: 0,
+            session_kind: session_kind.map(str::to_string),
+            messages: Vec::new(),
+            selected_reference_files: Vec::new(),
+            selected_outline_file: None,
+            todos: Vec::new(),
+            context_compaction: None,
+            is_archived: Some(is_archived),
+            character_card_id: None,
+            character_card_ids: None,
+            selected_world_book_id: None,
+            dynamic_role_loading_enabled: None,
+            book_travel_state: None,
+        }
+    }
+
+    #[test]
+    fn session_filters_include_all_chat_and_only_normal_story_sessions() {
+        let chat = session_record("partner-session-chat", None, false);
+        let archived_chat = session_record("partner-session-archived", None, true);
+        let story = session_record("story-session-story", Some("story"), false);
+        let legacy_story = session_record("story-session-legacy", None, false);
+        let book_travel = session_record("story-session-book", Some("bookTravel"), true);
+
+        assert!(session_matches_filters(
+            &chat,
+            Some("partner-session-"),
+            None
+        ));
+        assert!(session_matches_filters(
+            &archived_chat,
+            Some("partner-session-"),
+            None
+        ));
+        assert!(session_matches_filters(
+            &story,
+            Some("story-session-"),
+            Some("story")
+        ));
+        assert!(session_matches_filters(
+            &legacy_story,
+            Some("story-session-"),
+            Some("story")
+        ));
+        assert!(!session_matches_filters(
+            &book_travel,
+            Some("story-session-"),
+            Some("story")
+        ));
+    }
+
+    #[test]
+    fn shared_session_save_updates_timestamp_and_persists_fields() {
+        let root = temp_museai_dir("shared_session_save");
+        let dir = root.join("agent-sessions");
+        let mut record = session_record("story-session-shared", Some("story"), false);
+        record.selected_world_book_id = Some("world-1".to_string());
+        record.character_card_ids = Some(vec!["card-1".to_string()]);
+
+        let summary = save_agent_session_in_dir(&dir, record).expect("save session");
+        let saved =
+            fs::read_to_string(dir.join("story-session-shared.json")).expect("read saved session");
+        let saved_record: AgentSessionRecord =
+            serde_json::from_str(&saved).expect("parse saved session");
+
+        assert!(summary.saved_at > 0);
+        assert_eq!(saved_record.saved_at, summary.saved_at);
+        assert_eq!(saved_record.session_kind.as_deref(), Some("story"));
+        assert_eq!(
+            saved_record.character_card_ids,
+            Some(vec!["card-1".to_string()])
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

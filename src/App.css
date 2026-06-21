@@ -92,6 +92,49 @@ body {
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.02);
 }
 
+.mobile-token-input {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid #ded8cf;
+  border-radius: 8px;
+  background-color: #faf9f5;
+  color: #33312e;
+  font-size: 14px;
+}
+
+.mobile-token-input:focus-visible {
+  outline: 2px solid #d97757;
+  outline-offset: 2px;
+}
+
+.mobile-token-input--invalid {
+  border-color: #d14343;
+}
+
+.mobile-token-submit {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 8px;
+  background-color: #d97757;
+  color: #fffaf7;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mobile-token-submit:focus-visible {
+  outline: 2px solid #8f402c;
+  outline-offset: 2px;
+}
+
+.mobile-token-submit:disabled {
+  background-color: #d8b8aa;
+  cursor: not-allowed;
+}
+
 @media (max-width: 767px) {
   html,
   body,

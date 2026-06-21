@@ -1,5 +1,12 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { isMobile, getMobileToken, appInvoke, listenStream } from '../utils/runtime';
+import {
+  appInvoke,
+  clearMobileToken,
+  getMobileToken,
+  isMobile,
+  listenStream,
+  setMobileToken,
+} from '../utils/runtime';
 
 describe('Runtime Utility & Bridge', () => {
   const originalFetch = globalThis.fetch;
@@ -72,6 +79,23 @@ describe('Runtime Utility & Bridge', () => {
       const token = getMobileToken();
       expect(token).toBe('local-token-val');
     });
+
+    it('sets and clears the stored token', () => {
+      setMobileToken('manual-token');
+      expect(localStorage.getItem('mobile_token')).toBe('manual-token');
+
+      clearMobileToken();
+      expect(localStorage.getItem('mobile_token')).toBeNull();
+    });
+
+    it('removes an invalid token from the current URL when clearing it', () => {
+      window.location.search = '?token=expired-token&source=mobile';
+      const replaceState = vi.spyOn(window.history, 'replaceState');
+
+      clearMobileToken();
+
+      expect(replaceState).toHaveBeenCalledWith(null, '', '/?source=mobile');
+    });
   });
 
   describe('appInvoke HTTP Adapter (Mobile mode)', () => {
@@ -113,6 +137,24 @@ describe('Runtime Utility & Bridge', () => {
           'X-Mobile-Token': 'secret-token',
         },
       });
+    });
+
+    it('adds the session kind filter when listing mobile story sessions', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => [],
+      });
+      globalThis.fetch = mockFetch;
+
+      await appInvoke<any>('list_agent_sessions', {
+        prefix: 'story-session-',
+        sessionKind: 'story',
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:3000/api/mobile/sessions?prefix=story-session-&sessionKind=story',
+        expect.anything(),
+      );
     });
 
     it('calls POST /api/mobile/sessions with raw session object for save_agent_session', async () => {
