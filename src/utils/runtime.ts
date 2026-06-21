@@ -173,14 +173,6 @@ export const clearMobileToken = (): void => {
   }
 };
 
-// Auto-extract and save token if present in URL
-if (typeof window !== 'undefined') {
-  const token = new URLSearchParams(window.location.search).get('token');
-  if (token) {
-    localStorage.setItem('mobile_token', token);
-  }
-}
-
 export async function appInvoke<T>(cmd: string, args?: any): Promise<T> {
   if (isTauriHost()) {
     return invoke<T>(cmd, args);
