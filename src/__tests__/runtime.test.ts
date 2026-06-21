@@ -66,18 +66,16 @@ describe('Runtime Utility & Bridge', () => {
   });
 
   describe('getMobileToken', () => {
-    it('extracts token from URL search parameters and stores it in localStorage', () => {
-      window.location.search = '?token=my-secret-token-123';
+    it('reads token from localStorage', () => {
+      localStorage.setItem('mobile_token', 'my-secret-token-123');
       const token = getMobileToken();
       expect(token).toBe('my-secret-token-123');
-      expect(localStorage.getItem('mobile_token')).toBe('my-secret-token-123');
     });
 
-    it('reads token from localStorage when not present in URL', () => {
-      window.location.search = '';
-      localStorage.setItem('mobile_token', 'local-token-val');
+    it('returns empty string when no token in localStorage', () => {
+      localStorage.removeItem('mobile_token');
       const token = getMobileToken();
-      expect(token).toBe('local-token-val');
+      expect(token).toBe('');
     });
 
     it('sets and clears the stored token', () => {
@@ -229,25 +227,34 @@ describe('Runtime Utility & Bridge', () => {
   });
 
   describe('listenStream (Mobile mode)', () => {
-    it('instantiates EventSource and registers message callbacks', () => {
+    it('uses fetch with token in header and processes SSE stream', async () => {
       localStorage.setItem('mobile_token', 'secret-token');
 
-      const mockClose = vi.fn();
-      let lastUrl = '';
-      let sseInstance: any = null;
+      let fetchUrl = '';
+      let fetchHeaders: any = {};
+      const mockReadableStream = {
+        getReader: () => ({
+          read: vi.fn()
+            .mockResolvedValueOnce({
+              done: false,
+              value: new TextEncoder().encode('data: {"runId":"run-abc","eventType":"delta","delta":"hello"}\n\n'),
+            })
+            .mockResolvedValueOnce({
+              done: false,
+              value: new TextEncoder().encode('data: {"runId":"run-abc","eventType":"done"}\n\n'),
+            })
+            .mockResolvedValueOnce({ done: true }),
+        }),
+      };
 
-      class MockEventSource {
-        url: string;
-        onmessage: ((e: any) => void) | null = null;
-        onerror: ((e: any) => void) | null = null;
-        close = mockClose;
-        constructor(url: string) {
-          this.url = url;
-          lastUrl = url;
-          sseInstance = this;
-        }
-      }
-      (globalThis as any).EventSource = MockEventSource;
+      globalThis.fetch = vi.fn((url: string, options: any) => {
+        fetchUrl = url;
+        fetchHeaders = options.headers;
+        return Promise.resolve({
+          ok: true,
+          body: mockReadableStream,
+        } as any);
+      });
 
       const onEvent = vi.fn();
       const onComplete = vi.fn();
@@ -255,28 +262,17 @@ describe('Runtime Utility & Bridge', () => {
 
       const unsubscribe = listenStream('run-abc', onEvent, onError, onComplete);
 
-      expect(unsubscribe).toBeTypeOf('function');
-      expect(lastUrl).toContain('/api/mobile/stream?runId=run-abc&token=secret-token');
-      expect(sseInstance).not.toBeNull();
+      // Wait for async stream processing
+      await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Simulate stream message
-      if (sseInstance.onmessage) {
-        sseInstance.onmessage({
-          data: JSON.stringify({ runId: 'run-abc', eventType: 'delta', delta: 'hello' }),
-        });
-      }
+      expect(fetchUrl).toContain('/api/mobile/stream?runId=run-abc');
+      expect(fetchUrl).not.toContain('token=');
+      expect(fetchHeaders['X-Mobile-Token']).toBe('secret-token');
       expect(onEvent).toHaveBeenCalledWith({
         payload: { runId: 'run-abc', eventType: 'delta', delta: 'hello' },
       });
-
-      // Simulate stream completion
-      if (sseInstance.onmessage) {
-        sseInstance.onmessage({
-          data: JSON.stringify({ runId: 'run-abc', eventType: 'done' }),
-        });
-      }
       expect(onComplete).toHaveBeenCalled();
-      expect(mockClose).toHaveBeenCalled();
+      expect(unsubscribe).toBeTypeOf('function');
     });
   });
 });
