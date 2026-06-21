@@ -1,6 +1,98 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
+// Stream event types
+export interface StreamEventBase {
+  eventType: string;
+  message?: string;
+  runId: string;
+}
+
+export interface StreamDeltaEvent extends StreamEventBase {
+  eventType: 'delta';
+  delta: string;
+}
+
+export interface StreamThinkingDeltaEvent extends StreamEventBase {
+  eventType: 'thinking_delta';
+  delta: string;
+}
+
+export interface StreamThinkingSignatureEvent extends StreamEventBase {
+  eventType: 'thinking_signature';
+  delta: string;
+}
+
+export interface StreamContextCompactedEvent extends StreamEventBase {
+  eventType: 'context_compacted';
+  contextCompaction: {
+    summary: string;
+    compactedThroughMessageId?: string | null;
+    compactedThroughIndex: number;
+    sourceMessageCount: number;
+    updatedAt: number;
+    originalMessageCount: number;
+    compactedMessageCount: number;
+    removedCount: number;
+  };
+}
+
+export interface StreamTextEvent extends StreamEventBase {
+  eventType: 'text';
+  text: string;
+}
+
+export interface StreamToolStartEvent extends StreamEventBase {
+  eventType: 'tool_start';
+  toolCallId: string;
+  toolName: string;
+  toolArguments?: any;
+}
+
+export interface StreamToolDeltaEvent extends StreamEventBase {
+  eventType: 'tool_delta';
+  toolCallId: string;
+  delta: string;
+}
+
+export interface StreamToolDoneEvent extends StreamEventBase {
+  eventType: 'tool_done';
+  toolCallId: string;
+}
+
+export interface StreamToolEvent extends StreamEventBase {
+  eventType: 'tool_use' | 'tool_result';
+  toolName?: string;
+  toolInput?: any;
+  toolResult?: any;
+}
+
+export interface StreamDoneEvent extends StreamEventBase {
+  eventType: 'done';
+}
+
+export interface StreamErrorEvent extends StreamEventBase {
+  eventType: 'error';
+  message: string;
+}
+
+export type StreamEvent =
+  | StreamDeltaEvent
+  | StreamThinkingDeltaEvent
+  | StreamThinkingSignatureEvent
+  | StreamContextCompactedEvent
+  | StreamTextEvent
+  | StreamToolStartEvent
+  | StreamToolDeltaEvent
+  | StreamToolDoneEvent
+  | StreamToolEvent
+  | StreamDoneEvent
+  | StreamErrorEvent;
+
+export interface StreamEventWrapper {
+  payload: StreamEvent;
+}
+
 export const isTauriHost = (): boolean => {
   if (typeof window === 'undefined') return false;
   // If in vitest/jest test environment, default to desktop/tauri mock invoke
@@ -246,7 +338,7 @@ export async function appInvoke<T>(cmd: string, args?: any): Promise<T> {
 
 export function listenStream(
   runId: string,
-  onEvent: (event: { payload: any }) => void,
+  onEvent: (event: StreamEventWrapper) => void,
   onError?: (err: any) => void,
   onComplete?: () => void
 ): () => void {
@@ -254,7 +346,7 @@ export function listenStream(
     let active = true;
     let unlisten: UnlistenFn | null = null;
 
-    listen<any>('agent-chat-stream', (event) => {
+    listen<StreamEvent>('agent-chat-stream', (event) => {
       if (active) {
         onEvent({ payload: event.payload });
         if (event.payload?.eventType === 'done') {
@@ -282,7 +374,7 @@ export function listenStream(
 
   eventSource.onmessage = (event) => {
     try {
-      const payload = JSON.parse(event.data);
+      const payload = JSON.parse(event.data) as StreamEvent;
       onEvent({ payload });
       if (payload.eventType === 'done') {
         onComplete?.();
