@@ -72,7 +72,7 @@ fn decrypt_text(text: &str) -> String {
 
     let has_pua = text.chars().any(|c| {
         let u = c as u32;
-        u >= 58344 && u <= 58716
+        (58344..=58716).contains(&u)
     });
 
     if !has_pua {
@@ -277,7 +277,7 @@ pub fn crawl_fanqie_article(
         for a in document.select(&a_sel) {
             let href = a.value().attr("href").unwrap_or("");
             if href.contains("/reader/") {
-                chapter_id = href.split('/').last().unwrap_or("").to_string();
+                chapter_id = href.split('/').next_back().unwrap_or("").to_string();
                 break;
             }
         }
@@ -300,7 +300,7 @@ pub fn crawl_fanqie_article(
 
         fs::write(&file_path, md_content).map_err(|e| format!("保存文件失败: {}", e))?;
 
-        return Ok(format!("成功爬取短篇小说并保存至: {}", file_path.display()));
+        Ok(format!("成功爬取短篇小说并保存至: {}", file_path.display()))
     } else {
         // Long novel
         let mut chapters = Vec::new();
@@ -308,12 +308,11 @@ pub fn crawl_fanqie_article(
         for a in document.select(&a_sel) {
             let title = a.text().collect::<String>().trim().to_string();
             let href = a.value().attr("href").unwrap_or("");
-            let chapter_id = href.split('/').last().unwrap_or("").to_string();
-            if !chapter_id.is_empty() && !title.is_empty() {
-                if !title.contains("最近更新") && !title.contains("开始阅读") {
+            let chapter_id = href.split('/').next_back().unwrap_or("").to_string();
+            if !chapter_id.is_empty() && !title.is_empty()
+                && !title.contains("最近更新") && !title.contains("开始阅读") {
                     chapters.push((title, chapter_id));
                 }
-            }
         }
 
         if chapters.is_empty() {
@@ -322,7 +321,7 @@ pub fn crawl_fanqie_article(
                 let title = a.text().collect::<String>().trim().to_string();
                 let href = a.value().attr("href").unwrap_or("");
                 if href.contains("/reader/") {
-                    let chapter_id = href.split('/').last().unwrap_or("").to_string();
+                    let chapter_id = href.split('/').next_back().unwrap_or("").to_string();
                     if !chapters.iter().any(|(_, id)| id == &chapter_id) {
                         chapters.push((title, chapter_id));
                     }
@@ -386,12 +385,12 @@ pub fn crawl_fanqie_article(
             std::thread::sleep(Duration::from_millis(300));
         }
 
-        return Ok(format!(
+        Ok(format!(
             "成功抓取《{}》前{}章及目录，存至: {}",
             novel_name,
             success_count,
             book_folder.display()
-        ));
+        ))
     }
 }
 

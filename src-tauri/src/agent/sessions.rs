@@ -167,7 +167,7 @@ pub(crate) fn list_agent_sessions_in_dir(
         summaries.push(session_summary(&record));
     }
 
-    summaries.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
+    summaries.sort_by_key(|s| std::cmp::Reverse(s.saved_at));
     Ok(summaries)
 }
 
@@ -666,11 +666,10 @@ fn close_unclosed_json_containers(text: &str) -> String {
             '"' => in_string = true,
             '{' => stack.push('}'),
             '[' => stack.push(']'),
-            '}' | ']' => {
-                if stack.last() == Some(&current) {
+            '}' | ']'
+                if stack.last() == Some(&current) => {
                     stack.pop();
                 }
-            }
             _ => {}
         }
     }
@@ -1740,11 +1739,10 @@ async fn run_background_items_stream_task(
                                     },
                                 );
                             }
-                            crate::models::AnthropicStreamEvent::MessageDelta { stop_reason } => {
-                                if stop_reason.as_deref() == Some("max_tokens") {
+                            crate::models::AnthropicStreamEvent::MessageDelta { stop_reason }
+                                if stop_reason.as_deref() == Some("max_tokens") => {
                                     truncated = true;
                                 }
-                            }
                             _ => {}
                         }
                     }

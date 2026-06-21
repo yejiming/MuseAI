@@ -601,22 +601,17 @@ async fn execute_book_travel_stream(
                 let chunk = chunk.map_err(|e| format!("网络流读取失败：{}", e))?;
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
                 crate::llm::process_sse_buffer(&mut buffer, |data| {
-                    if let Some(event) = crate::llm::parse_anthropic_stream_event(data) {
-                        match event {
-                            crate::models::AnthropicStreamEvent::Text(delta) => {
-                                full_content.push_str(&delta);
-                                let _ = app.emit(
-                                    "book-travel-stream",
-                                    BookTravelStreamEvent {
-                                        run_id: run_id.to_string(),
-                                        event_type: "delta".to_string(),
-                                        delta: Some(delta),
-                                        message: None,
-                                    },
-                                );
-                            }
-                            _ => {}
-                        }
+                    if let Some(crate::models::AnthropicStreamEvent::Text(delta)) = crate::llm::parse_anthropic_stream_event(data) {
+                        full_content.push_str(&delta);
+                        let _ = app.emit(
+                            "book-travel-stream",
+                            BookTravelStreamEvent {
+                                run_id: run_id.to_string(),
+                                event_type: "delta".to_string(),
+                                delta: Some(delta),
+                                message: None,
+                            },
+                        );
                     }
                 });
             }

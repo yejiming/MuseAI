@@ -324,7 +324,7 @@ pub fn get_python_info() -> &'static str {
 pub fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in walkdir::WalkDir::new(src) {
-        let entry = entry.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let entry = entry.map_err(std::io::Error::other)?;
         let ty = entry.file_type();
         let dest_path = dst.join(entry.path().strip_prefix(src).unwrap());
         if ty.is_dir() {
@@ -338,7 +338,7 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 pub fn copy_md_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in walkdir::WalkDir::new(src) {
-        let entry = entry.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let entry = entry.map_err(std::io::Error::other)?;
         if entry
             .path()
             .components()
@@ -354,14 +354,13 @@ pub fn copy_md_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
 
         let dest_path = dst.join(relative_path);
-        if ty.is_file() {
-            if is_supported_content_file(entry.path()) {
+        if ty.is_file()
+            && is_supported_content_file(entry.path()) {
                 if let Some(parent) = dest_path.parent() {
                     fs::create_dir_all(parent)?;
                 }
                 fs::copy(entry.path(), &dest_path)?;
             }
-        }
     }
     Ok(())
 }
