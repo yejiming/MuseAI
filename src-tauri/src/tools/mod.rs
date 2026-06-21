@@ -455,10 +455,8 @@ pub fn tool_glob(pattern: String, path: Option<String>, workspace: Option<String
 
         let full_pattern = base.join(&pattern).to_string_lossy().into_owned();
         let mut hits = Vec::new();
-        for entry in glob(&full_pattern).map_err(|e| e.to_string())? {
-            if let Ok(path) = entry {
-                hits.push(path);
-            }
+        for path in glob(&full_pattern).map_err(|e| e.to_string())?.flatten() {
+            hits.push(path);
         }
 
         hits.sort_by(|a, b| {

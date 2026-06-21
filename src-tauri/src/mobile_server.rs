@@ -126,7 +126,7 @@ pub fn get_lan_ip() -> Option<IpAddr> {
 #[cfg(target_os = "macos")]
 fn get_mac_interface_ip(interface: &str) -> Option<IpAddr> {
     let output = std::process::Command::new("ipconfig")
-        .args(&["getifaddr", interface])
+        .args(["getifaddr", interface])
         .output()
         .ok()?;
     if output.status.success() {
@@ -1491,13 +1491,10 @@ pub async fn start_server<R: Runtime>(app_handle: AppHandle<R>) -> Result<(), St
 
     for p in 4080..=4085 {
         let addr = SocketAddr::from(([0, 0, 0, 0], p));
-        match tokio::net::TcpListener::bind(&addr).await {
-            Ok(l) => {
-                listener = Some(l);
-                port = p;
-                break;
-            }
-            Err(_) => {}
+        if let Ok(l) = tokio::net::TcpListener::bind(&addr).await {
+            listener = Some(l);
+            port = p;
+            break;
         }
     }
 

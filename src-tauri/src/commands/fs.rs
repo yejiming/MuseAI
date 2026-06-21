@@ -20,28 +20,26 @@ pub fn list_dir(path: String) -> Result<Vec<FileNode>, String> {
 
     match fs::read_dir(dir_path) {
         Ok(entries) => {
-            for entry in entries {
-                if let Ok(entry) = entry {
-                    let path_buf = entry.path();
-                    let name = entry
-                        .file_name()
-                        .into_string()
-                        .unwrap_or_else(|_| String::from("unknown"));
-                    if name.starts_with('.') {
-                        continue;
-                    }
-                    let is_dir = path_buf.is_dir();
-                    if !is_dir && !is_supported_content_file(&path_buf) {
-                        continue;
-                    }
-
-                    nodes.push(FileNode {
-                        name,
-                        path: path_buf.to_string_lossy().into_owned(),
-                        is_dir,
-                        children: if is_dir { Some(vec![]) } else { None },
-                    });
+            for entry in entries.flatten() {
+                let path_buf = entry.path();
+                let name = entry
+                    .file_name()
+                    .into_string()
+                    .unwrap_or_else(|_| String::from("unknown"));
+                if name.starts_with('.') {
+                    continue;
                 }
+                let is_dir = path_buf.is_dir();
+                if !is_dir && !is_supported_content_file(&path_buf) {
+                    continue;
+                }
+
+                nodes.push(FileNode {
+                    name,
+                    path: path_buf.to_string_lossy().into_owned(),
+                    is_dir,
+                    children: if is_dir { Some(vec![]) } else { None },
+                });
             }
             nodes.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
             Ok(nodes)
@@ -75,7 +73,7 @@ fn decode_text_bytes(bytes: &[u8]) -> Result<String, String> {
 }
 
 fn decode_utf16_bytes(bytes: &[u8], little_endian: bool) -> Result<String, String> {
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err("UTF-16 文件字节长度不完整".to_string());
     }
 

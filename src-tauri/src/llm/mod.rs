@@ -5,7 +5,7 @@ use crate::agent::parse_tool_arguments;
 use crate::models::*;
 
 pub fn approximate_token_count(text: &str) -> usize {
-    (text.chars().count() + 3) / 4
+    text.chars().count().div_ceil(4)
 }
 
 pub fn chat_message_token_estimate(message: &ChatMessage) -> usize {
@@ -455,14 +455,12 @@ fn select_compaction_boundary(
 
     let mut start = history.len();
     let mut total = 0usize;
-    let mut kept = 0usize;
-    for index in (0..history.len()).rev() {
+    for (kept, index) in (0..history.len()).rev().enumerate() {
         let cost = chat_message_token_estimate(&history[index]);
         if kept >= 4 && total + cost > recent_budget {
             break;
         }
         total += cost;
-        kept += 1;
         start = index;
     }
     if start == 0 || start >= history.len() {
