@@ -29,7 +29,7 @@ pub fn import_workspace_item(
         return Err("Source path does not exist".to_string());
     }
 
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(&app)?;
     let base_dir = doc_dir.join("MuseAI").join(&dir_type);
 
     fs::create_dir_all(&base_dir).map_err(|e| e.to_string())?;
@@ -73,7 +73,7 @@ pub fn import_workspace_item(
 #[tauri::command]
 pub fn delete_workspace_item(app: AppHandle, item_path: String) -> Result<(), String> {
     let target = Path::new(&item_path);
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(&app)?;
     let museai_dir = doc_dir.join("MuseAI");
     let refs_dir = museai_dir.join("references");
     let articles_dir = museai_dir.join("articles");
@@ -100,7 +100,7 @@ pub fn delete_workspace_item(app: AppHandle, item_path: String) -> Result<(), St
 #[tauri::command]
 pub fn get_workspace_dir(app: AppHandle, dir_type: String) -> Result<String, String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(&app)?;
     let museai_dir = doc_dir.join("MuseAI");
 
     // Migrate from old app_data_dir locations to ~/Documents/MuseAI
@@ -145,7 +145,7 @@ fn now_millis() -> Result<u64, String> {
 }
 
 fn articles_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(app)?;
     let articles_dir = doc_dir.join("MuseAI").join("articles");
     fs::create_dir_all(&articles_dir).map_err(|e| e.to_string())?;
     articles_dir.canonicalize().map_err(|e| e.to_string())
@@ -265,7 +265,7 @@ fn collect_writing_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
 
 #[tauri::command]
 pub fn get_writing_stats(app: AppHandle) -> Result<models::WritingStats, String> {
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(&app)?;
     let articles_dir = doc_dir.join("MuseAI").join("articles");
 
     let files = collect_writing_files(&articles_dir)?;
@@ -492,7 +492,7 @@ fn get_interaction_stats_for_root(
 
 #[tauri::command]
 pub fn get_interaction_stats(app: AppHandle) -> Result<models::InteractionStats, String> {
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(&app)?;
     get_interaction_stats_for_root(&doc_dir, SystemTime::now())
 }
 
@@ -519,13 +519,13 @@ pub fn save_app_state_path(base: &Path, name: &str, content: &str) -> Result<(),
 
 #[tauri::command]
 pub fn load_app_state(app: AppHandle, name: String) -> Result<String, String> {
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(&app)?;
     load_app_state_path(&doc_dir, &name)
 }
 
 #[tauri::command]
 pub fn save_app_state(app: AppHandle, name: String, content: String) -> Result<(), String> {
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(&app)?;
     save_app_state_path(&doc_dir, &name, &content)
 }
 
@@ -549,7 +549,7 @@ pub fn migrate_agent_sessions_dir(old_dir: &Path, new_dir: &Path) -> Result<(), 
 
 pub fn migrate_agent_sessions(app: &AppHandle) -> Result<(), String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(app)?;
     let old_dir = app_data_dir.join("agent-sessions");
     let new_dir = doc_dir.join("MuseAI").join("agent-sessions");
     migrate_agent_sessions_dir(&old_dir, &new_dir)

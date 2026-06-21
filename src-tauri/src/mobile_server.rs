@@ -1,4 +1,5 @@
 use crate::models::{ChatStreamEvent, ChatStreamRequest};
+use crate::utils::resolve_document_dir;
 use crate::ActiveStreams;
 use axum::{
     body::Body,
@@ -295,9 +296,7 @@ async fn get_app_state<R: Runtime>(
         return Err((StatusCode::FORBIDDEN, "未授权访问该配置".to_string()));
     }
 
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let content = crate::commands::workspace::load_app_state_path(&doc_dir, &name)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
@@ -343,9 +342,7 @@ async fn save_app_state<R: Runtime>(
         return Err((StatusCode::FORBIDDEN, "未授权保存该配置".to_string()));
     }
 
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let final_content = if name == "settings-store" {
@@ -405,9 +402,7 @@ async fn list_sessions<R: Runtime>(
     // Yes! That's incredibly elegant. We don't even need to call `list_agent_sessions`, `load_agent_session`, `save_agent_session`, `delete_agent_session` from the command modules!
     // We can just implement the directory reading and JSON loading/saving directly in `mobile_server.rs`!
     // Let's write the direct file operations for sessions:
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let dir = doc_dir.join("MuseAI").join("agent-sessions");
     fs::create_dir_all(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -479,9 +474,7 @@ async fn load_session<R: Runtime>(
         ));
     }
 
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let path = doc_dir
         .join("MuseAI")
@@ -513,9 +506,7 @@ async fn save_session<R: Runtime>(
         ));
     }
 
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let dir = doc_dir.join("MuseAI").join("agent-sessions");
     fs::create_dir_all(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -561,9 +552,7 @@ async fn delete_session<R: Runtime>(
         ));
     }
 
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let path = doc_dir
         .join("MuseAI")
@@ -598,9 +587,7 @@ async fn update_session_title<R: Runtime>(
     let payload: TitleUpdate = serde_json::from_str(&body)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?;
 
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let path = doc_dir
         .join("MuseAI")
@@ -653,9 +640,7 @@ async fn summarize_title<R: Runtime>(
     let payload: SummarizePayload = serde_json::from_str(&body)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?;
 
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let settings_str = crate::commands::workspace::load_app_state_path(&doc_dir, "settings-store")
@@ -755,9 +740,7 @@ async fn analyze_session_memory<R: Runtime>(
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?
     };
 
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let session_path = doc_dir
         .join("MuseAI")
@@ -1111,9 +1094,7 @@ async fn archive_session_memory<R: Runtime>(
     let payload: ArchivePayload = serde_json::from_str(&body)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?;
 
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let session_path = doc_dir
         .join("MuseAI")
@@ -1318,9 +1299,7 @@ async fn start_run_endpoint<R: Runtime>(
     State(app): State<AppHandle<R>>,
     body: String,
 ) -> Result<Response, (StatusCode, String)> {
-    let doc_dir = app
-        .path()
-        .document_dir()
+    let doc_dir = resolve_document_dir(&app)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let settings_str = crate::commands::workspace::load_app_state_path(&doc_dir, "settings-store")
         .map_err(|e| {

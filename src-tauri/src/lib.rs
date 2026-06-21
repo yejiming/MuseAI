@@ -28,7 +28,7 @@ pub use commands::workspace::*;
 pub use models::{DailyActivity, WritingStats};
 pub use tools::*;
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 static BASH_PERMISSION_CHANNELS: OnceLock<Mutex<HashMap<String, oneshot::Sender<bool>>>> =
     OnceLock::new();
@@ -51,7 +51,7 @@ fn rename_item(path: String, new_name: String) -> Result<(), String> {
 
 #[tauri::command]
 fn move_item(app: AppHandle, source: String, target_dir: String) -> Result<(), String> {
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = utils::resolve_document_dir(&app)?;
     let museai_dir = doc_dir.join("MuseAI");
     let refs_dir = museai_dir.join("references");
     let articles_dir = museai_dir.join("articles");

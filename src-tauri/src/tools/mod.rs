@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use glob::glob;
 use regex::Regex;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -129,7 +129,7 @@ pub fn ensure_read_path_allowed(
     workspace: Option<&str>,
     file_path: &str,
 ) -> Result<(), String> {
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(app)?;
     let home_dir = doc_dir.parent().ok_or("无法获取用户主目录")?;
 
     let resolved = expand_path(workspace, file_path);

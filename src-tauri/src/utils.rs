@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::sync::OnceLock;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 use walkdir::WalkDir;
 
 use crate::models::*;
@@ -78,6 +78,32 @@ fn home_dir() -> Option<PathBuf> {
     env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE"))
         .map(PathBuf::from)
+}
+
+fn resolve_document_dir_with_fallback(
+    system_result: Result<PathBuf, String>,
+    home: Option<PathBuf>,
+    allow_linux_fallback: bool,
+) -> Result<PathBuf, String> {
+    match system_result {
+        Ok(path) => Ok(path),
+        Err(error) => {
+            if allow_linux_fallback {
+                if let Some(home) = home.filter(|path| !path.as_os_str().is_empty()) {
+                    return Ok(home.join("Documents"));
+                }
+            }
+            Err(error)
+        }
+    }
+}
+
+pub fn resolve_document_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    resolve_document_dir_with_fallback(
+        app.path().document_dir().map_err(|error| error.to_string()),
+        env::var_os("HOME").map(PathBuf::from),
+        cfg!(target_os = "linux"),
+    )
 }
 
 pub fn expand_path(base_dir: Option<&str>, path: &str) -> std::path::PathBuf {
@@ -371,7 +397,7 @@ pub fn sanitize_session_id(id: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 pub fn agent_sessions_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(app)?;
     Ok(doc_dir.join("MuseAI").join("agent-sessions"))
 }
 
@@ -426,6 +452,51 @@ mod tests {
             let result = expand_path(Some("/base"), "subdir/file.txt");
             assert_eq!(result, PathBuf::from("/base/subdir/file.txt"));
         }
+    }
+
+    #[test]
+    fn test_resolve_document_dir_prefers_system_path() {
+        let system_dir = PathBuf::from("/custom/documents");
+        let result = resolve_document_dir_with_fallback(
+            Ok(system_dir.clone()),
+            Some(PathBuf::from("/home/test")),
+            true,
+        );
+
+        assert_eq!(result, Ok(system_dir));
+    }
+
+    #[test]
+    fn test_resolve_document_dir_falls_back_on_linux() {
+        let result = resolve_document_dir_with_fallback(
+            Err("unknown path".to_string()),
+            Some(PathBuf::from("/home/test")),
+            true,
+        );
+
+        assert_eq!(result, Ok(PathBuf::from("/home/test/Documents")));
+    }
+
+    #[test]
+    fn test_resolve_document_dir_rejects_empty_linux_home() {
+        let result = resolve_document_dir_with_fallback(
+            Err("unknown path".to_string()),
+            Some(PathBuf::new()),
+            true,
+        );
+
+        assert_eq!(result, Err("unknown path".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_document_dir_does_not_fallback_off_linux() {
+        let result = resolve_document_dir_with_fallback(
+            Err("unknown path".to_string()),
+            Some(PathBuf::from("/home/test")),
+            false,
+        );
+
+        assert_eq!(result, Err("unknown path".to_string()));
     }
 
     #[test]

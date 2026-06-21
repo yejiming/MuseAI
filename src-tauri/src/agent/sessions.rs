@@ -449,7 +449,7 @@ pub fn stop_chat_stream(
 }
 
 fn log_agent_run_error(app: &AppHandle, run_id: Option<&str>, error: &str) {
-    let Ok(doc_dir) = app.path().document_dir() else {
+    let Ok(doc_dir) = resolve_document_dir(app) else {
         return;
     };
     let museai_dir = doc_dir.join("MuseAI");
@@ -2024,7 +2024,7 @@ struct ReverseOutlineSummaryBatch {
 }
 
 fn reverse_outline_roots(app: &AppHandle) -> Result<(PathBuf, PathBuf, PathBuf), String> {
-    let doc_dir = app.path().document_dir().map_err(|e| e.to_string())?;
+    let doc_dir = resolve_document_dir(app)?;
     let museai_dir = doc_dir.join("MuseAI");
     let articles_dir = museai_dir.join("articles");
     let references_dir = museai_dir.join("references");
