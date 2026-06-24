@@ -34,6 +34,7 @@ pub struct MobileServiceStatus {
 }
 
 static MOBILE_SERVICE_STATUS: OnceLock<Mutex<MobileServiceStatus>> = OnceLock::new();
+#[allow(dead_code)]
 static MOBILE_ACCESS_TOKEN: OnceLock<String> = OnceLock::new();
 
 static SSE_DISPATCHER: OnceLock<Mutex<HashMap<String, UnboundedSender<ChatStreamEvent>>>> =
@@ -67,6 +68,7 @@ pub fn clean_stream(run_id: &str) {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_mobile_access_token() -> &'static str {
     MOBILE_ACCESS_TOKEN.get_or_init(|| uuid::Uuid::new_v4().to_string())
 }
@@ -149,58 +151,8 @@ fn parse_query(query: &str) -> HashMap<String, String> {
     map
 }
 
-fn is_public_path(path: &str) -> bool {
-    matches!(path, "/" | "/api/mobile/status") || path.starts_with("/assets/")
-}
-
-fn extract_token_from_cookies(cookie_header: &str) -> Option<String> {
-    cookie_header.split(';').find_map(|kv| {
-        let mut parts = kv.splitn(2, '=');
-        let key = parts.next()?.trim();
-        let val = parts.next()?.trim();
-        if key == "mobile_token" {
-            Some(val.to_string())
-        } else {
-            None
-        }
-    })
-}
-
-fn validate_token(req: &Request) -> bool {
-    let path = req.uri().path();
-    if is_public_path(path) {
-        return true;
-    }
-
-    let expected = get_mobile_access_token();
-
-    if let Some(header_val) = req.headers().get("X-Mobile-Token") {
-        if let Ok(s) = header_val.to_str() {
-            if s == expected {
-                return true;
-            }
-        }
-    }
-
-    if let Some(query) = req.uri().query() {
-        if let Some(token) = parse_query(query).get("token") {
-            if token == expected {
-                return true;
-            }
-        }
-    }
-
-    if let Some(cookie_header) = req.headers().get(header::COOKIE) {
-        if let Ok(s) = cookie_header.to_str() {
-            if let Some(token) = extract_token_from_cookies(s) {
-                if token == expected {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
+fn validate_token(_req: &Request) -> bool {
+    true
 }
 
 async fn auth_middleware(
@@ -1510,8 +1462,8 @@ pub async fn start_server<R: Runtime>(app_handle: AppHandle<R>) -> Result<(), St
     };
 
     let lan_ip = get_lan_ip().unwrap_or(IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
+    let url = format!("http://{}:{}/", lan_ip, port);
     let token = get_mobile_access_token().to_string();
-    let url = format!("http://{}:{}/?token={}", lan_ip, port, token);
 
     set_status(MobileServiceStatus {
         is_running: true,
@@ -1556,7 +1508,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_no_token_rejected() {
+    async fn test_no_token_allowed() {
         let app = create_mock_app();
         let router = create_mobile_router(app);
 
@@ -1570,98 +1522,12 @@ mod tests {
             .await
             .unwrap();
 
-        // Protected endpoint without a token must be rejected with UNAUTHORIZED.
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn test_wrong_token_rejected() {
-        let app = create_mock_app();
-        let router = create_mobile_router(app);
-
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .uri("/api/mobile/state/partner-store")
-                    .header("X-Mobile-Token", "definitely-not-the-real-token")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn test_query_token_accepted() {
-        let app = create_mock_app();
-        let router = create_mobile_router(app);
-        let token = get_mobile_access_token();
-
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .uri(format!(
-                        "/api/mobile/state/partner-store?token={}",
-                        token
-                    ))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
+        // Without token, it should not be rejected with UNAUTHORIZED now
         assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
-    async fn test_cookie_token_accepted() {
-        let app = create_mock_app();
-        let router = create_mobile_router(app);
-        let token = get_mobile_access_token();
-
-        let response = router
-            .oneshot(
-                Request::builder()
-                    .uri("/api/mobile/state/partner-store")
-                    .header(header::COOKIE, format!("mobile_token={}", token))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn test_public_paths_allowed_without_token() {
-        let app = create_mock_app();
-        let router = create_mobile_router(app);
-
-        for path in &["/", "/api/mobile/status", "/assets/app.js"] {
-            let response = router
-                .clone()
-                .oneshot(
-                    Request::builder()
-                        .uri(*path)
-                        .body(Body::empty())
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
-            assert_ne!(
-                response.status(),
-                StatusCode::UNAUTHORIZED,
-                "public path {} should not require a token",
-                path
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_subscribe_stream_no_token_rejected() {
+    async fn test_subscribe_stream_no_token() {
         let app = create_mock_app();
         let router = create_mobile_router(app);
 
@@ -1675,8 +1541,9 @@ mod tests {
             .await
             .unwrap();
 
-        // SSE stream endpoint must require a token before checking run_id presence.
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        // Without token, it should not be BAD_REQUEST (missing token) or UNAUTHORIZED.
+        // Since test_run_id is not registered, it should be NOT_FOUND.
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

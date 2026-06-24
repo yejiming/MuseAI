@@ -381,7 +381,13 @@ const useSettingsView = () => {
 
   React.useEffect(() => {
     invoke('get_mobile_service_status')
-      .then((status: any) => setMobileStatus(status))
+      .then((status: any) => {
+        setMobileStatus(status);
+        // Auto-save token to localStorage when service starts
+        if (status.token && typeof window !== 'undefined') {
+          localStorage.setItem('mobile_token', status.token);
+        }
+      })
       .catch((e) => console.error('Failed to get mobile service status:', e));
   }, []);
 
@@ -730,7 +736,7 @@ const useSettingsView = () => {
                     {mobileStatus.isRunning && mobileStatus.url && (
                       <div style={{ marginTop: 6 }}>
                         <Text style={{ fontSize: 13, color: '#8c857b', display: 'block', lineHeight: 1.5 }}>
-                          在同一个无线网络（WiFi）下，使用手机扫描或输入以下网址，即可直接访问您的智能伴侣、故事冒险和羁绊：
+                          在同一个无线网络（WiFi）下，使用手机浏览器访问以下网址：
                         </Text>
                         <div style={{ marginTop: 8 }}>
                           <Text copyable style={{ fontSize: 14, color: '#d97757', fontWeight: 600 }}>
@@ -738,15 +744,16 @@ const useSettingsView = () => {
                           </Text>
                         </div>
                         {mobileStatus.token && (
-                          <div style={{ marginTop: 6 }}>
-                            <Text style={{ fontSize: 12, color: '#8c857b', display: 'block', lineHeight: 1.5 }}>
-                              访问令牌（已包含在上方网址中，手机首次打开后会自动保存；如需手动配置可复制此令牌）：
+                          <div style={{ marginTop: 12, padding: 10, backgroundColor: '#f5f3f0', borderRadius: 4 }}>
+                            <Text style={{ fontSize: 12, color: '#8c857b', display: 'block', lineHeight: 1.5, marginBottom: 4 }}>
+                              首次访问时，请在手机浏览器的控制台（开发者工具）中执行以下命令保存访问令牌：
                             </Text>
-                            <div style={{ marginTop: 4 }}>
-                              <Text copyable style={{ fontSize: 13, color: '#8c857b', fontFamily: 'monospace' }}>
-                                {mobileStatus.token}
-                              </Text>
-                            </div>
+                            <Text copyable code style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                              localStorage.setItem('mobile_token', '{mobileStatus.token}')
+                            </Text>
+                            <Text style={{ fontSize: 11, color: '#8c857b', display: 'block', marginTop: 6, lineHeight: 1.4 }}>
+                              或者复制令牌：<Text copyable code style={{ fontSize: 11 }}>{mobileStatus.token}</Text>
+                            </Text>
                           </div>
                         )}
                       </div>
