@@ -20,8 +20,6 @@ import {
   defaultBookTravelSceneWriterPrompt,
   defaultBookTravelMemoryKeeperPrompt,
   defaultBookTravelEndingJudgePrompt,
-  defaultChatArchivePrompt,
-  defaultStoryArchivePrompt,
   defaultSillyTavernExporterPrompt,
   defaultAgentConfigs,
   applyCompactionTurnThresholdDefaults,
