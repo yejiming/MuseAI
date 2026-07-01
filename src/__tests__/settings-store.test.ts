@@ -20,6 +20,9 @@ import {
   defaultBookTravelSceneWriterPrompt,
   defaultBookTravelMemoryKeeperPrompt,
   defaultBookTravelEndingJudgePrompt,
+  defaultChatArchivePrompt,
+  defaultStoryArchivePrompt,
+  defaultSillyTavernExporterPrompt,
   defaultAgentConfigs,
   applyCompactionTurnThresholdDefaults,
   useSettingsStore,
@@ -251,5 +254,21 @@ describe('Settings store default exports', () => {
     expect(defaultBookTravelSceneWriterPrompt).not.toContain('activeCharacters：字符串数组');
     expect(defaultBookTravelMemoryKeeperPrompt).toContain('穿书记忆整理员');
     expect(defaultBookTravelEndingJudgePrompt).toContain('穿书结局裁判');
+  });
+
+  it('should define sillyTavernExporter config with required defaults and prompt', () => {
+    const { agentConfigs } = useSettingsStore.getState();
+
+    expect(agentConfigs.sillyTavernExporter).toEqual({
+      temperature: 0,
+      maxOutputTokens: 32000,
+      maxContextTokens: 200000,
+      thinkingDepth: 'high',
+    });
+    expect(defaultSillyTavernExporterPrompt).toContain('chara_card_v2');
+    expect(defaultSillyTavernExporterPrompt).toContain('字段映射');
+    expect(defaultSillyTavernExporterPrompt).toContain('纯 JSON');
+    expect(defaultAgentConfigs.sillyTavernExporter.thinkingDepth).toBe('high');
+    expect(useSettingsStore.getState().sillyTavernExporterPrompt).toBe(defaultSillyTavernExporterPrompt);
   });
 });

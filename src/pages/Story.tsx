@@ -12,7 +12,8 @@ import {
   ProfileOutlined,
   CommentOutlined,
   ExperimentOutlined,
-  BranchesOutlined
+  BranchesOutlined,
+  EditOutlined
 } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { useNavigate } from 'react-router-dom';
@@ -377,6 +378,47 @@ const useStoryView = () => {
   const navigate = useNavigate();
   const [isBookTravelHistoryOpen, setIsBookTravelHistoryOpen] = useState(false);
   const [bookTravelMaterialFilter, setBookTravelMaterialFilter] = useState<string | null>(null);
+
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingUserText, setEditingUserText] = useState<string>('');
+  const [editingNarrativeId, setEditingNarrativeId] = useState<string | null>(null);
+  const [editingNarrativeText, setEditingNarrativeText] = useState<string>('');
+
+  const startEditUser = (turn: BookTravelTurnSnapshot) => {
+    setEditingUserId(turn.id);
+    setEditingUserText(turn.userInput);
+  };
+  
+  const saveEditUser = async (turn: BookTravelTurnSnapshot) => {
+    const newText = editingUserText.trim();
+    if (!newText) return;
+    
+    useBookTravelStore.getState().updateTurn(turn.id, { userInput: newText });
+    setEditingUserId(null);
+    
+    await retryBookTravelWriter({ ...turn, userInput: newText });
+  };
+  
+  const startEditNarrative = (turn: BookTravelTurnSnapshot) => {
+    setEditingNarrativeId(turn.id);
+    setEditingNarrativeText(turn.narrativeOutput);
+  };
+  
+  const saveEditNarrative = (turn: BookTravelTurnSnapshot) => {
+    const newText = editingNarrativeText.trim();
+    if (!newText) return;
+    
+    useBookTravelStore.getState().updateTurn(turn.id, { narrativeOutput: newText });
+    if (turn.createdSceneId && turn.createdBeatIds && turn.createdBeatIds.length > 0) {
+      useBookTravelStore.getState().updateBeatContent(turn.createdSceneId, turn.createdBeatIds[0], newText);
+    } else if (turn.createdBeatIds && turn.createdBeatIds.length > 0) {
+      const currentSceneId = useBookTravelStore.getState().currentSceneId;
+      if (currentSceneId) {
+        useBookTravelStore.getState().updateBeatContent(currentSceneId, turn.createdBeatIds[0], newText);
+      }
+    }
+    setEditingNarrativeId(null);
+  };
 
   // Book-travel stream states
   const [, setIsTransitioningScene] = useState(false);
@@ -832,6 +874,7 @@ const useStoryView = () => {
       { userInput, allowedSpeakers: plannedScene.activeCharacters || [] },
     );
     const writerOutput = cleanAndParseJSON(writerOutputStr);
+    const suggestedChoices = Array.isArray(writerOutput?.suggestedChoices) ? writerOutput.suggestedChoices.map(String) : undefined;
     const newBeat = appendWriterBeatToCurrentScene(writerOutput);
     const store = useBookTravelStore.getState();
     const completedScene = store.scenes.find((scene) => scene.id === plannedScene.id) || {
@@ -847,6 +890,7 @@ const useStoryView = () => {
       stateSnapshot: currentState,
       createdSceneId: plannedScene.id,
       createdBeatIds: [newBeat.id],
+      suggestedChoices,
     };
     const newTurn = { id: turnId || `turn-${Date.now()}`, userInput, ...turnPatch };
     if (turnId) {
@@ -899,6 +943,7 @@ const useStoryView = () => {
       const allowedSpeakers = currentScene?.activeCharacters || [];
       const sceneJsonStr = await runBookTravelStreamTask('start_write_book_travel_insert_beat_stream', writerRequest, { userInput, allowedSpeakers });
       const writerOutput = cleanAndParseJSON(sceneJsonStr);
+      const suggestedChoices = Array.isArray(writerOutput?.suggestedChoices) ? writerOutput.suggestedChoices.map(String) : undefined;
       const newBeat = appendWriterBeatToCurrentScene(writerOutput);
       const turnPatch = {
         classification: 'insert-beat' as const,
@@ -907,6 +952,7 @@ const useStoryView = () => {
         narrativeOutput: newBeat?.content || '',
         stateSnapshot: useBookTravelStore.getState().currentState,
         createdBeatIds: [newBeat?.id || ''].filter(Boolean),
+        suggestedChoices,
       };
       if (turnId) {
         useBookTravelStore.getState().updateTurn(turnId, turnPatch);
@@ -1048,7 +1094,12 @@ const useStoryView = () => {
   };
 
   const retryBookTravelWriter = async (turn: BookTravelTurnSnapshot) => {
-    if (isBookTravelBusy || turn.failedStage !== 'writing') return;
+    if (isBookTravelBusy) return;
+    
+    if (turn.status === 'done' && turn.createdBeatIds && turn.createdBeatIds.length > 0) {
+      useBookTravelStore.getState().removeLastBeatFromCurrentScene();
+    }
+    
     setIsBookTravelSubmitting(true);
     useBookTravelStore.getState().updateTurn(turn.id, {
       status: 'writing',
@@ -1205,6 +1256,7 @@ const useStoryView = () => {
       const sceneJsonStr = await runBookTravelStreamTask('start_write_book_travel_change_scene_stream', writerRequest, { userInput: writerInstructions, allowedSpeakers: plannedScene.activeCharacters || [] });
 
       const writerOutput = cleanAndParseJSON(sceneJsonStr);
+      const suggestedChoices = Array.isArray(writerOutput?.suggestedChoices) ? writerOutput.suggestedChoices.map(String) : undefined;
       const firstBeat = appendWriterBeatToCurrentScene(writerOutput);
       useBookTravelStore.getState().updateTurn(openingTurnId, {
         status: 'done' as const,
@@ -1214,6 +1266,7 @@ const useStoryView = () => {
         stateSnapshot: newCurrentState,
         createdSceneId: plannedScene.id,
         createdBeatIds: [firstBeat?.id || ''],
+        suggestedChoices,
       });
       const autoTitle = `${selectedOutline.title}-${entryPoint.title}`;
       setSessionTitle(autoTitle);
@@ -1618,7 +1671,7 @@ const useStoryView = () => {
         {bookTravelStore.scenes.length > 0 ? (
           <div className="book-travel-turns">
             {/* Turns history */}
-            {bookTravelStore.turns.map((turn) => {
+            {bookTravelStore.turns.map((turn, idx) => {
               const createdScene = turn.createdSceneId ? bookTravelStore.scenes.find((s) => s.id === turn.createdSceneId) : null;
               const currentScene = bookTravelStore.scenes.find((s) => s.id === bookTravelStore.currentSceneId);
               const sceneContext = createdScene || currentScene;
@@ -1632,9 +1685,39 @@ const useStoryView = () => {
               return (
                 <div key={turn.id} className="book-travel-turn">
                   <div className="book-travel-user-row">
-                    <div className="book-travel-user-bubble">
-                      {turn.userInput}
-                    </div>
+                    {editingUserId === turn.id ? (
+                      <div className="book-travel-user-bubble" style={{ width: '100%', padding: 0, background: 'transparent' }}>
+                        <Input.TextArea
+                          value={editingUserText}
+                          onChange={(e) => setEditingUserText(e.target.value)}
+                          autoSize={{ minRows: 2, maxRows: 6 }}
+                          style={{ marginBottom: 8 }}
+                        />
+                        <div style={{ textAlign: 'right' }}>
+                          <Button size="small" onClick={() => setEditingUserId(null)} style={{ marginRight: 8 }}>取消</Button>
+                          <Button size="small" type="primary" onClick={() => void saveEditUser(turn)}>保存并重新生成</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                        <div className="book-travel-user-bubble">
+                          {turn.userInput}
+                        </div>
+                        {idx === bookTravelStore.turns.length - 1 && !isSessionArchived && !isBookTravelBusy && (
+                          <div style={{ marginTop: 4, textAlign: 'right' }}>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<EditOutlined />}
+                              onClick={() => startEditUser(turn)}
+                              style={{ color: '#d97757' }}
+                            >
+                              编辑
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   {sceneContext && (
                     <div className="book-travel-scene-card">
@@ -1678,11 +1761,27 @@ const useStoryView = () => {
                   )}
                   {turn.narrativeOutput ? (
                     <div className="book-travel-narrative-row">
-                      <div className="book-travel-narrative-bubble">
-                        {turn.narrativeOutput}
-                      </div>
-                      {canRetryWriter && (
-                        <div style={{ marginTop: 6 }}>
+                      {editingNarrativeId === turn.id ? (
+                        <div className="book-travel-narrative-bubble" style={{ width: '100%', padding: 0, background: 'transparent' }}>
+                          <Input.TextArea
+                            value={editingNarrativeText}
+                            onChange={(e) => setEditingNarrativeText(e.target.value)}
+                            autoSize={{ minRows: 3, maxRows: 10 }}
+                            style={{ marginBottom: 8 }}
+                          />
+                          <div style={{ textAlign: 'right' }}>
+                            <Button size="small" onClick={() => setEditingNarrativeId(null)} style={{ marginRight: 8 }}>取消</Button>
+                            <Button size="small" type="primary" onClick={() => saveEditNarrative(turn)}>保存</Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="book-travel-narrative-bubble">
+                          {turn.narrativeOutput}
+                        </div>
+                      )}
+                      
+                      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {canRetryWriter && (
                           <Button
                             disabled={isBookTravelBusy}
                             icon={<ReloadOutlined />}
@@ -1693,6 +1792,45 @@ const useStoryView = () => {
                           >
                             重试写手
                           </Button>
+                        )}
+                        {!canRetryWriter && idx === bookTravelStore.turns.length - 1 && !isSessionArchived && !isBookTravelBusy && (
+                          <>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<ReloadOutlined />}
+                              onClick={() => void retryBookTravelWriter(turn)}
+                              style={{ color: '#d97757', paddingInline: 6 }}
+                            >
+                              重新生成
+                            </Button>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<EditOutlined />}
+                              onClick={() => startEditNarrative(turn)}
+                              style={{ color: '#d97757', paddingInline: 6 }}
+                            >
+                              编辑
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                      {turn.suggestedChoices && turn.suggestedChoices.length > 0 && !isSessionArchived && idx === bookTravelStore.turns.length - 1 && (
+                        <div className="book-travel-suggested-choices" style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {turn.suggestedChoices.map((choice, i) => (
+                            <Button
+                              key={i}
+                              type="dashed"
+                              style={{ textAlign: 'left', height: 'auto', padding: '8px 12px', whiteSpace: 'normal', color: '#d97757', borderColor: '#d97757' }}
+                              onClick={() => {
+                                setInput(choice);
+                                setInputMode('behavior');
+                              }}
+                            >
+                              {choice}
+                            </Button>
+                          ))}
                         </div>
                       )}
                     </div>

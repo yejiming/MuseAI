@@ -42,6 +42,7 @@ import {
   defaultBookTravelEndingJudgePrompt,
   defaultChatArchivePrompt,
   defaultStoryArchivePrompt,
+  defaultSillyTavernExporterPrompt,
 } from '../stores/useSettingsStore';
 import { SettingsConcurrencyCard } from '../components/SettingsConcurrencyCard';
 
@@ -989,6 +990,16 @@ const useSettingsView = () => {
               onSavePrompt={store.setBackgroundCharacterCardPrompt}
               onResetPrompt={store.resetBackgroundCharacterCardPrompt}
               helpText="此提示词用于 AI 智能提取背景设定的第二阶段：按角色名分别生成结构化角色卡。"
+            />
+
+            <AgentSettingCard
+              title="SillyTavern 角色卡转换师"
+              agentId="sillyTavernExporter"
+              defaultPrompt={defaultSillyTavernExporterPrompt}
+              currentPrompt={store.sillyTavernExporterPrompt}
+              onSavePrompt={store.setSillyTavernExporterPrompt}
+              onResetPrompt={store.resetSillyTavernExporterPrompt}
+              helpText="此提示词用于在角色卡导出时把 MuseAI 角色卡转换为 SillyTavern 角色卡 V2 格式。默认使用温度 0、max_tokens 32000、思考深度 high。"
             />
           </section>
 

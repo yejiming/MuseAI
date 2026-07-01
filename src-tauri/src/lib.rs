@@ -222,6 +222,7 @@ pub fn run() {
             summarize_text,
             update_agent_session_title,
             analyze_character_memory,
+            convert_character_card_to_silly_tavern,
             start_chat_completion_stream,
             import_skill,
             delete_skill,

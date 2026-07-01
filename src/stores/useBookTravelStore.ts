@@ -54,6 +54,7 @@ export interface BookTravelTurnSnapshot {
   stateSnapshot: unknown;
   createdSceneId?: string;
   createdBeatIds: string[];
+  suggestedChoices?: string[];
 }
 
 export interface BookTravelEnding {
@@ -158,6 +159,7 @@ interface BookTravelState extends BookTravelSnapshot {
   updateTurn: (id: string, patch: Partial<Omit<BookTravelTurnSnapshot, 'id'>>) => void;
   removeLastTurn: () => void;
   removeLastBeatFromCurrentScene: () => void;
+  updateBeatContent: (sceneId: string, beatId: string, content: string) => void;
   updateSummaryMemory: (summaryMemory: string) => void;
   finishSession: (ending: BookTravelEnding) => void;
   saveAssembledMaterial: (material: BookTravelAssembledMaterialInput) => string;
@@ -292,6 +294,18 @@ export const useBookTravelStore = create<BookTravelState>()(
         newScenes[sceneIndex] = { ...scene, beats: newBeats };
         const newBeatId = newBeats.length > 0 ? newBeats[newBeats.length - 1].id : null;
         return { scenes: newScenes, currentBeatId: newBeatId };
+      }),
+      updateBeatContent: (sceneId, beatId, content) => set((state) => {
+        const sceneIndex = state.scenes.findIndex((s) => s.id === sceneId);
+        if (sceneIndex === -1) return {};
+        const newScenes = [...state.scenes];
+        const scene = newScenes[sceneIndex];
+        const beatIndex = scene.beats.findIndex((b) => b.id === beatId);
+        if (beatIndex === -1) return {};
+        const newBeats = [...scene.beats];
+        newBeats[beatIndex] = { ...newBeats[beatIndex], content };
+        newScenes[sceneIndex] = { ...scene, beats: newBeats };
+        return { scenes: newScenes };
       }),
       updateSummaryMemory: (summaryMemory) => set({ summaryMemory }),
       finishSession: (ending) => set({ ending, isCompleted: true }),

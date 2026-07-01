@@ -34,6 +34,7 @@ import {
 } from '../utils/backgroundExtraction';
 import { UNASSIGNED_CHARACTER_CARD_GROUP_ID, groupCharacterCardsByWorldBook } from '../utils/characterCardGroups';
 import { useStateGroup } from '../utils/reducerState';
+import { SillyTavernExportPreviewModal } from '../components/SillyTavernExportPreviewModal';
 
 const DIRECTORY_WIDTH = 280;
 const DEFAULT_BACKGROUND_CANCELLATION_SETTLE_MS = 15_000;
@@ -70,6 +71,12 @@ interface BackgroundUiState {
   tagInputVisible: boolean;
   tagInputValue: string;
   expandedCharacterGroupKeys: React.Key[];
+  exportFormatModalItem: PartnerItem | null;
+  sillyTavernPreviewOpen: boolean;
+  sillyTavernPreviewJson: string | null;
+  sillyTavernConverting: boolean;
+  sillyTavernConvertError: string | null;
+  sillyTavernExportItem: PartnerItem | null;
 }
 
 const getBackgroundCancellationSettleMs = () => {
@@ -205,6 +212,12 @@ const useBackgroundView = () => {
     tagInputVisible: false,
     tagInputValue: '',
     expandedCharacterGroupKeys: [],
+    exportFormatModalItem: null,
+    sillyTavernPreviewOpen: false,
+    sillyTavernPreviewJson: null,
+    sillyTavernConverting: false,
+    sillyTavernConvertError: null,
+    sillyTavernExportItem: null,
   });
   const {
     isAiModalOpen,
@@ -231,6 +244,12 @@ const useBackgroundView = () => {
     tagInputVisible,
     tagInputValue,
     expandedCharacterGroupKeys,
+    exportFormatModalItem,
+    sillyTavernPreviewOpen,
+    sillyTavernPreviewJson,
+    sillyTavernConverting,
+    sillyTavernConvertError,
+    sillyTavernExportItem,
   } = uiState;
   const setIsAiModalOpen = (isAiModalOpen: boolean) => setUiField('isAiModalOpen', isAiModalOpen);
   const setSelectedFilePaths = (selectedFilePaths: React.SetStateAction<string[]>) => setUiField('selectedFilePaths', selectedFilePaths);
@@ -834,6 +853,94 @@ const useBackgroundView = () => {
     } catch (err) {
       message.error(`${partnerTypeLabel(item.type)}导出失败：${String(err)}`);
     }
+  };
+
+  const handleChooseMuseAiFormat = () => {
+    const item = exportFormatModalItem;
+    setUiField('exportFormatModalItem', null);
+    if (item) {
+      handleExportPartnerItem(item);
+    }
+  };
+
+  const handleStartSillyTavernConvert = async (item: PartnerItem) => {
+    setUiField('exportFormatModalItem', null);
+    setUiField('sillyTavernExportItem', item);
+    setUiField('sillyTavernPreviewOpen', true);
+    setUiField('sillyTavernConverting', true);
+    setUiField('sillyTavernConvertError', null);
+    setUiField('sillyTavernPreviewJson', null);
+
+    const sourceCharacterCard = {
+      name: item.name,
+      fields: normalizePartnerFields(item.fields),
+      content: item.content,
+    };
+    const worldBook = item.worldBookId
+      ? worldBooks.find((wb) => wb.id === item.worldBookId)
+      : null;
+    const worldBookEntries = worldBook
+      ? { name: worldBook.name, fields: normalizePartnerFields(worldBook.fields), content: worldBook.content }
+      : undefined;
+
+    const agentConfig = settings.agentConfigs?.sillyTavernExporter || {};
+
+    try {
+      const resultJson = await invoke<string>('convert_character_card_to_silly_tavern', {
+        request: {
+          modelInterface: settings.modelInterface,
+          baseUrl: settings.llmBaseUrl,
+          apiKey: settings.llmApiKey,
+          model: settings.llmModel,
+          temperature: agentConfig.temperature ?? 0,
+          maxOutputTokens: agentConfig.maxOutputTokens ?? 32000,
+          thinkingDepth: agentConfig.thinkingDepth ?? 'high',
+          sourceCharacterCard,
+          worldBookEntries,
+          systemPrompt: settings.sillyTavernExporterPrompt || undefined,
+        },
+      });
+      setUiField('sillyTavernPreviewJson', resultJson);
+    } catch (err) {
+      setUiField('sillyTavernConvertError', String(err));
+    } finally {
+      setUiField('sillyTavernConverting', false);
+    }
+  };
+
+  const handleRetrySillyTavernConvert = () => {
+    const item = sillyTavernExportItem;
+    if (item) {
+      handleStartSillyTavernConvert(item);
+    }
+  };
+
+  const handleConfirmSillyTavernExport = async () => {
+    const item = sillyTavernExportItem;
+    const cardJson = sillyTavernPreviewJson;
+    if (!item || !cardJson) return;
+
+    try {
+      const fileName = `sillytavern-character-card-${item.name || '未命名角色卡'}.json`;
+      const paths = await invoke<string[]>('export_json_files_to_downloads', {
+        directoryName: null,
+        files: [{ relativePath: fileName, content: cardJson }],
+      });
+      message.success(`SillyTavern 角色卡导出成功，已保存到下载目录：${paths[0] || ''}`);
+      setUiField('sillyTavernPreviewOpen', false);
+      setUiField('sillyTavernPreviewJson', null);
+      setUiField('sillyTavernExportItem', null);
+      setUiField('sillyTavernConvertError', null);
+    } catch (err) {
+      message.error(`SillyTavern 角色卡导出失败：${String(err)}`);
+    }
+  };
+
+  const handleCancelSillyTavernPreview = () => {
+    setUiField('sillyTavernPreviewOpen', false);
+    setUiField('sillyTavernPreviewJson', null);
+    setUiField('sillyTavernConvertError', null);
+    setUiField('sillyTavernExportItem', null);
   };
 
   const handleRequestImportPartnerItems = (type: PartnerImportExportType) => {
@@ -2151,7 +2258,13 @@ const useBackgroundView = () => {
                     type="text"
                     size="small"
                     icon={<DownloadOutlined style={{ fontSize: 13, color: '#8c8882' }} />}
-                    onClick={() => handleExportPartnerItem(selectedItem)}
+                    onClick={() => {
+                      if (selectedItem.type === 'character_card') {
+                        setUiField('exportFormatModalItem', selectedItem);
+                      } else {
+                        handleExportPartnerItem(selectedItem);
+                      }
+                    }}
                     className="background-export-button"
                   />
                 </Tooltip>
@@ -2566,6 +2679,57 @@ const useBackgroundView = () => {
           </div>
         </div>
       </Modal>
+
+      <Modal
+        title="选择导出格式"
+        open={Boolean(exportFormatModalItem)}
+        onCancel={() => setUiField('exportFormatModalItem', null)}
+        footer={[
+          <Button key="cancel" onClick={() => setUiField('exportFormatModalItem', null)}>
+            取消
+          </Button>,
+        ]}
+        width={420}
+        centered
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
+          <div style={{ color: '#8c8882', fontSize: 13, marginBottom: 4 }}>
+            请选择「{exportFormatModalItem?.name || '未命名角色卡'}」的导出格式：
+          </div>
+          <Button
+            block
+            size="large"
+            onClick={handleChooseMuseAiFormat}
+            style={{ textAlign: 'left', height: 'auto', padding: '12px 16px' }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>MuseAI 格式</span>
+              <span style={{ fontSize: 12, color: '#b4afa7' }}>导出为 MuseAI 角色卡 JSON，可重新导入编辑</span>
+            </div>
+          </Button>
+          <Button
+            block
+            size="large"
+            onClick={() => exportFormatModalItem && handleStartSillyTavernConvert(exportFormatModalItem)}
+            style={{ textAlign: 'left', height: 'auto', padding: '12px 16px' }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>SillyTavern 格式</span>
+              <span style={{ fontSize: 12, color: '#b4afa7' }}>使用大模型转换为 SillyTavern V2 角色卡，预览确认后导出</span>
+            </div>
+          </Button>
+        </div>
+      </Modal>
+
+      <SillyTavernExportPreviewModal
+        open={sillyTavernPreviewOpen}
+        cardJson={sillyTavernPreviewJson}
+        loading={sillyTavernConverting}
+        error={sillyTavernConvertError}
+        onConfirm={handleConfirmSillyTavernExport}
+        onRetry={handleRetrySillyTavernConvert}
+        onCancel={handleCancelSillyTavernPreview}
+      />
     </div>
   );
 };

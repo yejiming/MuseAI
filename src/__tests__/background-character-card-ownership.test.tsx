@@ -6,6 +6,43 @@ import { PartnerItem, usePartnerStore } from '../stores/usePartnerStore';
 
 const invokeMock = vi.mocked(invoke);
 
+const validSillyTavernV2Json = JSON.stringify({
+  spec: 'chara_card_v2',
+  spec_version: '2.0',
+  name: '沈霜',
+  description: '冷静沉着的战士',
+  personality: '冷静',
+  scenario: '并肩作战',
+  first_mes: '你来了。',
+  mes_example: '<START>\n测试',
+  creator_notes: '由 MuseAI 转换',
+  system_prompt: '',
+  post_history_instructions: '保持中文',
+  alternate_greetings: [],
+  tags: ['中文'],
+  creator: 'MuseAI',
+  character_version: '2.0',
+  extensions: {},
+  character_book: { name: '沈霜世界书', entries: [] },
+  data: {
+    name: '沈霜',
+    description: '冷静沉着的战士',
+    personality: '冷静',
+    scenario: '并肩作战',
+    first_mes: '你来了。',
+    mes_example: '<START>\n测试',
+    creator_notes: '由 MuseAI 转换',
+    system_prompt: '',
+    post_history_instructions: '保持中文',
+    alternate_greetings: [],
+    tags: ['中文'],
+    creator: 'MuseAI',
+    character_version: '2.0',
+    extensions: {},
+    character_book: { name: '沈霜世界书', entries: [] },
+  },
+});
+
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async () => () => {}),
 }));
@@ -32,6 +69,7 @@ describe('Background Character Card ownership', () => {
     invokeMock.mockReset();
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'export_json_files_to_downloads') return ['/Users/test/Downloads/export.json'];
+      if (command === 'convert_character_card_to_silly_tavern') return validSillyTavernV2Json;
       return undefined;
     });
     usePartnerStore.setState({
@@ -171,11 +209,14 @@ describe('Background Character Card ownership', () => {
     });
   });
 
-  it('exports the selected Character Card from the right detail header into Downloads', async () => {
+  it('exports the selected Character Card in MuseAI format from the format selection modal', async () => {
     render(<Background />);
 
     fireEvent.click(screen.getByText('沈霜'));
     fireEvent.click(await screen.findByRole('button', { name: '导出当前角色卡' }));
+
+    expect(await screen.findByText('选择导出格式')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('MuseAI 格式'));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('export_json_files_to_downloads', {
@@ -188,6 +229,75 @@ describe('Background Character Card ownership', () => {
         ],
       });
     });
+  });
+
+  it('exports the selected Character Card in SillyTavern format after preview confirmation', async () => {
+    render(<Background />);
+
+    fireEvent.click(screen.getByText('沈霜'));
+    fireEvent.click(await screen.findByRole('button', { name: '导出当前角色卡' }));
+
+    expect(await screen.findByText('选择导出格式')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('SillyTavern 格式'));
+
+    expect(await screen.findByText('SillyTavern 角色卡预览')).toBeInTheDocument();
+    await screen.findByText('冷静沉着的战士');
+    const confirmBtn = await screen.findByRole('button', { name: /确认导出/ });
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('export_json_files_to_downloads', {
+        directoryName: null,
+        files: [
+          expect.objectContaining({
+            relativePath: 'sillytavern-character-card-沈霜.json',
+            content: expect.stringContaining('"chara_card_v2"'),
+          }),
+        ],
+      });
+    });
+  });
+
+  it('shows an error and does not export when SillyTavern conversion fails', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'export_json_files_to_downloads') return ['/Users/test/Downloads/export.json'];
+      if (command === 'convert_character_card_to_silly_tavern') throw new Error('转换失败：模型超时');
+      return undefined;
+    });
+
+    render(<Background />);
+
+    fireEvent.click(screen.getByText('沈霜'));
+    fireEvent.click(await screen.findByRole('button', { name: '导出当前角色卡' }));
+
+    expect(await screen.findByText('选择导出格式')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('SillyTavern 格式'));
+
+    expect(await screen.findByText('转换失败')).toBeInTheDocument();
+    const exportCalls = invokeMock.mock.calls.filter(
+      (call) => call[0] === 'export_json_files_to_downloads',
+    );
+    expect(exportCalls).toHaveLength(0);
+  });
+
+  it('exports World Book directly without opening the format selection modal', async () => {
+    render(<Background />);
+
+    fireEvent.click(screen.getAllByText('云州世界书')[0]);
+    fireEvent.click(await screen.findByRole('button', { name: '导出当前世界书' }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('export_json_files_to_downloads', {
+        directoryName: '云州世界书',
+        files: expect.arrayContaining([
+          expect.objectContaining({
+            relativePath: '世界书.json',
+            content: expect.stringContaining('"worldBooks"'),
+          }),
+        ]),
+      });
+    });
+    expect(screen.queryByText('选择导出格式')).not.toBeInTheDocument();
   });
 
   it('imports multiple Character Card files through the hidden file input', async () => {

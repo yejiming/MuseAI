@@ -850,6 +850,233 @@ pub async fn analyze_character_memory(request: AnalyzeMemoryRequest) -> Result<S
     canonical_json_response(raw_content)
 }
 
+fn default_silly_tavern_exporter_prompt() -> &'static str {
+    "你是一个专门负责把 MuseAI 中文角色卡转换为 SillyTavern 角色卡 V2 的转换师。\
+你需要依据源角色卡的事实，生成结构有效、内容连贯的中文角色卡，并严格遵循以下规则。\n\n\
+## 字段映射\n\
+按含义将 MuseAI 角色卡 fields 映射到 SillyTavern 字段，不要机械依赖原始键名：\n\
+- 姓名、年龄、性别、种族、出生地、职业、阶层 → description 中的基础资料\n\
+- 身高体型、标志性特征、服装、整体气质 → description 中的外貌描写\n\
+- 外在/内在性格、愿望、恐惧、价值观、习惯 → description 和简洁的 personality\n\
+- 技能和物品 → description；内容较多时放入世界书条目\n\
+- 背景故事 → description；时间线类世界书条目\n\
+- 人际关系 → description；关系类世界书条目\n\
+- 说话风格和典型反应 → description、mes_example、post_history_instructions\n\
+- 与用户的关系类型、互动模式、底线 → description、scenario、post_history_instructions、常驻用户关系世界书条目\n\
+- 关键事件 → 时间线类世界书条目，也可用于备用开场\n\
+- 身份标签 → tags\n\n\
+## 世界书 character_book\n\
+如果源角色卡关联世界书条目，把有用条目保留到 character_book.entries。合并重复信息，丢弃仅供应用内部使用的 ID 或时间戳。\
+优先整理为 4 到 10 条聚焦条目，可按以下类型分组：核心冲突或反派、亲密关系、能力与重要物品、地点与组织、事件时间线、与 {{user}} 的关系。\
+关键词数组 keys 应使用对话中可能触发的词。与 {{user}} 的关系条目设为 constant: true；大型背景和时间线条目不要设为常驻。\n\n\
+## 中文保留\n\
+所有面向角色扮演的内容都保持中文。SillyTavern 结构字段、{{char}}、{{user}} 和 <START> 可以保留原样。\
+不要翻译 JSON 结构字段或占位符。检查面向角色扮演的字段，确保没有意外残留的英文段落。\n\n\
+## 写作要求\n\
+- 将零散字段整理为连贯可用的角色指令，而不是直接堆叠原始键值对。\n\
+- 编写有场景感的 first_mes，包含动作、对白、张力，并给 {{user}} 留出开放选择。\n\
+- 编写至少三段有差异的 mes_example 交流，用来展示语气、反应、边界和关系动态。\n\
+- 当源文件支持多个时期或场景时，添加两到三个 alternate_greetings。\n\
+- 明确要求不得替 {{user}} 说话、思考、决定或行动。\n\
+- 保持时间线一致，不要在对应时期之前泄露未来事实。\n\
+- 不要发明与源文件冲突的身份特征、关系、能力或正史事件。\n\
+- 可以添加中性的衔接文字、场景框架和行为约束，但不要添加源文件不支持的恋爱关系、性内容、能力、诊断、死亡或正史结局。\n\n\
+## 输出结构\n\
+必须输出 spec 为 \"chara_card_v2\"、spec_version 为 \"2.0\" 的 JSON。\
+顶层和 data 内重复出现的载荷字段必须完全一致，编辑其中一处后要同步镜像到另一处。\
+必须包含以下字段：name、description、personality、scenario、first_mes、mes_example、creator_notes、\
+system_prompt、post_history_instructions、alternate_greetings、tags、creator、character_version、extensions、character_book、data。\
+data 对象内必须镜像上述所有字段。\n\n\
+请以纯 JSON 格式输出，不要包含 markdown 格式标记（如 ```json）或额外的解释字眼。"
+}
+
+fn build_silly_tavern_user_prompt(request: &ConvertCharacterCardToSillyTavernRequest) -> String {
+    let card_json = serde_json::to_string_pretty(&request.source_character_card)
+        .unwrap_or_else(|_| "{}".to_string());
+    let world_book_section = match &request.world_book_entries {
+        Some(entries) => format!(
+            "\n\n### 关联世界书条目\n{}\n",
+            serde_json::to_string_pretty(entries).unwrap_or_else(|_| "[]".to_string())
+        ),
+        None => String::new(),
+    };
+    format!(
+        "请将以下 MuseAI 角色卡转换为 SillyTavern 角色卡 V2 JSON。\
+保留源文件事实，整理为连贯可用的中文角色指令，并按规则映射到 V2 字段。\n\n\
+### 源角色卡 JSON\n{}\n{}\
+请直接输出符合 V2 规范的纯 JSON，顶层与 data 字段必须完全镜像。",
+        card_json, world_book_section
+    )
+}
+
+const SILLY_TAVERN_MIRRORED_FIELDS: &[&str] = &[
+    "name",
+    "description",
+    "personality",
+    "scenario",
+    "first_mes",
+    "mes_example",
+    "creator_notes",
+    "system_prompt",
+    "post_history_instructions",
+    "alternate_greetings",
+    "tags",
+    "creator",
+    "character_version",
+    "extensions",
+    "character_book",
+];
+
+fn validate_silly_tavern_v2(card: &Value) -> Result<(), String> {
+    let mut errors: Vec<String> = Vec::new();
+    if card.get("spec").and_then(|v| v.as_str()) != Some("chara_card_v2") {
+        errors.push("spec 必须为 \"chara_card_v2\"".to_string());
+    }
+    if card.get("spec_version").and_then(|v| v.as_str()) != Some("2.0") {
+        errors.push("spec_version 必须为 \"2.0\"".to_string());
+    }
+    let data = card.get("data");
+    if !data.is_some_and(|d| d.is_object()) {
+        return Err("缺少 data 对象".to_string());
+    }
+    let data = data.unwrap();
+    for key in SILLY_TAVERN_MIRRORED_FIELDS {
+        if card.get(*key).is_none() {
+            errors.push(format!("顶层缺少字段：{}", key));
+        }
+        if data.get(*key).is_none() {
+            errors.push(format!("data 缺少字段：{}", key));
+        }
+        if let (Some(top), Some(inner)) = (card.get(*key), data.get(*key)) {
+            if top != inner {
+                errors.push(format!("顶层与 data 字段不一致：{}", key));
+            }
+        }
+    }
+    if !card
+        .get("character_book")
+        .and_then(|b| b.get("entries"))
+        .is_some_and(|e| e.is_array())
+    {
+        errors.push("character_book.entries 必须为数组".to_string());
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("；"))
+    }
+}
+
+#[tauri::command]
+pub async fn convert_character_card_to_silly_tavern(
+    request: ConvertCharacterCardToSillyTavernRequest,
+) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let default_prompt = default_silly_tavern_exporter_prompt().to_string();
+    let system_prompt = request
+        .system_prompt
+        .as_deref()
+        .unwrap_or(&default_prompt);
+    let user_prompt = build_silly_tavern_user_prompt(&request);
+    let max_tokens = request.max_output_tokens.unwrap_or(32000);
+
+    let raw_content = match request.model_interface.as_str() {
+        "Anthropic-compatible" => {
+            let endpoint = build_anthropic_endpoint(&request.base_url);
+            let mut body = json!({
+                "model": request.model,
+                "messages": [{"role": "user", "content": user_prompt}],
+                "system": system_prompt,
+                "stream": false,
+                "max_tokens": max_tokens,
+            });
+            if let Some(thinking) =
+                anthropic_thinking_config(request.thinking_depth.as_deref(), max_tokens)
+            {
+                body["thinking"] = thinking;
+            } else {
+                body["temperature"] = json!(request.temperature.unwrap_or(0.0));
+            }
+
+            let response = client
+                .post(&endpoint)
+                .header("x-api-key", &request.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body_text = response.text().await.unwrap_or_default();
+                return Err(format!("Anthropic 接口请求失败：{} {}", status, body_text));
+            }
+
+            let json: Value = response.json().await.map_err(|e| e.to_string())?;
+            json.get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|item| item.get("type") == Some(&json!("text")))
+                })
+                .and_then(|text_block| text_block.get("text"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        }
+        _ => {
+            let endpoint = build_openai_endpoint(&request.base_url);
+            let messages = vec![
+                json!({"role": "system", "content": system_prompt}),
+                json!({"role": "user", "content": user_prompt}),
+            ];
+            let mut body = json!({
+                "model": request.model,
+                "messages": messages,
+                "stream": false,
+                "temperature": request.temperature.unwrap_or(0.0),
+                "max_tokens": max_tokens,
+            });
+            let depth = request.thinking_depth.as_deref().unwrap_or("").trim();
+            if !depth.is_empty() && depth != "off" {
+                body["reasoning_effort"] = json!(depth);
+            }
+
+            let response = client
+                .post(&endpoint)
+                .bearer_auth(&request.api_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body_text = response.text().await.unwrap_or_default();
+                return Err(format!("OpenAI 兼容接口请求失败：{} {}", status, body_text));
+            }
+
+            let json: Value = response.json().await.map_err(|e| e.to_string())?;
+            json.get("choices")
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|choice| choice.get("message"))
+                .and_then(|msg| msg.get("content"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        }
+    };
+
+    let canonical = canonical_json_response(raw_content)?;
+    let parsed: Value = serde_json::from_str(&canonical).map_err(|e| e.to_string())?;
+    validate_silly_tavern_v2(&parsed)?;
+    Ok(canonical)
+}
+
 fn validate_background_text(text: &str) -> Result<(), String> {
     if text.chars().count() > 100_000 {
         return Err("选中文件总字数超过10万字，内容过长可能导致提取失败。建议先在大纲页使用“AI反向分析大纲”功能，再基于精简后的大纲提取设定。".to_string());
@@ -3294,15 +3521,19 @@ mod tests {
         build_background_character_card_prompts, build_background_stage_one_prompts,
         build_long_reverse_outline_batches, build_long_reverse_outline_segments,
         build_openai_background_body, build_openai_reverse_outline_body,
-        build_short_reverse_outline_text, canonical_json_response, clean_json_response,
+        build_short_reverse_outline_text, build_silly_tavern_user_prompt,
+        canonical_json_response, clean_json_response, default_silly_tavern_exporter_prompt,
         format_reverse_outline_send_error, long_final_prompt, long_summary_prompt,
         parse_background_character_card_response, parse_background_stage_one_response,
         resolve_reverse_outline_sources, reverse_outline_char_count,
         sanitize_reverse_outline_title, save_agent_session_in_dir, save_reverse_outline_for_root,
-        session_matches_filters, short_reverse_outline_prompt, ReverseOutlineSegment,
-        ReverseOutlineSourceDoc, ReverseOutlineSummaryBatch,
+        session_matches_filters, short_reverse_outline_prompt, validate_silly_tavern_v2,
+        ReverseOutlineSegment, ReverseOutlineSourceDoc, ReverseOutlineSummaryBatch,
     };
-    use crate::models::{AgentSessionRecord, AnalyzeMemoryRequest, TestConnectionRequest};
+    use crate::models::{
+        AgentSessionRecord, AnalyzeMemoryRequest, ConvertCharacterCardToSillyTavernRequest,
+        TestConnectionRequest,
+    };
     use serde_json::Value;
     use std::env;
     use std::fs;
@@ -4112,5 +4343,195 @@ plain text
 
         let (custom_prompt, _) = long_final_prompt(&summaries, Some("自定义提示词")).unwrap();
         assert_eq!(custom_prompt, "自定义提示词");
+    }
+
+    fn silly_tavern_source_card() -> Value {
+        serde_json::json!({
+            "name": "沈霜",
+            "fields": {
+                "age": "20岁",
+                "gender": "女",
+                "externalPersonality": "冷静沉着",
+                "userRelationType": "并肩作战的伙伴"
+            },
+            "content": "# 角色卡：沈霜"
+        })
+    }
+
+    fn valid_silly_tavern_v2_card() -> String {
+        let payload = serde_json::json!({
+            "name": "沈霜",
+            "description": "冷静沉着的战士",
+            "personality": "冷静",
+            "scenario": "并肩作战",
+            "first_mes": "你来了。",
+            "mes_example": "<START>\n测试",
+            "creator_notes": "由 MuseAI 转换",
+            "system_prompt": "",
+            "post_history_instructions": "保持中文",
+            "alternate_greetings": [],
+            "tags": ["中文"],
+            "creator": "MuseAI",
+            "character_version": "2.0",
+            "extensions": {},
+            "character_book": {"name": "沈霜世界书", "entries": []}
+        });
+        let mut card = serde_json::json!({
+            "spec": "chara_card_v2",
+            "spec_version": "2.0",
+        });
+        if let serde_json::Value::Object(ref mut map) = card {
+            if let serde_json::Value::Object(ref p) = payload {
+                for (k, v) in p {
+                    map.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        card["data"] = payload;
+        serde_json::to_string(&card).unwrap()
+    }
+
+    fn silly_tavern_request(base_url: String, thinking_depth: &str) -> ConvertCharacterCardToSillyTavernRequest {
+        ConvertCharacterCardToSillyTavernRequest {
+            model_interface: "OpenAI-compatible".to_string(),
+            base_url,
+            api_key: "key".to_string(),
+            model: "model".to_string(),
+            temperature: Some(0.0),
+            max_output_tokens: Some(32000),
+            thinking_depth: Some(thinking_depth.to_string()),
+            source_character_card: silly_tavern_source_card(),
+            world_book_entries: None,
+            system_prompt: None,
+        }
+    }
+
+    #[test]
+    fn silly_tavern_system_prompt_contains_mapping_rules() {
+        let prompt = default_silly_tavern_exporter_prompt();
+        assert!(prompt.contains("字段映射"));
+        assert!(prompt.contains("description"));
+        assert!(prompt.contains("personality"));
+        assert!(prompt.contains("first_mes"));
+        assert!(prompt.contains("mes_example"));
+        assert!(prompt.contains("character_book"));
+        assert!(prompt.contains("不得替 {{user}}"));
+        assert!(prompt.contains("顶层和 data"));
+        assert!(prompt.contains("chara_card_v2"));
+        assert!(prompt.contains("纯 JSON"));
+    }
+
+    #[test]
+    fn silly_tavern_user_prompt_includes_source_card_fields() {
+        let request = silly_tavern_request("http://localhost".to_string(), "high");
+        let prompt = build_silly_tavern_user_prompt(&request);
+        assert!(prompt.contains("沈霜"));
+        assert!(prompt.contains("externalPersonality"));
+        assert!(prompt.contains("并肩作战的伙伴"));
+    }
+
+    #[test]
+    fn validate_silly_tavern_v2_accepts_valid_card() {
+        let card: Value = serde_json::from_str(&valid_silly_tavern_v2_card()).unwrap();
+        validate_silly_tavern_v2(&card).expect("valid card should pass");
+    }
+
+    #[test]
+    fn validate_silly_tavern_v2_rejects_missing_fields() {
+        let mut card: Value = serde_json::from_str(&valid_silly_tavern_v2_card()).unwrap();
+        if let Some(obj) = card.as_object_mut() {
+            obj.remove("first_mes");
+        }
+        let err = validate_silly_tavern_v2(&card).expect_err("missing field should fail");
+        assert!(err.contains("顶层缺少字段：first_mes"));
+    }
+
+    #[test]
+    fn validate_silly_tavern_v2_rejects_mirrored_mismatch() {
+        let mut card: Value = serde_json::from_str(&valid_silly_tavern_v2_card()).unwrap();
+        card["name"] = serde_json::json!("改名了");
+        let err = validate_silly_tavern_v2(&card).expect_err("mismatch should fail");
+        assert!(err.contains("顶层与 data 字段不一致：name"));
+    }
+
+    #[test]
+    fn validate_silly_tavern_v2_rejects_missing_data() {
+        let mut card: Value = serde_json::from_str(&valid_silly_tavern_v2_card()).unwrap();
+        if let Some(obj) = card.as_object_mut() {
+            obj.remove("data");
+        }
+        let err = validate_silly_tavern_v2(&card).expect_err("missing data should fail");
+        assert!(err.contains("缺少 data 对象"));
+    }
+
+    #[tokio::test]
+    async fn silly_tavern_openai_body_enables_reasoning_effort_when_depth_is_high() {
+        let body = format!(
+            r#"{{"choices":[{{"message":{{"content":{}}}}}]}}"#,
+            serde_json::Value::String(valid_silly_tavern_v2_card())
+        );
+        let (base_url, request_handle) =
+            spawn_connection_test_server(complete_http_response("application/json", &body)).await;
+
+        let result = super::convert_character_card_to_silly_tavern(silly_tavern_request(
+            base_url,
+            "high",
+        ))
+        .await;
+        let raw_request = request_handle.await.expect("server task should finish");
+        assert!(result.is_ok(), "conversion should succeed: {:?}", result);
+
+        let body_start = raw_request.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
+        let request_json: Value =
+            serde_json::from_str(&raw_request[body_start..]).expect("request body should be JSON");
+        assert_eq!(request_json["reasoning_effort"], "high");
+        assert_eq!(request_json["max_tokens"], 32000);
+    }
+
+    #[tokio::test]
+    async fn silly_tavern_openai_body_omits_reasoning_effort_when_depth_is_off() {
+        let body = format!(
+            r#"{{"choices":[{{"message":{{"content":{}}}}}]}}"#,
+            serde_json::Value::String(valid_silly_tavern_v2_card())
+        );
+        let (base_url, request_handle) =
+            spawn_connection_test_server(complete_http_response("application/json", &body)).await;
+
+        let result = super::convert_character_card_to_silly_tavern(silly_tavern_request(
+            base_url,
+            "off",
+        ))
+        .await;
+        let raw_request = request_handle.await.expect("server task should finish");
+        assert!(result.is_ok(), "conversion should succeed: {:?}", result);
+
+        let body_start = raw_request.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
+        let request_json: Value =
+            serde_json::from_str(&raw_request[body_start..]).expect("request body should be JSON");
+        assert!(request_json.get("reasoning_effort").is_none());
+        assert_eq!(request_json["temperature"], 0.0);
+    }
+
+    #[tokio::test]
+    async fn silly_tavern_anthropic_body_includes_thinking_when_depth_is_high() {
+        let v2_card = valid_silly_tavern_v2_card();
+        let body = format!(
+            r#"{{"content":[{{"type":"text","text":{}}}]}}"#,
+            serde_json::Value::String(v2_card)
+        );
+        let (base_url, request_handle) =
+            spawn_connection_test_server(complete_http_response("application/json", &body)).await;
+
+        let mut request = silly_tavern_request(base_url, "high");
+        request.model_interface = "Anthropic-compatible".to_string();
+        let result = super::convert_character_card_to_silly_tavern(request).await;
+        let raw_request = request_handle.await.expect("server task should finish");
+        assert!(result.is_ok(), "conversion should succeed: {:?}", result);
+
+        let body_start = raw_request.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
+        let request_json: Value =
+            serde_json::from_str(&raw_request[body_start..]).expect("request body should be JSON");
+        assert!(request_json.get("thinking").is_some());
+        assert!(request_json.get("temperature").is_none());
     }
 }

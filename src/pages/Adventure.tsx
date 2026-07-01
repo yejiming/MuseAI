@@ -1463,7 +1463,17 @@ const useAdventureView = () => {
                         )}
 
                         {(() => {
-                          const parts = msg.content ? msg.content.split(/(\[\[(?:TOOL|THINKING):[^\]]+\]\])/) : [''];
+                          let contentToRender = msg.content || '';
+                          const choicesMatch = contentToRender.match(/<choices>\s*(\[[\s\S]*?\])(?:\s*<\/choices>)?/);
+                          let choices: string[] = [];
+                          if (choicesMatch) {
+                            contentToRender = contentToRender.replace(choicesMatch[0], '');
+                            try {
+                              choices = JSON.parse(choicesMatch[1]);
+                            } catch (e) {}
+                          }
+
+                          const parts = contentToRender.split(/(\[\[(?:TOOL|THINKING):[^\]]+\]\])/);
                           const renderedToolIds = new Set<string>();
                           const getMarkdownPartKey = createStableContentKey(`${msg.id}-md`);
                           const getToolKey = createStableToolKey(`${msg.id}-tool`);
@@ -1526,7 +1536,29 @@ const useAdventureView = () => {
                             );
                           });
 
-                          return [...renderedParts, ...unrenderedTools];
+                          return (
+                            <>
+                              {renderedParts}
+                              {unrenderedTools}
+                              {choices.length > 0 && !isSessionArchived && isLastAgent && (
+                                <div className="book-travel-suggested-choices" style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                  {choices.map((choice, i) => (
+                                    <Button
+                                      key={`choice-${i}`}
+                                      type="dashed"
+                                      style={{ textAlign: 'left', height: 'auto', padding: '8px 12px', whiteSpace: 'normal', color: '#d97757', borderColor: '#d97757' }}
+                                      onClick={() => {
+                                        setInput(choice);
+                                        setInputMode('behavior');
+                                      }}
+                                    >
+                                      {choice}
+                                    </Button>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          );
                         })()}
                       </>
                     )}

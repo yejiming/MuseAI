@@ -996,6 +996,109 @@ async fn analyze_session_memory<R: Runtime>(
         .unwrap())
 }
 
+async fn convert_character_card_to_silly_tavern_endpoint<R: Runtime>(
+    State(app): State<AppHandle<R>>,
+    body: String,
+) -> Result<Response, (StatusCode, String)> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ConvertPayload {
+        source_character_card: Value,
+        world_book_entries: Option<Value>,
+        system_prompt: Option<String>,
+    }
+    let payload: ConvertPayload = serde_json::from_str(&body)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?;
+
+    let doc_dir = resolve_document_dir(&app)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let settings_str = crate::commands::workspace::load_app_state_path(&doc_dir, "settings-store")
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to load settings: {}", e),
+            )
+        })?;
+    let settings_val: Value = serde_json::from_str(&settings_str)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to parse settings: {}", e)))?;
+    let state = settings_val.get("state").ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Invalid settings".to_string(),
+        )
+    })?;
+
+    let model_interface = state
+        .get("modelInterface")
+        .and_then(|v| v.as_str())
+        .unwrap_or("OpenAI")
+        .to_string();
+    let base_url = state
+        .get("llmBaseUrl")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let api_key = state
+        .get("llmApiKey")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let model = state
+        .get("llmModel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if api_key.is_empty() || model.is_empty() || base_url.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "大模型配置缺失，请先在桌面端设置".to_string(),
+        ));
+    }
+
+    let agent_config = state
+        .get("agentConfigs")
+        .and_then(|c| c.get("sillyTavernExporter"));
+    let temperature = agent_config
+        .and_then(|c| c.get("temperature"))
+        .and_then(|v| v.as_f64())
+        .map(|f| f as f32);
+    let max_output_tokens = agent_config
+        .and_then(|c| c.get("maxOutputTokens"))
+        .and_then(|v| v.as_u64())
+        .map(|n| n as u32);
+    let thinking_depth = agent_config
+        .and_then(|c| c.get("thinkingDepth"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let request = crate::models::ConvertCharacterCardToSillyTavernRequest {
+        model_interface,
+        base_url,
+        api_key,
+        model,
+        temperature,
+        max_output_tokens,
+        thinking_depth,
+        source_character_card: payload.source_character_card,
+        world_book_entries: payload.world_book_entries,
+        system_prompt: payload.system_prompt,
+    };
+
+    let result_str = crate::agent::sessions::convert_character_card_to_silly_tavern(request)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(
+            header::CACHE_CONTROL,
+            "no-store, no-cache, must-revalidate, max-age=0",
+        )
+        .body(Body::from(result_str))
+        .unwrap())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ArchivePayload {
@@ -1472,6 +1575,10 @@ pub fn create_mobile_router<R: Runtime>(app_handle: AppHandle<R>) -> Router {
             post(analyze_session_memory::<R>),
         )
         .route("/api/mobile/summarize", post(summarize_title::<R>))
+        .route(
+            "/api/mobile/character-cards/convert-silly-tavern",
+            post(convert_character_card_to_silly_tavern_endpoint::<R>),
+        )
         .route(
             "/api/mobile/sessions/{id}/archive",
             post(archive_session_memory::<R>),
@@ -1974,9 +2081,52 @@ mod tests {
     async fn test_get_lan_ip_is_resolvable() {
         let ip = get_lan_ip();
         // Since we are running in a CI/test environment, it might be Some(ip) or None if completely offline.
-        // We assert that the function executes without panics.
+        // We assert that the function executes without panicking.
         if let Some(resolved) = ip {
             assert!(!resolved.is_loopback());
         }
+    }
+
+    #[tokio::test]
+    async fn test_convert_silly_tavern_rejects_missing_token() {
+        let app = create_mock_app();
+        let router = create_mobile_router(app);
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/mobile/character-cards/convert-silly-tavern")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_convert_silly_tavern_accepts_token() {
+        let app = create_mock_app();
+        let router = create_mobile_router(app);
+        let token = get_mobile_access_token();
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/mobile/character-cards/convert-silly-tavern")
+                    .header("X-Mobile-Token", token)
+                    .body(Body::from(
+                        serde_json::to_string(&json!({"sourceCharacterCard": {}})).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Auth should pass; the handler will fail on missing settings but not with UNAUTHORIZED.
+        assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

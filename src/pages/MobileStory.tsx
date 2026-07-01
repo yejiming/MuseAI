@@ -960,10 +960,20 @@ const useMobileStoryView = () => {
                       ) : (
                         /* Parse thinking and tools */
                         (() => {
-                          const parts = msg.content.split(/(\[\[TOOL:[^\]]+\]\])/);
+                          let contentToRender = msg.content || '';
+                          const choicesMatch = contentToRender.match(/<choices>\s*(\[[\s\S]*?\])(?:\s*<\/choices>)?/);
+                          let choices: string[] = [];
+                          if (choicesMatch) {
+                            contentToRender = contentToRender.replace(choicesMatch[0], '');
+                            try {
+                              choices = JSON.parse(choicesMatch[1]);
+                            } catch (e) {}
+                          }
+
+                          const parts = contentToRender.split(/(\[\[TOOL:[^\]]+\]\])/);
                           const getMarkdownPartKey = createStableContentKey(`${msg.id}-md`);
                           const getToolKey = createStableToolKey(`${msg.id}-tool`);
-                          return parts.map((part) => {
+                          const renderedParts = parts.map((part) => {
                             const match = part.match(/^\[\[TOOL:([^\]]+)\]\]$/);
                             if (match) {
                               const toolId = match[1];
@@ -1022,6 +1032,29 @@ const useMobileStoryView = () => {
                               </ReactMarkdown>
                             ) : null;
                           });
+
+                          return (
+                            <>
+                              {renderedParts}
+                              {choices.length > 0 && !isSessionArchived && msg.id === messages[messages.length - 1]?.id && (
+                                <div className="book-travel-suggested-choices" style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                  {choices.map((choice, i) => (
+                                    <Button
+                                      key={`choice-${i}`}
+                                      type="dashed"
+                                      style={{ textAlign: 'left', height: 'auto', padding: '8px 12px', whiteSpace: 'normal', color: '#d97757', borderColor: '#d97757' }}
+                                      onClick={() => {
+                                        setInput(choice);
+                                        setInputMode('behavior');
+                                      }}
+                                    >
+                                      {choice}
+                                    </Button>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          );
                         })()
                       )}
                     </div>

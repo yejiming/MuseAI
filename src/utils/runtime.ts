@@ -90,6 +90,16 @@ export interface AppInvokeCommands {
     args: { path: string };
     result: string;
   };
+  convert_character_card_to_silly_tavern: {
+    args: {
+      request: {
+        sourceCharacterCard: unknown;
+        worldBookEntries?: unknown;
+        systemPrompt?: string;
+      };
+    };
+    result: string;
+  };
 }
 
 export type AppInvokeCommand = keyof AppInvokeCommands;
@@ -311,6 +321,20 @@ export async function appInvoke<C extends AppInvokeCommand>(
       });
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       return res.json();
+    }
+    case 'convert_character_card_to_silly_tavern': {
+      const res = await fetch(getUrl('/api/mobile/character-cards/convert-silly-tavern'), {
+        method: 'POST',
+        headers,
+        cache: 'no-store',
+        body: JSON.stringify({
+          sourceCharacterCard: cmdArgs.request.sourceCharacterCard,
+          worldBookEntries: cmdArgs.request.worldBookEntries,
+          systemPrompt: cmdArgs.request.systemPrompt,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+      return res.text();
     }
     case 'stop_chat_stream': {
       const res = await fetch(getUrl('/api/mobile/chat/stop'), {

@@ -211,6 +211,21 @@ pub struct AnalyzeMemoryRequest {
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConvertCharacterCardToSillyTavernRequest {
+    pub model_interface: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub temperature: Option<f32>,
+    pub max_output_tokens: Option<u32>,
+    pub thinking_depth: Option<String>,
+    pub source_character_card: Value,
+    pub world_book_entries: Option<Value>,
+    pub system_prompt: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GenerateBackgroundItemsRequest {
     pub model_interface: String,
     pub base_url: String,
