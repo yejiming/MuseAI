@@ -126,6 +126,36 @@ export const isTauriHost = (): boolean => {
   );
 };
 
+export interface LocalWebPreviewContext {
+  isDevelopment: boolean;
+  isTauri: boolean;
+  hostname: string;
+  port: string;
+}
+
+export const isLocalWebPreview = ({
+  isDevelopment,
+  isTauri,
+  hostname,
+  port,
+}: LocalWebPreviewContext): boolean => (
+  isDevelopment &&
+  !isTauri &&
+  hostname.length > 0 &&
+  port === '1420'
+);
+
+export const isLocalWebPreviewHost = (): boolean => {
+  if (typeof window === 'undefined') return false;
+
+  return isLocalWebPreview({
+    isDevelopment: import.meta.env.DEV,
+    isTauri: isTauriHost(),
+    hostname: window.location.hostname,
+    port: window.location.port,
+  });
+};
+
 export const isMobile = (): boolean => {
   if (typeof window === 'undefined') return false;
   // If in vitest/jest test environment, default to desktop layout

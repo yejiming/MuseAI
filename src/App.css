@@ -37,6 +37,59 @@ body {
   width: 100%;
 }
 
+.local-preview-disabled {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: 40px 24px;
+  box-sizing: border-box;
+  background: #faf9f5;
+  color: #33312e;
+}
+
+.local-preview-disabled__content {
+  width: min(100%, 440px);
+  text-align: center;
+}
+
+.local-preview-disabled__mark {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  margin-bottom: 24px;
+  border-radius: 14px;
+  background: #f4e5df;
+  color: #b85f43;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.local-preview-disabled h1 {
+  margin: 0;
+  color: #33312e;
+  font-size: 24px;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.local-preview-disabled p {
+  margin: 14px 0 0;
+  color: #625e58;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.local-preview-disabled small {
+  display: block;
+  margin-top: 8px;
+  color: #918a82;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
@@ -978,6 +1031,385 @@ a:hover {
   flex-direction: column;
   overflow: hidden;
   background: #faf9f5;
+}
+
+.book-travel-page--active {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.book-travel-page--active > .agent-chat__header {
+  grid-row: 1;
+  grid-column: 1 / -1;
+}
+
+.book-travel-page--active > .book-travel-scroll {
+  min-width: 0;
+  grid-row: 2;
+  grid-column: 1;
+}
+
+.book-travel-page--active > .book-travel-composer {
+  min-width: 0;
+  grid-row: 3;
+  grid-column: 1;
+}
+
+.book-travel-status-hud {
+  position: absolute;
+  top: 76px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  width: min(340px, calc(100vw - 32px));
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #e2dbd3;
+  border-radius: 12px;
+  background: #f8f5f0;
+  box-shadow: 0 18px 48px rgba(70, 55, 45, 0.14);
+  color: #33312e;
+  transform-origin: top right;
+  transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.book-travel-status-hud.is-collapsed {
+  bottom: auto;
+  width: min(196px, calc(100vw - 32px));
+  border-color: #e6ddd5;
+  background: #fffaf6;
+  box-shadow: 0 10px 28px rgba(70, 55, 45, 0.1);
+}
+
+.book-travel-status-hud__panel {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.book-travel-status-hud__header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 18px 16px;
+  border-bottom: 1px solid #e8e2da;
+}
+
+.book-travel-status-hud__heading {
+  min-width: 0;
+}
+
+.book-travel-status-hud__eyebrow {
+  display: block;
+  margin-bottom: 3px;
+  color: #9a7364;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.book-travel-status-hud__heading h2 {
+  margin: 0;
+  color: #33312e;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.book-travel-status-hud__heading p {
+  overflow: hidden;
+  margin: 5px 0 0;
+  color: #777069;
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-travel-status-hud__collapse,
+.book-travel-status-hud__compact-button {
+  border: 0;
+  background: transparent;
+  color: #756e67;
+  cursor: pointer;
+  font: inherit;
+}
+
+.book-travel-status-hud__collapse {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border-radius: 8px;
+}
+
+.book-travel-status-hud__collapse:hover,
+.book-travel-status-hud__compact-button:hover {
+  background: #eee8e1;
+  color: #b85f43;
+}
+
+.book-travel-status-hud__collapse:focus-visible,
+.book-travel-status-hud__compact-button:focus-visible,
+.book-travel-hud-text-button:focus-visible,
+.book-travel-hud-details > summary:focus-visible {
+  outline: 2px solid #d97757;
+  outline-offset: 2px;
+}
+
+.book-travel-status-hud__ended {
+  flex-shrink: 0;
+  margin: 12px 18px 0;
+  padding: 7px 10px;
+  border: 1px solid #ead9cf;
+  border-radius: 7px;
+  background: #f7e9e2;
+  color: #a34f38;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.book-travel-status-hud__content {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 18px 24px;
+}
+
+.book-travel-hud-section {
+  padding: 17px 0;
+  border-bottom: 1px solid #e8e2da;
+}
+
+.book-travel-hud-section:last-child {
+  border-bottom: 0;
+}
+
+.book-travel-hud-section h3 {
+  margin: 0 0 10px;
+  color: #5d5650;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.book-travel-hud-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.book-travel-hud-entry {
+  padding: 5px 7px;
+  border-radius: 7px;
+  transition: background-color 200ms cubic-bezier(0.22, 1, 0.36, 1), color 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.book-travel-hud-entry.is-changed {
+  background: #f4dfd5;
+}
+
+.book-travel-hud-entry__label {
+  margin-bottom: 3px;
+  color: #8b837b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.book-travel-hud-entry__content,
+.book-travel-hud-entry__value {
+  color: #3e3a36;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.book-travel-hud-entry__hint,
+.book-travel-hud-empty {
+  color: #938b83;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.book-travel-hud-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.book-travel-hud-tag {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid #e3dcd4;
+  border-radius: 999px;
+  background: #fcfaf7;
+  color: #5b554f;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.book-travel-hud-details {
+  margin-top: 6px;
+}
+
+.book-travel-hud-details > summary {
+  width: fit-content;
+  border-radius: 4px;
+  color: #b85f43;
+  cursor: pointer;
+  font-size: 11px;
+  list-style-position: inside;
+}
+
+.book-travel-hud-details__text {
+  margin-top: 6px;
+  color: #5d5650;
+  white-space: pre-wrap;
+}
+
+.book-travel-hud-details .book-travel-hud-entry {
+  margin-top: 6px;
+  padding: 6px 0 0;
+}
+
+.book-travel-hud-text-button {
+  margin-top: 8px;
+  padding: 3px 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #b85f43;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.book-travel-hud-text-button:hover {
+  color: #93452f;
+}
+
+.book-travel-hud-summary__text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #514c47;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.book-travel-hud-summary__text.is-expanded {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.book-travel-hud-recent {
+  margin-top: 10px;
+}
+
+.book-travel-hud-recent__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.book-travel-hud-recent__turn {
+  color: #5d5650;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.book-travel-hud-recent__turn > div + div {
+  margin-top: 4px;
+}
+
+.book-travel-hud-recent__label {
+  color: #978f87;
+  font-size: 11px;
+}
+
+.book-travel-status-hud__compact {
+  width: 100%;
+}
+
+.book-travel-status-hud__compact-button {
+  display: flex;
+  width: 100%;
+  min-height: 72px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 11px;
+  text-align: left;
+}
+
+.book-travel-status-hud__compact-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.book-travel-status-hud__compact-copy > span {
+  color: #a4644f;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.book-travel-status-hud__compact-copy > strong {
+  overflow: hidden;
+  color: #3f3a36;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .book-travel-status-hud {
+    top: 72px;
+    right: 12px;
+    bottom: 12px;
+    width: min(320px, calc(100vw - 24px));
+  }
+
+  .book-travel-status-hud.is-narrow.is-collapsed {
+    bottom: auto;
+    width: min(184px, calc(100vw - 24px));
+  }
+
+  .book-travel-turns {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .book-travel-composer {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .book-travel-status-hud,
+  .book-travel-hud-entry {
+    transition: none;
+  }
 }
 
 .book-travel-modal-title {

@@ -9,7 +9,6 @@ import {
   DeleteOutlined,
   UserOutlined,
   FileProtectOutlined,
-  ProfileOutlined,
   CommentOutlined,
   ExperimentOutlined,
   BranchesOutlined,
@@ -40,6 +39,8 @@ import { StylePresetSelector } from '../components/StylePresetSelector';
 import { useStylePresetStore } from '../stores/useStylePresetStore';
 import { prependStylePresets } from '../utils/stylePresets';
 import { buildBookTravelCharacterDetails } from '../utils/bookTravelSaveDetails';
+import { buildBookTravelHudModel } from '../utils/bookTravelHud';
+import { BookTravelStatusHud } from '../components/BookTravelStatusHud';
 
 interface ChatStreamEvent {
   runId: string;
@@ -765,6 +766,15 @@ const useStoryView = () => {
   );
   const currentBookTravelScene = bookTravelStore.scenes.find((s) => s.id === bookTravelStore.currentSceneId);
   const currentBookTravelSceneTitle = currentBookTravelScene?.title?.trim();
+  const bookTravelHudModel = isActiveBookTravelScene ? buildBookTravelHudModel({
+    userCharacter: bookTravelStore.userCharacter,
+    currentScene: currentBookTravelScene ?? null,
+    currentState: bookTravelStore.currentState,
+    volatileMemory: bookTravelStore.volatileMemory,
+    summaryMemory: bookTravelStore.summaryMemory,
+    turns: bookTravelStore.turns,
+    isCompleted: bookTravelStore.isCompleted,
+  }) : null;
   const activeBookTravelProgress = bookTravelStore.activeSavedProgressId
     ? bookTravelStore.savedProgresses.find((progress) => progress.id === bookTravelStore.activeSavedProgressId) || null
     : null;
@@ -802,65 +812,6 @@ const useStoryView = () => {
     setBookTravelSaveTitle(title);
     setIsBookTravelSaveChoiceOpen(false);
     message.success('进度已保存');
-  };
-
-  const showBookTravelStatusModal = () => {
-    const currentScene = bookTravelStore.scenes.find((s) => s.id === bookTravelStore.currentSceneId);
-    const summary = bookTravelStore.summaryMemory;
-    const turns = bookTravelStore.turns;
-    Modal.info({
-      title: '穿书状态',
-      width: 680,
-      content: (
-        <div style={{ lineHeight: 1.8, color: '#33312e', maxHeight: 520, overflowY: 'auto' }}>
-          <section style={{ marginBottom: 18 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>当前状态</div>
-            {bookTravelStore.userCharacter && (
-              <div>
-                <strong>扮演身份：</strong>
-                {bookTravelStore.userCharacter.name}（{bookTravelStore.userCharacter.identity}）
-                <br /><strong>目标：</strong>{bookTravelStore.userCharacter.goal}
-              </div>
-            )}
-            <div style={{ marginTop: 8 }}>
-              <strong>时间：</strong>{String((bookTravelStore.currentState as any)?.time || currentScene?.time || '未知')}
-              <br /><strong>地点：</strong>{String((bookTravelStore.currentState as any)?.location || currentScene?.location || '未知')}
-            </div>
-            {bookTravelStore.volatileMemory && (
-              <div style={{ marginTop: 8 }}>
-                {Object.entries(bookTravelStore.volatileMemory).map(([k, v]) => (
-                  <div key={k}><strong>{k}：</strong>{String(v)}</div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>剧情回顾</div>
-            {summary ? (
-              <div style={{ marginBottom: 12, padding: 12, background: '#faf9f5', borderRadius: 8 }}>
-                <strong>剧情摘要：</strong>
-                <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{String(summary)}</div>
-              </div>
-            ) : null}
-            {turns.length > 0 ? (
-              <div>
-                <strong>近期回合：</strong>
-                {turns.slice(-5).map((turn, idx) => (
-                  <div key={turn.id} style={{ marginTop: 8, padding: 8, background: '#faf9f5', borderRadius: 6 }}>
-                    <div style={{ fontSize: 12, color: '#8c8882', marginBottom: 4 }}>回合 {Math.max(1, turns.length - 5 + idx + 1)}</div>
-                    <div><strong>你：</strong>{turn.userInput}</div>
-                    <div style={{ marginTop: 4 }}><strong>剧情：</strong>{turn.narrativeOutput}</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div style={{ color: '#8c8882' }}>暂无剧情记录</div>
-            )}
-          </section>
-        </div>
-      ),
-    });
   };
 
   const runChangeSceneWriterForPlan = async ({
@@ -1515,7 +1466,7 @@ const useStoryView = () => {
   );
 
   return (
-    <div className="agent-chat book-travel-page">
+    <div className={`agent-chat book-travel-page ${isActiveBookTravelScene ? 'book-travel-page--active' : ''}`}>
 
       <SaveChoiceModal
         open={isBookTravelSaveChoiceOpen}
@@ -2181,29 +2132,7 @@ const useStoryView = () => {
 
             <div className="agent-composer__actions book-travel-composer-actions">
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {bookTravelStore.scenes.length > 0 ? (
-                  <Tooltip title="查看当前状态和剧情回顾">
-                    <Button
-                      aria-label="状态"
-                      icon={<ProfileOutlined />}
-                      onClick={showBookTravelStatusModal}
-                      size="small"
-                      type="text"
-                      style={{ color: '#d97757', fontWeight: 500, paddingInline: 8 }}
-                    >
-                      状态
-                    </Button>
-                  </Tooltip>
-                ) : (
-                  <span style={{ fontSize: '12px', color: '#8c8882' }}>
-                    当前模式：
-                    <Tag color="orange" style={{ margin: 0 }}>
-                      {inputMode === 'speech' ? '说话 (我：“内容”)' : inputMode === 'behavior' ? '动作 (（我 内容）)' : '第三方剧情推进'}
-                    </Tag>
-                  </span>
-                )}
-              </div>
+              <div />
 
               <div className="agent-send-cluster" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <Tooltip color="#fff" placement="topRight" title={contextTooltip} overlayInnerStyle={{ width: 'max-content', maxWidth: 320, padding: '8px 12px', border: '1px solid #eae6df' }}>
@@ -2238,6 +2167,13 @@ const useStoryView = () => {
           </div>
         </div>
       )}
+
+      {bookTravelHudModel ? (
+        <BookTravelStatusHud
+          model={bookTravelHudModel}
+          restorationKey={bookTravelStore.activeSavedProgressId}
+        />
+      ) : null}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { Modal } from 'antd';
@@ -10,6 +10,19 @@ import { useStylePresetStore } from '../stores/useStylePresetStore';
 
 function renderWithRouter(ui: React.ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
+
+function mockNarrowBookTravelLayout(matches: boolean) {
+  vi.mocked(window.matchMedia).mockImplementation((query: string) => ({
+    matches: query.includes('1100px') ? matches : false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
 }
 
 function emitBookTravelEvent(payload: any) {
@@ -296,6 +309,7 @@ describe('Story book-travel mode', () => {
   beforeEach(() => {
     Modal.destroyAll();
     document.body.innerHTML = '';
+    mockNarrowBookTravelLayout(false);
     resetStoryBookTravelStores();
     useStylePresetStore.setState({ presets: [] });
   });
@@ -318,6 +332,7 @@ describe('Story book-travel mode', () => {
     expect(screen.getByText('选择穿书素材')).toBeInTheDocument();
     expect(screen.getByText(/暂无已装配素材/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /开始穿书/ })).toBeDisabled();
+    expect(screen.queryByRole('complementary', { name: '穿书状态' })).not.toBeInTheDocument();
   });
 
   it('loads selected assembled material and shows entry setup with recommended identity', async () => {
@@ -378,7 +393,7 @@ describe('Story book-travel mode', () => {
 
     renderWithRouter(<Story />);
 
-    expect(screen.getByText('沈府婚宴')).toBeInTheDocument();
+    expect(screen.getAllByText('沈府婚宴').length).toBeGreaterThan(0);
     expect(screen.getByText('她在喜房里睁开眼。')).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/说些什么/)).toBeInTheDocument();
   });
@@ -405,6 +420,7 @@ describe('Story book-travel mode', () => {
     // Composer should be hidden when completed
     expect(screen.queryByPlaceholderText(/说些什么/)).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/做点什么/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole('complementary', { name: '穿书状态' })).getByText('旅程已结束')).toBeInTheDocument();
   });
 
   it('enables start button after selecting material, entry point and character', async () => {
@@ -468,14 +484,14 @@ describe('Story book-travel mode', () => {
       }),
     });
 
-    expect(await screen.findByText('猫头鹰来信')).toBeInTheDocument();
+    expect((await screen.findAllByText('猫头鹰来信')).length).toBeGreaterThan(0);
     expect(screen.queryByText('选择穿书素材')).not.toBeInTheDocument();
     expect(screen.getByText(/时间：1991年夏，清晨/)).toBeInTheDocument();
     expect(screen.getByText(/地点：女贞路4号周边/)).toBeInTheDocument();
     const situationCards = screen.getAllByTestId('scene-situation-card');
     expect(situationCards[situationCards.length - 1]).toHaveTextContent('场景目标：拿到入学信、避免惊动德思礼家');
     expect(situationCards[situationCards.length - 1]).toHaveTextContent('当前局势：窗外雨声渐急，猫头鹰停在窗沿上，爪下压着一封烫金信。');
-    expect(screen.getByText('林晚')).toBeInTheDocument();
+    expect(screen.getAllByText('林晚').length).toBeGreaterThan(0);
     expect(await screen.findByText(/场景写手正在书写/)).toBeInTheDocument();
     expect(screen.queryByText('猫头鹰轻轻敲了敲窗。')).not.toBeInTheDocument();
 
@@ -500,7 +516,7 @@ describe('Story book-travel mode', () => {
 
     renderWithRouter(<Story />);
 
-    expect(screen.getByText('沈府婚宴')).toBeInTheDocument();
+    expect(screen.getAllByText('沈府婚宴').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: '重开新冒险' }));
 
     expect(await screen.findByText('选择穿书素材')).toBeInTheDocument();
@@ -509,22 +525,115 @@ describe('Story book-travel mode', () => {
     expect(useBookTravelStore.getState().selectedMaterialId).toBeNull();
   });
 
-  it('shows book-travel status and recap from the composer status button', async () => {
+  it('shows a persistent Chinese HUD and removes the composer status modal action', () => {
     setActiveBookTravelScene();
 
     renderWithRouter(<Story />);
 
     expect(screen.queryByText(/当前模式/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '状态' }));
+    const hud = screen.getByRole('complementary', { name: '穿书状态' });
+    expect(within(hud).getByText('旅程状态')).toBeInTheDocument();
+    expect(within(hud).getByText(/林晚（替嫁者）/)).toBeInTheDocument();
+    expect(within(hud).getByText('第一夜')).toBeInTheDocument();
+    expect(within(hud).getByText('红头盖')).toBeInTheDocument();
+    expect(within(hud).getByText('剧情回顾')).toBeInTheDocument();
+    expect(within(hud).getByText(/林晚在沈府喜房醒来/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '状态' })).not.toBeInTheDocument();
+    expect(screen.queryByText('OK')).not.toBeInTheDocument();
+  });
 
-    expect(await screen.findAllByText('穿书状态')).not.toHaveLength(0);
-    expect(screen.getByText('当前状态')).toBeInTheDocument();
-    expect(screen.getAllByText(/林晚（替嫁者）/)).not.toHaveLength(0);
-    expect(screen.getAllByText(/第一夜/)).not.toHaveLength(0);
-    expect(screen.getAllByText(/红头盖/)).not.toHaveLength(0);
-    expect(screen.getByText('剧情回顾')).toBeInTheDocument();
-    expect(screen.getByText(/林晚在沈府喜房醒来/)).toBeInTheDocument();
-    expect(screen.getAllByText(/她在喜房里睁开眼。/)).not.toHaveLength(0);
+  it('expands no more than the three most recent turns in the HUD recap', () => {
+    setActiveBookTravelScene();
+    useBookTravelStore.setState({
+      turns: Array.from({ length: 5 }, (_, index) => ({
+        id: `turn-${index + 1}`,
+        userInput: `行动 ${index + 1}`,
+        narrativeOutput: `剧情 ${index + 1}`,
+        stateSnapshot: {},
+        createdBeatIds: [],
+      })),
+    });
+
+    renderWithRouter(<Story />);
+
+    const hud = screen.getByRole('complementary', { name: '穿书状态' });
+    fireEvent.click(within(hud).getByRole('button', { name: '展开近期回合' }));
+    expect(within(hud).queryByText('行动 2')).not.toBeInTheDocument();
+    expect(within(hud).getByText('行动 3')).toBeInTheDocument();
+    expect(within(hud).getByText('行动 4')).toBeInTheDocument();
+    expect(within(hud).getByText('行动 5')).toBeInTheDocument();
+  });
+
+  it('removes the summary clamp when the HUD recap is expanded', () => {
+    setActiveBookTravelScene();
+    useBookTravelStore.setState({
+      summaryMemory: '林晚逐步查清替嫁局与沈府密道的联系。'.repeat(10),
+    });
+
+    renderWithRouter(<Story />);
+
+    const hud = screen.getByRole('complementary', { name: '穿书状态' });
+    const expandSummary = within(hud).getByRole('button', { name: '展开剧情摘要' });
+    fireEvent.click(expandSummary);
+
+    expect(expandSummary).toHaveAttribute('aria-expanded', 'true');
+    expect(hud.querySelector('.book-travel-hud-summary__text')).toHaveClass('is-expanded');
+  });
+
+  it('updates the HUD after Book Travel state changes', async () => {
+    setActiveBookTravelScene();
+    renderWithRouter(<Story />);
+
+    const hud = screen.getByRole('complementary', { name: '穿书状态' });
+    act(() => {
+      useBookTravelStore.setState({
+        currentState: { time: '第二夜', location: '沈府偏院' },
+        volatileMemory: { clues: ['红头盖', '婚书碎片'] },
+      });
+    });
+
+    expect(await within(hud).findByText('第二夜')).toBeInTheDocument();
+    expect(within(hud).getByText('沈府偏院')).toBeInTheDocument();
+    expect(within(hud).getByText('婚书碎片')).toBeInTheDocument();
+    await waitFor(() => expect(hud.querySelector('.book-travel-hud-entry.is-changed')).not.toBeNull());
+  });
+
+  it('renders a compact floating summary and supports keyboard opening on narrow layouts', () => {
+    mockNarrowBookTravelLayout(true);
+    setActiveBookTravelScene();
+
+    renderWithRouter(<Story />);
+
+    const hud = screen.getByRole('complementary', { name: '穿书状态' });
+    expect(hud).toHaveClass('is-floating', 'is-narrow', 'is-collapsed');
+    expect(within(hud).getByText('旅程状态')).toBeInTheDocument();
+    expect(within(hud).getByText('沈府婚宴')).toBeInTheDocument();
+    expect(hud.querySelector('.book-travel-status-hud__rail')).not.toBeInTheDocument();
+
+    const openButton = within(hud).getByRole('button', { name: '展开穿书状态' });
+    expect(openButton).toHaveClass('book-travel-status-hud__compact-button');
+    openButton.focus();
+    expect(openButton).toHaveFocus();
+    fireEvent.keyDown(openButton, { key: 'Enter' });
+    expect(hud).toHaveClass('is-narrow', 'is-open');
+    expect(within(hud).getByRole('button', { name: '收起穿书状态' })).toBeInTheDocument();
+
+    fireEvent.keyDown(hud, { key: 'Escape' });
+    expect(hud).toHaveClass('is-narrow', 'is-collapsed');
+  });
+
+  it('closes the expanded floating HUD with Escape on wide layouts', () => {
+    setActiveBookTravelScene();
+    renderWithRouter(<Story />);
+
+    const hud = screen.getByRole('complementary', { name: '穿书状态' });
+    expect(hud).toHaveClass('is-floating', 'is-wide', 'is-open');
+
+    fireEvent.keyDown(hud, { key: 'Escape' });
+
+    expect(hud).toHaveClass('is-wide', 'is-collapsed');
+    expect(within(hud).getByText('旅程状态')).toBeInTheDocument();
+    expect(within(hud).getByText('沈府婚宴')).toBeInTheDocument();
   });
 
   it('shows a submitted book-travel action immediately and locks sending while it is processed', async () => {
@@ -623,7 +732,7 @@ describe('Story book-travel mode', () => {
       }),
     });
 
-    expect(await screen.findByText('沈府正厅')).toBeInTheDocument();
+    expect((await screen.findAllByText('沈府正厅')).length).toBeGreaterThan(0);
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_change_scene_stream', expect.anything());
     });
@@ -695,7 +804,7 @@ describe('Story book-travel mode', () => {
       }),
     });
 
-    expect(await screen.findByText('沈府偏院')).toBeInTheDocument();
+    expect((await screen.findAllByText('沈府偏院')).length).toBeGreaterThan(0);
     await waitFor(() => {
       expect(writerRuns).toBe(1);
     });

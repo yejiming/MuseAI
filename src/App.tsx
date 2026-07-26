@@ -24,11 +24,11 @@ import { useSettingsStore } from './stores/useSettingsStore';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useEffect } from 'react';
-import { isMobile } from './utils/runtime';
+import { isLocalWebPreviewHost, isMobile } from './utils/runtime';
 import { applyPartnerStoreContent } from './utils/partnerStoreSync';
 import './App.css';
 
-function App() {
+function MuseApplication() {
   const setWorksDirectory = useSettingsStore((s) => s.setWorksDirectory);
   const mobileEnv = isMobile();
 
@@ -91,6 +91,27 @@ function App() {
       </Routes>
     </Router>
   );
+}
+
+function LocalPreviewUnavailable() {
+  return (
+    <main className="local-preview-disabled">
+      <div className="local-preview-disabled__content">
+        <span className="local-preview-disabled__mark" aria-hidden="true">M</span>
+        <h1>网页预览已关闭</h1>
+        <p>请通过 MuseAI 桌面应用使用完整功能。</p>
+        <small>此地址仅用于桌面应用的开发连接。</small>
+      </div>
+    </main>
+  );
+}
+
+function App() {
+  if (isLocalWebPreviewHost()) {
+    return <LocalPreviewUnavailable />;
+  }
+
+  return <MuseApplication />;
 }
 
 export default App;

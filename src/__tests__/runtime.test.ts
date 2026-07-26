@@ -3,6 +3,7 @@ import {
   appInvoke,
   clearMobileToken,
   getMobileToken,
+  isLocalWebPreview,
   isMobile,
   listenStream,
   setMobileToken,
@@ -66,6 +67,44 @@ describe('Runtime Utility & Bridge', () => {
       (window as any).__TAURI_IPC__ = () => {};
       window.location.search = '?token=abcd';
       expect(isMobile()).toBe(true);
+    });
+  });
+
+  describe('local web preview detection', () => {
+    it('blocks a non-Tauri browser on the Vite development port', () => {
+      expect(isLocalWebPreview({
+        isDevelopment: true,
+        isTauri: false,
+        hostname: 'localhost',
+        port: '1420',
+      })).toBe(true);
+    });
+
+    it('allows the Tauri WebView to use the Vite development port', () => {
+      expect(isLocalWebPreview({
+        isDevelopment: true,
+        isTauri: true,
+        hostname: 'localhost',
+        port: '1420',
+      })).toBe(false);
+    });
+
+    it('allows LAN browser origins that are not the Vite development port', () => {
+      expect(isLocalWebPreview({
+        isDevelopment: true,
+        isTauri: false,
+        hostname: '192.168.1.8',
+        port: '9527',
+      })).toBe(false);
+    });
+
+    it('does not block production builds', () => {
+      expect(isLocalWebPreview({
+        isDevelopment: false,
+        isTauri: false,
+        hostname: 'localhost',
+        port: '1420',
+      })).toBe(false);
     });
   });
 

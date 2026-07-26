@@ -1,6 +1,6 @@
 [package]
 name = "museai"
-version = "0.9.2"
+version = "0.9.3"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
