@@ -1,5 +1,5 @@
 import React from 'react';
-import { Form, Input, Button, InputNumber, Divider, Typography, Select, message, Anchor, Card, Modal, Space, Popconfirm } from 'antd';
+import { Form, Input, Button, InputNumber, Divider, Typography, Select, message, Anchor, Card, Modal, Space, Popconfirm, Switch } from 'antd';
 import {
   SettingOutlined,
   BookOutlined,
@@ -394,13 +394,28 @@ const useSettingsView = () => {
   const [isAddModalVisible, setIsAddModalVisible] = React.useState(false);
   const [isTesting, setIsTesting] = React.useState(false);
   const [testResult, setTestResult] = React.useState<{ success: boolean; msg: string } | null>(null);
-  const [mobileStatus, setMobileStatus] = React.useState<{ isRunning: boolean; url: string | null; token: string | null; error: string | null } | null>(null);
+  const [mobileStatus, setMobileStatus] = React.useState<{ isRunning: boolean; url: string | null; token: string | null; fixedTokenEnabled: boolean; error: string | null } | null>(null);
+  const [fixedTokenUpdating, setFixedTokenUpdating] = React.useState(false);
 
   React.useEffect(() => {
     invoke('get_mobile_service_status')
       .then((status: any) => setMobileStatus(status))
       .catch((e) => console.error('Failed to get mobile service status:', e));
   }, []);
+
+  const handleToggleFixedToken = async (checked: boolean) => {
+    try {
+      setFixedTokenUpdating(true);
+      await invoke('set_mobile_fixed_token', { enabled: checked });
+      const status: any = await invoke('get_mobile_service_status');
+      setMobileStatus(status);
+      message.success(checked ? '访问令牌已固定，重启应用后保持不变' : '访问令牌已恢复为随机生成');
+    } catch (err) {
+      message.error('切换固定令牌失败，请重试');
+    } finally {
+      setFixedTokenUpdating(false);
+    }
+  };
 
   // Retrieve current active model configuration
   const currentModel = store.models?.find((m) => m.id === store.selectedModelId) || store.models?.[0];
@@ -728,6 +743,31 @@ const useSettingsView = () => {
               }}
               styles={{ body: { padding: '24px' } }}
             >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: 16,
+                  marginBottom: 20,
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <Text style={{ fontWeight: 600, color: '#33312e', fontSize: 14, display: 'block' }}>
+                    令牌固定不变
+                  </Text>
+                  <Text style={{ fontSize: 12, color: '#8c857b', display: 'block', marginTop: 4, lineHeight: 1.6 }}>
+                    开启后，每次启动应用都会使用同一个访问令牌，下次连接无需重新获取；关闭后每次启动随机生成新令牌。
+                  </Text>
+                </div>
+                <Switch
+                  aria-label="令牌固定不变"
+                  checked={mobileStatus?.fixedTokenEnabled ?? false}
+                  disabled={!mobileStatus || fixedTokenUpdating}
+                  loading={fixedTokenUpdating}
+                  onChange={handleToggleFixedToken}
+                />
+              </div>
               {mobileStatus ? (
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
                   <div

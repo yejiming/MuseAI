@@ -269,6 +269,7 @@ pub fn run() {
             load_app_state,
             save_app_state,
             mobile_server::get_mobile_service_status,
+            mobile_server::set_mobile_fixed_token,
         ])
         .manage(ActiveStreams(Mutex::new(HashMap::new())))
         .build(tauri::generate_context!())

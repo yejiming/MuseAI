@@ -30,11 +30,12 @@ pub struct MobileServiceStatus {
     pub is_running: bool,
     pub url: Option<String>,
     pub token: Option<String>,
+    pub fixed_token_enabled: bool,
     pub error: Option<String>,
 }
 
 static MOBILE_SERVICE_STATUS: OnceLock<Mutex<MobileServiceStatus>> = OnceLock::new();
-static MOBILE_ACCESS_TOKEN: OnceLock<String> = OnceLock::new();
+static MOBILE_ACCESS_TOKEN: OnceLock<Mutex<String>> = OnceLock::new();
 
 static SSE_DISPATCHER: OnceLock<Mutex<HashMap<String, UnboundedSender<ChatStreamEvent>>>> =
     OnceLock::new();
@@ -67,8 +68,95 @@ pub fn clean_stream(run_id: &str) {
     }
 }
 
-pub fn get_mobile_access_token() -> &'static str {
-    MOBILE_ACCESS_TOKEN.get_or_init(|| uuid::Uuid::new_v4().to_string())
+fn fixed_mobile_token_path(base: &std::path::Path) -> std::path::PathBuf {
+    base.join("MuseAI").join("config").join("mobile-fixed-token")
+}
+
+fn load_token_from_path(path: &std::path::Path) -> Option<String> {
+    fs::read_to_string(path)
+        .ok()
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+}
+
+fn current_fixed_mobile_token_path() -> Option<std::path::PathBuf> {
+    let handle = WRY_APP_HANDLE.get()?;
+    let doc_dir = resolve_document_dir(handle).ok()?;
+    Some(fixed_mobile_token_path(&doc_dir))
+}
+
+pub fn is_fixed_mobile_token_enabled() -> bool {
+    current_fixed_mobile_token_path()
+        .and_then(|path| load_token_from_path(&path))
+        .is_some()
+}
+
+fn set_mobile_access_token(token: String) {
+    let cell = MOBILE_ACCESS_TOKEN.get_or_init(|| Mutex::new(String::new()));
+    *cell.lock().unwrap() = token;
+}
+
+pub fn get_mobile_access_token() -> String {
+    let cell = MOBILE_ACCESS_TOKEN.get_or_init(|| Mutex::new(String::new()));
+    let mut guard = cell.lock().unwrap();
+    if guard.is_empty() {
+        *guard = current_fixed_mobile_token_path()
+            .and_then(|path| load_token_from_path(&path))
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    }
+    guard.clone()
+}
+
+/// Enables or disables the fixed mobile access token under a given user data root.
+/// When enabled the token is persisted to `config/mobile-fixed-token` and reused
+/// across restarts; when disabled the persisted token is removed and a fresh
+/// random token is generated for the current session.
+pub fn set_mobile_fixed_token_at(base: &std::path::Path, enabled: bool) -> Result<String, String> {
+    let path = fixed_mobile_token_path(base);
+    if enabled {
+        let token =
+            load_token_from_path(&path).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::write(&path, &token).map_err(|e| e.to_string())?;
+        set_mobile_access_token(token.clone());
+        Ok(token)
+    } else {
+        let _ = fs::remove_file(&path);
+        let token = uuid::Uuid::new_v4().to_string();
+        set_mobile_access_token(token.clone());
+        Ok(token)
+    }
+}
+
+#[tauri::command]
+pub fn set_mobile_fixed_token(app: AppHandle, enabled: bool) -> Result<String, String> {
+    let doc_dir = resolve_document_dir(&app)?;
+    let token = set_mobile_fixed_token_at(&doc_dir, enabled)?;
+    refresh_status_for_fixed_token();
+    Ok(token)
+}
+
+/// Rebuilds the cached service status after the access token changed, so the
+/// frontend always reads the current token, URL and fixed-token flag.
+fn refresh_status_for_fixed_token() {
+    let status = get_status();
+    let enabled = is_fixed_mobile_token_enabled();
+    let token = get_mobile_access_token();
+    let url = status
+        .url
+        .as_deref()
+        .and_then(|url| url.split_once("?token="))
+        .map(|(base, _)| format!("{}?token={}", base, token))
+        .unwrap_or_else(|| status.url.clone().unwrap_or_default());
+    set_status(MobileServiceStatus {
+        is_running: status.is_running,
+        url: status.is_running.then_some(url),
+        token: status.is_running.then_some(token.clone()),
+        fixed_token_enabled: enabled,
+        error: status.error,
+    });
 }
 
 pub fn get_status() -> MobileServiceStatus {
@@ -78,6 +166,7 @@ pub fn get_status() -> MobileServiceStatus {
                 is_running: false,
                 url: None,
                 token: None,
+                fixed_token_enabled: false,
                 error: None,
             })
         })
@@ -92,6 +181,7 @@ pub fn set_status(status: MobileServiceStatus) {
             is_running: false,
             url: None,
             token: None,
+            fixed_token_enabled: false,
             error: None,
         })
     });
@@ -184,7 +274,7 @@ fn validate_token(req: &Request) -> bool {
 
     if let Some(query) = req.uri().query() {
         if let Some(token) = parse_query(query).get("token") {
-            if token == expected {
+            if token == &expected {
                 return true;
             }
         }
@@ -1611,19 +1701,21 @@ pub async fn start_server<R: Runtime>(app_handle: AppHandle<R>) -> Result<(), St
             is_running: false,
             url: None,
             token: None,
+            fixed_token_enabled: false,
             error: Some(err_msg.clone()),
         });
         return Err(err_msg);
     };
 
     let lan_ip = get_lan_ip().unwrap_or(IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
-    let token = get_mobile_access_token().to_string();
+    let token = get_mobile_access_token();
     let url = format!("http://{}:{}/?token={}", lan_ip, port, token);
 
     set_status(MobileServiceStatus {
         is_running: true,
         url: Some(url),
         token: Some(token),
+        fixed_token_enabled: is_fixed_mobile_token_enabled(),
         error: None,
     });
 
@@ -1660,6 +1752,55 @@ mod tests {
         let token2 = get_mobile_access_token();
         assert!(!token1.is_empty());
         assert_eq!(token1, token2);
+    }
+
+    #[test]
+    fn test_fixed_token_refresh_updates_cached_status() {
+        let stale_token = "stale-token".to_string();
+        set_status(MobileServiceStatus {
+            is_running: true,
+            url: Some(format!("http://192.168.1.2:4080/?token={}", stale_token)),
+            token: Some(stale_token.clone()),
+            fixed_token_enabled: false,
+            error: None,
+        });
+        refresh_status_for_fixed_token();
+        let status = get_status();
+        assert!(status.is_running);
+        let token = status.token.clone().expect("token set");
+        assert_ne!(token, stale_token);
+        assert_eq!(
+            status.url.clone().expect("url set"),
+            format!("http://192.168.1.2:4080/?token={}", token)
+        );
+        assert_eq!(
+            status.fixed_token_enabled,
+            is_fixed_mobile_token_enabled()
+        );
+    }
+
+    #[test]
+    fn test_fixed_mobile_token_enable_disable() {
+        let root = std::env::temp_dir().join(format!(
+            "museai-fixed-token-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+
+        let enabled_token = set_mobile_fixed_token_at(&root, true).expect("enable fixed token");
+        assert!(!enabled_token.is_empty());
+        assert!(fixed_mobile_token_path(&root).exists());
+
+        // Enabling again reuses the same persisted token instead of generating a new one.
+        let again = set_mobile_fixed_token_at(&root, true).expect("re-enable fixed token");
+        assert_eq!(enabled_token, again);
+
+        let disabled_token = set_mobile_fixed_token_at(&root, false).expect("disable fixed token");
+        assert!(!disabled_token.is_empty());
+        assert_ne!(enabled_token, disabled_token);
+        assert!(!fixed_mobile_token_path(&root).exists());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]
