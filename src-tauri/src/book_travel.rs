@@ -217,22 +217,66 @@ fn request_for_role(
     BookTravelStructuredRequest { role, ..request }
 }
 
+fn escape_json_control_chars(json: &str) -> String {
+    // 修复模型把换行/制表符等控制字符直接写进 JSON 字符串值（未转义）导致解析失败：
+    // 仅替换字符串内部的原始控制字符，字符串外的空白保持原样。
+    let mut result = String::with_capacity(json.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    for ch in json.chars() {
+        if in_string {
+            if escaped {
+                result.push(ch);
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => {
+                    result.push(ch);
+                    escaped = true;
+                }
+                '"' => {
+                    in_string = false;
+                    result.push(ch);
+                }
+                c if (c as u32) < 0x20 || c == '\u{7f}' => match c {
+                    '\u{08}' => result.push_str("\\b"),
+                    '\u{09}' => result.push_str("\\t"),
+                    '\u{0a}' => result.push_str("\\n"),
+                    '\u{0c}' => result.push_str("\\f"),
+                    '\u{0d}' => result.push_str("\\r"),
+                    _ => result.push_str(&format!("\\u{:04x}", c as u32)),
+                },
+                _ => result.push(ch),
+            }
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+        }
+        result.push(ch);
+    }
+    result
+}
+
 fn extract_json_text(raw: &str) -> String {
     let trimmed = raw.trim();
-    if !trimmed.starts_with("```") {
-        return trimmed.to_string();
-    }
-    let without_opening = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```JSON"))
-        .or_else(|| trimmed.strip_prefix("```"))
-        .unwrap_or(trimmed)
-        .trim();
-    without_opening
-        .strip_suffix("```")
-        .unwrap_or(without_opening)
-        .trim()
-        .to_string()
+    let extracted = if !trimmed.starts_with("```") {
+        trimmed.to_string()
+    } else {
+        let without_opening = trimmed
+            .strip_prefix("```json")
+            .or_else(|| trimmed.strip_prefix("```JSON"))
+            .or_else(|| trimmed.strip_prefix("```"))
+            .unwrap_or(trimmed)
+            .trim();
+        without_opening
+            .strip_suffix("```")
+            .unwrap_or(without_opening)
+            .trim()
+            .to_string()
+    };
+    escape_json_control_chars(&extracted)
 }
 
 pub fn build_structured_call(
@@ -1196,6 +1240,43 @@ mod tests {
                 story_progress: 1,
             }
         );
+    }
+
+    #[test]
+    fn parses_json_with_raw_control_characters_in_strings() {
+        let previous = PlannerOutput {
+            input_classification: "insert-beat".to_string(),
+            story_progress: 1,
+        };
+
+        // 字符串字面量里的 \n 是真实换行符，模拟模型未转义控制字符的输出
+        let raw = "{\"inputClassification\":\"change-scene\",\"storyProgress\":2,\"note\":\"第一段。\n\n第二段。\"}";
+        let parsed = parse_book_travel_json::<PlannerOutput>(raw, previous)
+            .expect("raw control characters should be escaped before parse");
+
+        assert_eq!(parsed.input_classification, "change-scene");
+        assert_eq!(parsed.story_progress, 2);
+    }
+
+    #[test]
+    fn extract_json_text_escapes_raw_newlines_only_inside_strings() {
+        let raw = "{\n  \"content\": \"第一段。\n\n第二段。\"\n}";
+        let extracted = extract_json_text(raw);
+
+        // 字符串外的换行（缩进/格式化）应保留，字符串内的原始换行应被转义
+        assert!(extracted.contains('\n'));
+        assert!(!extracted.contains("第一段。\n"));
+        let value: serde_json::Value =
+            serde_json::from_str(&extracted).expect("extracted text should be valid JSON");
+        assert_eq!(value["content"], "第一段。\n\n第二段。");
+    }
+
+    #[test]
+    fn extract_json_text_leaves_escaped_sequences_unchanged() {
+        let raw = r#"{"content":"第一段。\n\n第二段。"}"#;
+        let extracted = extract_json_text(raw);
+
+        assert_eq!(extracted, r#"{"content":"第一段。\n\n第二段。"}"#);
     }
 
     #[test]

@@ -681,6 +681,44 @@ describe('Story book-travel mode', () => {
     await waitFor(() => expect(sendButton).toBeEnabled());
   });
 
+  it('recovers when the scene writer returns JSON with raw newlines inside a string value', async () => {
+    const classification = createDeferred<{ classification: 'insert-beat' }>();
+    invokeMock.mockImplementation((command: string, args?: any) => {
+      if (command === 'classify_book_travel_input') return classification.promise;
+      if (command === 'start_write_book_travel_insert_beat_stream') {
+        return Promise.resolve({ runId: 'raw-newline-insert-run' });
+      }
+      return defaultInvoke(command, args);
+    });
+    setActiveBookTravelScene();
+
+    renderWithRouter(<Story />);
+
+    const inputBox = screen.getByPlaceholderText(/说些什么/);
+    fireEvent.change(inputBox, { target: { value: '查看窗外动静' } });
+    const sendButton = document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement;
+    fireEvent.click(sendButton);
+
+    expect(await screen.findByText(/查看窗外动静/)).toBeInTheDocument();
+    classification.resolve({ classification: 'insert-beat' });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_insert_beat_stream', expect.anything());
+    });
+
+    // 模拟 deepseek 等模型把 beat.content 的段落分隔写成原始换行（未转义），产出非法 JSON
+    const rawJson = '{\n  "id": "scene-1",\n  "beat": { "id": "beat-2", "content": "她凑近窗缝，月光照亮半截婚书。\n\n她屏住呼吸，伸手去够。" },\n  "volatileMemoryPatch": { "lastAction": "查看窗外动静" }\n}';
+    emitBookTravelEvent({
+      runId: 'raw-newline-insert-run',
+      eventType: 'done',
+      message: rawJson,
+    });
+
+    expect(await screen.findByText(/她凑近窗缝，月光照亮半截婚书。\s*她屏住呼吸，伸手去够。/)).toBeInTheDocument();
+    expect(screen.queryByText(/写手生成失败/)).not.toBeInTheDocument();
+    fireEvent.change(inputBox, { target: { value: '继续查看窗外动静' } });
+    await waitFor(() => expect(sendButton).toBeEnabled());
+  });
+
   it('shows new scene information after planning before the scene writer finishes', async () => {
     const classification = createDeferred<{ classification: 'change-scene' }>();
     invokeMock.mockImplementation((command: string, args?: any) => {

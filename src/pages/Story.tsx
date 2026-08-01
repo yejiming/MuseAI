@@ -83,6 +83,52 @@ const formatBookTravelUserInput = (text: string, mode: 'speech' | 'behavior' | '
 };
 
 
+const escapeControlCharactersInJson = (jsonStr: string): string => {
+  // 修复模型把换行/制表符等控制字符直接写进 JSON 字符串值（未转义）导致的
+  // "Bad control character in string literal" 解析失败：仅替换字符串内部的原始控制字符。
+  const escapeMap: Record<number, string> = {
+    0x08: '\\b',
+    0x09: '\\t',
+    0x0a: '\\n',
+    0x0c: '\\f',
+    0x0d: '\\r',
+  };
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of jsonStr) {
+    if (inString) {
+      if (escaped) {
+        result += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        result += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+        result += ch;
+        continue;
+      }
+      const code = ch.charCodeAt(0);
+      if (code < 0x20 || code === 0x7f) {
+        result += escapeMap[code] ?? `\\u${code.toString(16).padStart(4, '0')}`;
+        continue;
+      }
+      result += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    }
+    result += ch;
+  }
+  return result;
+};
+
 const cleanAndParseJSON = (rawStr: unknown): any => {
   if (typeof rawStr !== 'string') {
     if (rawStr && typeof rawStr === 'object') return rawStr;
@@ -140,7 +186,7 @@ const cleanAndParseJSON = (rawStr: unknown): any => {
     }
   }
   const jsonStr = cleaned.slice(startIdx, endIdx);
-  return JSON.parse(jsonStr);
+  return JSON.parse(escapeControlCharactersInJson(jsonStr));
 };
 
 const getPlannerSceneGoals = (plannerOutput: unknown): string[] => {
