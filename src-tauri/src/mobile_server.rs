@@ -1738,6 +1738,10 @@ mod tests {
     use super::*;
     use tower::util::ServiceExt;
 
+    /// Serializes tests that read or mutate the shared `MOBILE_ACCESS_TOKEN`
+    /// global so parallel test execution cannot overwrite the token mid-request.
+    static TOKEN_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn create_mock_app() -> AppHandle<tauri::test::MockRuntime> {
         let builder = tauri::test::mock_builder();
         let app = builder
@@ -1748,6 +1752,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_token_generation() {
+        let _token_guard = TOKEN_TEST_LOCK.lock().unwrap();
         let token1 = get_mobile_access_token();
         let token2 = get_mobile_access_token();
         assert!(!token1.is_empty());
@@ -1756,6 +1761,7 @@ mod tests {
 
     #[test]
     fn test_fixed_token_refresh_updates_cached_status() {
+        let _token_guard = TOKEN_TEST_LOCK.lock().unwrap();
         let stale_token = "stale-token".to_string();
         set_status(MobileServiceStatus {
             is_running: true,
@@ -1781,6 +1787,7 @@ mod tests {
 
     #[test]
     fn test_fixed_mobile_token_enable_disable() {
+        let _token_guard = TOKEN_TEST_LOCK.lock().unwrap();
         let root = std::env::temp_dir().join(format!(
             "museai-fixed-token-test-{}",
             uuid::Uuid::new_v4()
@@ -1843,6 +1850,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_token_accepted() {
+        let _token_guard = TOKEN_TEST_LOCK.lock().unwrap();
         let app = create_mock_app();
         let router = create_mobile_router(app);
         let token = get_mobile_access_token();
@@ -1865,6 +1873,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cookie_token_accepted() {
+        let _token_guard = TOKEN_TEST_LOCK.lock().unwrap();
         let app = create_mock_app();
         let router = create_mobile_router(app);
         let token = get_mobile_access_token();
@@ -1929,6 +1938,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_authorized_by_header() {
+        let _token_guard = TOKEN_TEST_LOCK.lock().unwrap();
         let app = create_mock_app();
         let router = create_mobile_router(app);
         let token = get_mobile_access_token();
@@ -1949,6 +1959,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_desktop_only_route_rejection() {
+        let _token_guard = TOKEN_TEST_LOCK.lock().unwrap();
         let app = create_mock_app();
         let router = create_mobile_router(app);
         let token = get_mobile_access_token();
@@ -2162,6 +2173,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_prefix_validation() {
+        let _token_guard = TOKEN_TEST_LOCK.lock().unwrap();
         let app = create_mock_app();
         let router = create_mobile_router(app);
         let token = get_mobile_access_token();
@@ -2182,6 +2194,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mobile_save_rejects_book_travel_session() {
+        let _token_guard = TOKEN_TEST_LOCK.lock().unwrap();
         let app = create_mock_app();
         let router = create_mobile_router(app);
         let token = get_mobile_access_token();
@@ -2249,6 +2262,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_convert_silly_tavern_accepts_token() {
+        let _token_guard = TOKEN_TEST_LOCK.lock().unwrap();
         let app = create_mock_app();
         let router = create_mobile_router(app);
         let token = get_mobile_access_token();
