@@ -513,7 +513,9 @@ fn append_agent_run_error_log(
 }
 
 fn clean_json_response(text: String) -> String {
-    let trimmed = text.trim();
+    // MiniMax 等模型可能把思考过程以 <think>...</think> 包裹在输出里，
+    // 先剥离再提取 JSON，避免思考内容混入或干扰起始花括号定位
+    let trimmed = crate::llm::strip_think_blocks(text.trim());
 
     // Find the first occurrence of '{' or '['
     let start_idx = trimmed.find('{').or_else(|| trimmed.find('['));

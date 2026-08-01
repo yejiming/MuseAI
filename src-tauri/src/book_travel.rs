@@ -724,7 +724,7 @@ async fn execute_book_travel_stream(
         }
     }
 
-    Ok(full_content)
+    Ok(crate::llm::strip_think_blocks(&full_content))
 }
 
 async fn run_book_travel_stream_task(

@@ -894,6 +894,88 @@ pub fn parse_anthropic_stream_event(data: &str) -> Option<AnthropicStreamEvent> 
     }
 }
 
+/// 从完整文本中移除 `<think>...</think>` 思考块（非流式场景使用）。
+/// 某些 OpenAI 兼容模型（如 MiniMax）会把思考过程放进 content 并以 `<think>` 标签包裹，
+/// 若直接透传会污染正文或破坏 JSON 解析。
+pub fn strip_think_blocks(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        let Some(open) = rest.find("<think>") else {
+            output.push_str(rest);
+            return output;
+        };
+        output.push_str(&rest[..open]);
+        let after_open = &rest[open + "<think>".len()..];
+        let Some(close) = after_open.find("</think>") else {
+            return output;
+        };
+        rest = &after_open[close + "</think>".len()..];
+    }
+}
+
+/// 流式分离 `<think>...</think>` 思考块与正文。
+/// 思考块必须完整闭合后才会输出，跨 chunk 被截断的标签会缓存在内部缓冲中。
+pub struct ThinkTagSplitter {
+    pending: String,
+}
+
+impl Default for ThinkTagSplitter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ThinkTagSplitter {
+    pub fn new() -> Self {
+        Self {
+            pending: String::new(),
+        }
+    }
+
+    /// 输入一段流式文本，返回 `(正文, 思考)` 两个片段。
+    pub fn push(&mut self, chunk: &str) -> (String, String) {
+        let mut output = (String::new(), String::new());
+        self.pending.push_str(chunk);
+        loop {
+            let Some(open) = self.pending.find("<think>") else {
+                // 没有完整开标签：只保留尾部可能与 <think 前缀重叠的部分
+                let keep = self.pending.len().saturating_sub(self.partial_open_prefix_len());
+                output.0.push_str(&self.pending[..keep]);
+                self.pending.drain(..keep);
+                break;
+            };
+            output.0.push_str(&self.pending[..open]);
+            let rest = &self.pending[open + "<think>".len()..];
+            let Some(close) = rest.find("</think>") else {
+                // 思考块未闭合，从开标签起整体缓存
+                self.pending.drain(..open);
+                break;
+            };
+            output.1.push_str(&rest[..close]);
+            self.pending.drain(..open + "<think>".len() + close + "</think>".len());
+        }
+        output
+    }
+
+    /// 返回尾部可能与 `<think>` 前缀重叠的长度（即不完整的标签片段）。
+    fn partial_open_prefix_len(&self) -> usize {
+        const PREFIX: &str = "<think>";
+        let len = self.pending.len();
+        if len == 0 {
+            return 0;
+        }
+        (1..=PREFIX.len().min(len))
+            .filter(|candidate_len| {
+                let start = len - candidate_len;
+                self.pending.is_char_boundary(start)
+                    && PREFIX.starts_with(&self.pending[start..])
+            })
+            .max()
+            .unwrap_or(0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1569,5 +1651,68 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["role"], "user");
         assert_eq!(messages[0]["content"], "hi");
+    }
+
+    #[test]
+    fn strip_think_blocks_removes_think_sections() {
+        assert_eq!(
+            strip_think_blocks("<think>她在想什么</think>（正文）"),
+            "（正文）"
+        );
+        assert_eq!(
+            strip_think_blocks("前文<think>思考</think>后文"),
+            "前文后文"
+        );
+        assert_eq!(strip_think_blocks("没有思考标签"), "没有思考标签");
+        assert_eq!(strip_think_blocks("<think>未闭合"), "");
+        assert_eq!(
+            strip_think_blocks("<think>一</think>中间<think>二</think>结尾"),
+            "中间结尾"
+        );
+    }
+
+    #[test]
+    fn think_tag_splitter_handles_whole_chunk() {
+        let mut splitter = ThinkTagSplitter::new();
+        let (content, thinking) =
+            splitter.push("<think>第一步思考</think>你好，正文");
+        assert_eq!(thinking, "第一步思考");
+        assert_eq!(content, "你好，正文");
+    }
+
+    #[test]
+    fn think_tag_splitter_handles_chunks_splitting_tags() {
+        let mut splitter = ThinkTagSplitter::new();
+        let (content1, thinking1) = splitter.push("前导<thi");
+        assert_eq!(content1, "前导");
+        assert_eq!(thinking1, "");
+        let (content2, thinking2) = splitter.push("nk>思考开始，还有");
+        assert_eq!(content2, "");
+        assert_eq!(thinking2, "");
+        let (content3, thinking3) = splitter.push("一段</th");
+        assert_eq!(content3, "");
+        assert_eq!(thinking3, "");
+        let (content4, thinking4) = splitter.push("ink>这是正文");
+        assert_eq!(content4, "这是正文");
+        assert_eq!(thinking4, "思考开始，还有一段");
+    }
+
+    #[test]
+    fn think_tag_splitter_keeps_content_without_think_tags() {
+        let mut splitter = ThinkTagSplitter::new();
+        let (content, thinking) = splitter.push("普通文本");
+        assert_eq!(content, "普通文本");
+        assert!(thinking.is_empty());
+    }
+
+    #[test]
+    fn think_tag_splitter_multiple_blocks_in_one_stream() {
+        let mut splitter = ThinkTagSplitter::new();
+        let (content1, thinking1) = splitter.push("a<think>一</think>b");
+        assert_eq!(content1, "ab");
+        assert_eq!(thinking1, "一");
+        let (content2, thinking2) = splitter.push("<think>二</think>c");
+        assert_eq!(content2, "c");
+        assert_eq!(thinking2, "二");
     }
 }

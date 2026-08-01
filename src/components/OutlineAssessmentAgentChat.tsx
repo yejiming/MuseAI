@@ -79,6 +79,7 @@ const useOutlineAssessmentAgentChatView = ({
 
   useEffect(() => {
     const effectiveWorkspaceDirType = workspaceDirType ?? 'outline';
+    let ignore = false;
     const build = async () => {
       try {
         const workspaceDir = await invoke<string>('get_workspace_dir', { dirType: effectiveWorkspaceDirType });
@@ -87,12 +88,15 @@ const useOutlineAssessmentAgentChatView = ({
           workspacePath: workspaceDir,
           selectedReferenceFiles: [],
         });
-        setFullSystemPrompt(full);
+        if (!ignore) setFullSystemPrompt(full);
       } catch (e) {
-        console.error(e);
+        if (!ignore) console.error(e);
       }
     };
     build();
+    return () => {
+      ignore = true;
+    };
   }, [systemPrompt, workspaceDirType]);
 
   useEffect(() => { messagesRef.current = messages; }, [messages]);

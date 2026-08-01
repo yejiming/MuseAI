@@ -356,9 +356,9 @@ const SessionHistory: React.FC<SessionHistoryProps> = ({
                           border: '1px solid rgba(0,0,0,0.03)',
                         }}
                       >
-                        {expandedRecord.messages.map((msg, idx) => (
+                        {expandedRecord.messages.map((msg) => (
                           <div
-                            key={msg.id || idx}
+                            key={msg.id}
                             style={{
                               marginBottom: 12,
                               display: 'flex',
@@ -512,9 +512,9 @@ const AdventureHistory: React.FC<AdventureHistoryProps> = ({
                           border: '1px solid rgba(0,0,0,0.03)',
                         }}
                       >
-                        {expandedAdventureRecord.messages.map((msg, idx) => (
+                        {expandedAdventureRecord.messages.map((msg) => (
                           <div
-                            key={msg.id || idx}
+                            key={msg.id}
                             style={{
                               marginBottom: 12,
                               display: 'flex',

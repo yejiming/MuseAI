@@ -157,6 +157,7 @@ async fn stream_openai_round(
     let mut buffer = String::new();
     let mut utf8_decoder = Utf8StreamDecoder::default();
     let mut result = OpenAiRoundResult::default();
+    let mut think_splitter = ThinkTagSplitter::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk
             .map_err(|error| format_response_read_error("读取 OpenAI 兼容流式响应失败", &error))?;
@@ -179,9 +180,24 @@ async fn stream_openai_round(
                     }
                 }
                 if let Some(delta) = event.content {
-                    result.content.push_str(&delta);
-                    if options.emit_events {
-                        emit_chat_event(app, run_id, "delta", Some(delta), None, options);
+                    // MiniMax 等模型会把思考过程以 <think>...</think> 混进 content，
+                    // 在此分离，避免思考内容污染回复正文
+                    let (content_part, thinking_part) = think_splitter.push(&delta);
+                    if !thinking_part.is_empty() && options.emit_events && show_thinking {
+                        emit_chat_event(
+                            app,
+                            run_id,
+                            "thinking_delta",
+                            Some(thinking_part),
+                            None,
+                            options,
+                        );
+                    }
+                    if !content_part.is_empty() {
+                        result.content.push_str(&content_part);
+                        if options.emit_events {
+                            emit_chat_event(app, run_id, "delta", Some(content_part), None, options);
+                        }
                     }
                 }
                 for chunk in event.tool_call_chunks {

@@ -591,6 +591,7 @@ const useAgentChatView = ({ onClose, title = '写文章Agent' }: AgentChatProps)
   const [fullSystemPrompt, setFullSystemPrompt] = useState('');
 
   useEffect(() => {
+    let ignore = false;
     const build = async () => {
       try {
         const full = await invoke<string>('build_full_system_prompt', {
@@ -598,12 +599,15 @@ const useAgentChatView = ({ onClose, title = '写文章Agent' }: AgentChatProps)
           workspacePath: settings.worksDirectory,
           selectedReferenceFiles,
         });
-        setFullSystemPrompt(full);
+        if (!ignore) setFullSystemPrompt(full);
       } catch (e) {
-        console.error(e);
+        if (!ignore) console.error(e);
       }
     };
     build();
+    return () => {
+      ignore = true;
+    };
   }, [effectiveSystemPrompt, settings.worksDirectory, selectedReferenceFiles]);
 
   const effectiveContextMessages = getEffectiveMessagesForContextStats(messages, contextCompaction);
