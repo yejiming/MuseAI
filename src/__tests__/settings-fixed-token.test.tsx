@@ -44,7 +44,9 @@ describe('Settings 局域网固定令牌', () => {
     render(<Settings />);
 
     const switchEl = await screen.findByRole('switch', { name: switchLabel });
-    expect(switchEl).toHaveAttribute('aria-checked', 'true');
+    await waitFor(() => {
+      expect(switchEl).toHaveAttribute('aria-checked', 'true');
+    });
   });
 
   it('toggles the fixed token on and keeps the switch checked after refresh', async () => {
@@ -100,7 +102,9 @@ describe('Settings 局域网固定令牌', () => {
     render(<Settings />);
 
     const switchEl = await screen.findByRole('switch', { name: switchLabel });
-    expect(switchEl).toHaveAttribute('aria-checked', 'true');
+    await waitFor(() => {
+      expect(switchEl).toHaveAttribute('aria-checked', 'true');
+    });
     fireEvent.click(switchEl);
 
     await waitFor(() => {
