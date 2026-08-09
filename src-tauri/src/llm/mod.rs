@@ -513,6 +513,23 @@ fn truncate_for_summary_line(value: &str, max_chars: usize) -> String {
     }
     result
 }
+/// 工具调用参数规范化：保证发送给 OpenAI 兼容接口的 `arguments` 一定是合法 JSON。
+/// 解析成功则原样返回；失败时先剥离代码围栏、转义可能的内层引号与控制字符、
+/// 去掉尾随逗号、补全未闭合容器后重新解析；仍失败则回退为 `{}`。
+pub fn normalize_tool_arguments(arguments: &str) -> String {
+    if serde_json::from_str::<Value>(arguments).is_ok() {
+        return arguments.to_string();
+    }
+    let cleaned = crate::agent::sessions::clean_json_response(arguments.to_string());
+    let escaped =
+        crate::agent::sessions::escape_likely_inner_quotes_and_control_chars(&cleaned);
+    let no_trailing = crate::agent::sessions::remove_trailing_json_commas(&escaped);
+    let closed = crate::agent::sessions::close_unclosed_json_containers(&no_trailing);
+    if serde_json::from_str::<Value>(&closed).is_ok() {
+        return closed;
+    }
+    "{}".to_string()
+}
 pub fn openai_history_messages(system_prompt: &str, history: &[ChatMessage]) -> Vec<Value> {
     let mut messages = vec![json!({ "role": "system", "content": system_prompt })];
     for message in history {
@@ -540,7 +557,7 @@ pub fn openai_history_messages(system_prompt: &str, history: &[ChatMessage]) -> 
                                 "type": "function",
                                 "function": {
                                     "name": call.name,
-                                    "arguments": call.arguments,
+                                    "arguments": normalize_tool_arguments(&call.arguments),
                                 },
                             })
                         }).collect::<Vec<_>>(),
@@ -1617,6 +1634,89 @@ mod tests {
         assert_eq!(messages[0]["content"], "system prompt");
         assert_eq!(messages[1]["role"], "user");
         assert_eq!(messages[1]["content"], "hi");
+    }
+
+    #[test]
+    fn normalize_tool_arguments_passes_valid_json_through_unchanged() {
+        let valid = r#"{"file_path": "articles/第一章.md", "content": "正文"}"#;
+        assert_eq!(normalize_tool_arguments(valid), valid);
+        assert_eq!(normalize_tool_arguments("{}"), "{}");
+    }
+
+    #[test]
+    fn normalize_tool_arguments_repairs_truncated_json() {
+        let truncated = r#"{"file_path": "articles/第一章.md""#;
+        let normalized = normalize_tool_arguments(truncated);
+        assert!(serde_json::from_str::<Value>(&normalized).is_ok());
+        assert_eq!(
+            normalized,
+            r#"{"file_path": "articles/第一章.md"}"#
+        );
+    }
+
+    #[test]
+    fn normalize_tool_arguments_escapes_inner_quotes() {
+        let with_inner_quotes = r#"{"content": 他说"你好"}"#;
+        let normalized = normalize_tool_arguments(with_inner_quotes);
+        assert!(serde_json::from_str::<Value>(&normalized).is_ok());
+    }
+
+    #[test]
+    fn normalize_tool_arguments_falls_back_to_empty_object_for_garbage() {
+        assert_eq!(normalize_tool_arguments("不是JSON"), "{}");
+        assert_eq!(normalize_tool_arguments(""), "{}");
+        assert_eq!(normalize_tool_arguments("   "), "{}");
+    }
+
+    #[test]
+    fn normalize_tool_arguments_strips_code_fences() {
+        let fenced = "```json\n{\"file_path\": \"a.md\"}\n```";
+        assert_eq!(normalize_tool_arguments(fenced), "{\"file_path\": \"a.md\"}");
+    }
+
+    #[test]
+    fn openai_history_messages_sanitizes_malformed_stored_tool_arguments() {
+        let history = vec![
+            ChatMessage {
+                id: Some("a1".to_string()),
+                role: "assistant".to_string(),
+                content: "".to_string(),
+                tool_call_id: None,
+                tool_calls: Some(vec![
+                    ChatToolCall {
+                        id: "call_1".to_string(),
+                        name: "read".to_string(),
+                        arguments: r#"{"file_path": "截断""#.to_string(),
+                    },
+                    ChatToolCall {
+                        id: "call_2".to_string(),
+                        name: "glob".to_string(),
+                        arguments: "完全不是JSON".to_string(),
+                    },
+                ]),
+                thinking_blocks: None,
+            },
+            tool_result("t1", "call_1", "result"),
+            tool_result("t2", "call_2", "result"),
+        ];
+        let messages = openai_history_messages("sys", &history);
+        let calls = messages[1]["tool_calls"].as_array().unwrap();
+        for call in calls {
+            let arguments = call["function"]["arguments"].as_str().unwrap();
+            assert!(
+                serde_json::from_str::<Value>(arguments).is_ok(),
+                "replayed arguments must be valid JSON, got: {}",
+                arguments
+            );
+        }
+        assert_eq!(
+            calls[0]["function"]["arguments"].as_str().unwrap(),
+            r#"{"file_path": "截断"}"#
+        );
+        assert_eq!(
+            calls[1]["function"]["arguments"].as_str().unwrap(),
+            "{}"
+        );
     }
 
     #[test]

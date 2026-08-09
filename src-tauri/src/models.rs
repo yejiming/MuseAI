@@ -504,6 +504,7 @@ pub struct AgentToolDefinition {
 pub struct OpenAiRoundResult {
     pub content: String,
     pub tool_calls: Vec<AgentToolCall>,
+    pub finish_reason: Option<String>,
 }
 #[derive(Default)]
 pub struct AnthropicRoundResult {

@@ -75,6 +75,7 @@ pub async fn run_openai_agent_loop(
         }
 
         let stream_result = stream_openai_round(app, run_id, request, response, &options).await?;
+        validate_round_tool_arguments(&stream_result)?;
         if stream_result.tool_calls.is_empty() {
             return Ok(stream_result.content);
         }
@@ -85,20 +86,7 @@ pub async fn run_openai_agent_loop(
             ));
         }
 
-        let assistant_tool_calls: Vec<Value> = stream_result
-            .tool_calls
-            .iter()
-            .map(|call| {
-                json!({
-                    "id": call.id,
-                    "type": "function",
-                    "function": {
-                        "name": call.name,
-                        "arguments": call.arguments,
-                    }
-                })
-            })
-            .collect();
+        let assistant_tool_calls = assistant_tool_call_messages(&stream_result.tool_calls);
         messages.push(json!({
             "role": "assistant",
             "content": stream_result.content,
@@ -125,6 +113,46 @@ pub async fn run_openai_agent_loop(
     }
 
     Err(String::from("Agent 工具循环异常结束"))
+}
+
+/// 校验一轮流式返回的工具调用参数：任一参数不是合法 JSON 即整轮失败，
+/// 避免把截断或损坏的参数执行掉、再原样回放进下一轮请求。
+/// `finish_reason = length` 时提示输出达到长度上限。
+fn validate_round_tool_arguments(round: &OpenAiRoundResult) -> Result<(), String> {
+    let Some(invalid_call) = round
+        .tool_calls
+        .iter()
+        .find(|call| serde_json::from_str::<Value>(&call.arguments).is_err())
+    else {
+        return Ok(());
+    };
+    let truncation_hint = if round.finish_reason.as_deref() == Some("length") {
+        "；模型输出已达到长度上限，工具调用参数可能被截断"
+    } else {
+        ""
+    };
+    Err(format!(
+        "模型返回的工具调用参数不是合法 JSON（工具：{}）{}. 请调整输出长度限制或重试。",
+        invalid_call.name, truncation_hint
+    ))
+}
+
+/// 把一轮流式返回的工具调用组装成 OpenAI 请求里的 assistant `tool_calls` 数组，
+/// 并对每个参数的 JSON 做规范化，避免把非法参数原样回放进下一轮请求。
+fn assistant_tool_call_messages(tool_calls: &[AgentToolCall]) -> Vec<Value> {
+    tool_calls
+        .iter()
+        .map(|call| {
+            json!({
+                "id": call.id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": normalize_tool_arguments(&call.arguments),
+                }
+            })
+        })
+        .collect()
 }
 
 fn apply_openai_sampling_controls(body: &mut Value, request: &ChatStreamRequest) {
@@ -167,6 +195,9 @@ async fn stream_openai_round(
                 return;
             }
             if let Some(event) = parse_openai_stream_event(data) {
+                if let Some(reason) = event.finish_reason {
+                    result.finish_reason = Some(reason);
+                }
                 if let Some(reasoning) = event.reasoning_content {
                     if options.emit_events && show_thinking {
                         emit_chat_event(
@@ -1500,6 +1531,104 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn assistant_tool_call_messages_sanitizes_invalid_arguments() {
+        let calls = vec![
+            AgentToolCall {
+                index: 0,
+                id: "call_1".to_string(),
+                name: "read".to_string(),
+                arguments: r#"{"file_path": "好的.md""#.to_string(),
+            },
+            AgentToolCall {
+                index: 1,
+                id: "call_2".to_string(),
+                name: "glob".to_string(),
+                arguments: "坏参数".to_string(),
+            },
+        ];
+
+        let messages = assistant_tool_call_messages(&calls);
+
+        assert_eq!(messages.len(), 2);
+        for message in &messages {
+            let arguments = message["function"]["arguments"].as_str().unwrap();
+            assert!(
+                serde_json::from_str::<Value>(arguments).is_ok(),
+                "round-loop arguments must be valid JSON, got: {}",
+                arguments
+            );
+        }
+        assert_eq!(
+            messages[0]["function"]["arguments"].as_str().unwrap(),
+            r#"{"file_path": "好的.md"}"#
+        );
+        assert_eq!(messages[1]["function"]["arguments"].as_str().unwrap(), "{}");
+        assert_eq!(messages[0]["function"]["name"], "read");
+        assert_eq!(messages[0]["id"], "call_1");
+    }
+
+    #[test]
+    fn validate_round_tool_arguments_accepts_valid_json() {
+        let round = OpenAiRoundResult {
+            content: String::new(),
+            tool_calls: vec![AgentToolCall {
+                index: 0,
+                id: "call_1".to_string(),
+                name: "read".to_string(),
+                arguments: r#"{"file_path": "a.md"}"#.to_string(),
+            }],
+            finish_reason: None,
+        };
+
+        assert!(validate_round_tool_arguments(&round).is_ok());
+    }
+
+    #[test]
+    fn validate_round_tool_arguments_rejects_invalid_json() {
+        let round = OpenAiRoundResult {
+            content: String::new(),
+            tool_calls: vec![
+                AgentToolCall {
+                    index: 0,
+                    id: "call_1".to_string(),
+                    name: "read".to_string(),
+                    arguments: r#"{"file_path": "a.md"}"#.to_string(),
+                },
+                AgentToolCall {
+                    index: 1,
+                    id: "call_2".to_string(),
+                    name: "write".to_string(),
+                    arguments: "坏了".to_string(),
+                },
+            ],
+            finish_reason: None,
+        };
+
+        let error = validate_round_tool_arguments(&round).unwrap_err();
+        assert!(error.contains("write"));
+        assert!(!error.contains("长度上限"));
+    }
+
+    #[test]
+    fn validate_round_tool_arguments_mentions_length_truncation() {
+        let round = OpenAiRoundResult {
+            content: String::new(),
+            tool_calls: vec![AgentToolCall {
+                index: 0,
+                id: "call_1".to_string(),
+                name: "write".to_string(),
+                arguments: r#"{"content": "截断"#.to_string(),
+            }],
+            finish_reason: Some("length".to_string()),
+        };
+
+        let error = validate_round_tool_arguments(&round).unwrap_err();
+        assert!(error.contains("write"));
+        assert!(error.contains("长度上限"));
+        assert!(error.contains("截断"));
     }
 
     #[test]

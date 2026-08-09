@@ -1,4 +1,5 @@
 import type { AgentToolEntry, Message, ThinkingBlock } from '../stores/useAgentStore';
+import { sanitizeToolArguments } from '../utils/toolArguments';
 
 const USER_INFO_LABELS: Record<string, string> = {
   name: '姓名',
@@ -211,7 +212,7 @@ function buildAssistantToolCallMessage(
     toolCalls: tools.map((tool, index) => ({
       id: tool.id || `tool-${index}`,
       name: tool.name,
-      arguments: tool.arguments || '{}',
+      arguments: sanitizeToolArguments(tool.arguments || '{}'),
     })),
     thinkingBlocks,
   };

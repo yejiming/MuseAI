@@ -512,7 +512,7 @@ fn append_agent_run_error_log(
     writeln!(file, "{}", entry).map_err(|e| e.to_string())
 }
 
-fn clean_json_response(text: String) -> String {
+pub(crate) fn clean_json_response(text: String) -> String {
     // MiniMax 等模型可能把思考过程以 <think>...</think> 包裹在输出里，
     // 先剥离再提取 JSON，避免思考内容混入或干扰起始花括号定位
     let trimmed = crate::llm::strip_think_blocks(text.trim());
@@ -577,7 +577,7 @@ fn background_json_error_with_raw(raw: &str, error: impl std::fmt::Display) -> S
     .to_string()
 }
 
-fn escape_likely_inner_quotes_and_control_chars(text: &str) -> String {
+pub(crate) fn escape_likely_inner_quotes_and_control_chars(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut repaired = String::new();
     let mut in_string = false;
@@ -628,7 +628,7 @@ fn escape_likely_inner_quotes_and_control_chars(text: &str) -> String {
     repaired
 }
 
-fn remove_trailing_json_commas(text: &str) -> String {
+pub(crate) fn remove_trailing_json_commas(text: &str) -> String {
     let mut repaired = String::new();
     let mut chars = text.chars().peekable();
     while let Some(current) = chars.next() {
@@ -646,7 +646,7 @@ fn remove_trailing_json_commas(text: &str) -> String {
     repaired
 }
 
-fn close_unclosed_json_containers(text: &str) -> String {
+pub(crate) fn close_unclosed_json_containers(text: &str) -> String {
     let mut repaired = text.to_string();
     let mut stack = Vec::new();
     let mut in_string = false;

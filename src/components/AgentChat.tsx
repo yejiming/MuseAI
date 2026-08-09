@@ -10,6 +10,7 @@ import { createAgentTodoKeyGenerator, createStableContentKey, createStableToolKe
 import { useStateGroup } from '../utils/reducerState';
 import { getEffectiveMessagesForContextStats } from '../utils/contextCompaction';
 import { filterExistingValues } from '../utils/collectionSelection';
+import { sanitizeToolArguments } from '../utils/toolArguments';
 import { ARTICLE_TYPE_OPTIONS, buildRequiredSkillInstruction, getWriterSkillName } from '../constants/articleTypes';
 import {
   useAgentStore,
@@ -1169,7 +1170,7 @@ function buildAssistantToolCallMessage(content: string, tools: AgentToolEntry[],
     toolCalls: tools.map((tool, index) => ({
       id: tool.id || `tool-${index}`,
       name: tool.name,
-      arguments: tool.arguments || '{}',
+      arguments: sanitizeToolArguments(tool.arguments || '{}'),
     })),
     thinkingBlocks,
   };
