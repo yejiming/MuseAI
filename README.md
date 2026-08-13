@@ -1,8 +1,7 @@
-<div align="center">
 # MuseAI — 本地 AI 伴侣、文字冒险与穿书互动应用
 
 [English](README_EN.md) | 简体中文
-</div>
+
 
 > ### 🆕 重要更新：MuseAI 现在可以装进 DeepSeek Harness
 > 新增 DSH 客户端插件 —— 把 MuseAI 装进 DeepSeek Harness
