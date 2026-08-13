@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 简体中文
 
-> 重要更新：MuseAI 现在可以装进 DeepSeek Harness
+> ## 重要更新：MuseAI 现在可以装进 DeepSeek Harness
 > 新增 DSH 客户端插件 —— 把 MuseAI 装进 DeepSeek Harness：一边用 DSH 干活，一边与 AI 冒险！→ https://github.com/yejiming/dsh-museai-tavern
 
 > 创建你的 AI 角色，进入你的故事世界。
