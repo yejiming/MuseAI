@@ -1,13 +1,12 @@
+<div align="center">
 # MuseAI — 本地 AI 伴侣、文字冒险与穿书互动应用
 
 [English](README_EN.md) | 简体中文
+</div>
 
 > ### 🆕 重要更新：MuseAI 现在可以装进 DeepSeek Harness
 > 新增 DSH 客户端插件 —— 把 MuseAI 装进 DeepSeek Harness
 > 一边用 DSH 干活，一边与 AI 冒险！→ https://github.com/yejiming/dsh-museai-tavern
-
-> 创建你的 AI 角色，进入你的故事世界。
-> 支持 AI 伴侣聊天、角色卡、世界书、长期记忆、文字冒险、穿书剧情和本地数据保存。
 
 MuseAI 是一款面向沉浸式角色互动的本地 AI 应用。你可以创建自己的角色与世界设定，和角色持续对话、共同经历冒险，并在一次次互动中积累关系、记忆与羁绊。
 
