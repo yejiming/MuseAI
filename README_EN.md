@@ -2,7 +2,13 @@
 
 English | [简体中文](README.md)
 
+> ### 🆕 Important Update: MuseAI can now be installed into DeepSeek Harness
+> New DSH client plugin — bring MuseAI into DeepSeek Harness
+> 
+> Work with DSH while adventuring with AI! → https://github.com/yejiming/dsh-museai-tavern
+
 > Create your AI characters and step into your own story world.
+> 
 > MuseAI supports AI companion chat, character cards, world books, long-term memory, text adventures, story-world isekai, and local data storage.
 
 MuseAI is a local-first AI app for immersive character interaction. You can create characters and worlds, keep talking with them over time, go on adventures together, and let each interaction build memory, relationship history, and emotional continuity.
