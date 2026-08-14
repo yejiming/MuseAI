@@ -5,6 +5,7 @@
 
 > ### 🆕 重要更新：MuseAI 现在可以装进 DeepSeek Harness
 > 新增 DSH 客户端插件 —— 把 MuseAI 装进 DeepSeek Harness
+> 
 > 一边用 DSH 干活，一边与 AI 冒险！→ https://github.com/yejiming/dsh-museai-tavern
 
 MuseAI 是一款面向沉浸式角色互动的本地 AI 应用。你可以创建自己的角色与世界设定，和角色持续对话、共同经历冒险，并在一次次互动中积累关系、记忆与羁绊。
