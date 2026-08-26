@@ -96,6 +96,7 @@ const MODEL_PROVIDER_PRESETS = [
   { provider: "Xiaomi MiMo", baseUrl: "https://api.xiaomimimo.com/v1", interface: "OpenAI-compatible" },
   { provider: "ModelScope", baseUrl: "https://api-inference.modelscope.cn/v1", interface: "OpenAI-compatible" },
   { provider: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", interface: "OpenAI-compatible" },
+  { provider: "OrcaRouter", baseUrl: "https://api.orcarouter.ai/v1", interface: "OpenAI-compatible" },
   { provider: "Ollama", baseUrl: "http://localhost:11434/v1", interface: "OpenAI-compatible" },
   { provider: "Custom", baseUrl: "", interface: "OpenAI-compatible" },
 ];
