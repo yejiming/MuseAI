@@ -35,9 +35,12 @@ import { formatHistorySavedAt, resolveBookTravelProgressMaterial } from '../util
 import { ensureSessionId } from '../utils/sessionIds';
 import { getEffectiveMessagesForContextStats } from '../utils/contextCompaction';
 import { createStableContentKey } from '../utils/renderKeys';
-import { StylePresetSelector } from '../components/StylePresetSelector';
+import { BookTravelCharacterSendPicker } from '../components/BookTravelCharacterSendPicker';
+import { BookTravelSessionControls } from '../components/BookTravelSessionControls';
+import { BookTravelStylePresetControl } from '../components/BookTravelStylePresetControl';
 import { useStylePresetStore } from '../stores/useStylePresetStore';
 import { prependStylePresets } from '../utils/stylePresets';
+import { filterBookTravelRequestContext } from '../utils/bookTravelMaterials';
 import { buildBookTravelCharacterDetails } from '../utils/bookTravelSaveDetails';
 import { buildBookTravelHudModel } from '../utils/bookTravelHud';
 import { BookTravelStatusHud } from '../components/BookTravelStatusHud';
@@ -527,6 +530,20 @@ const useStoryView = () => {
     systemPrompt,
   });
 
+  const readBookTravelRequestContext = () => {
+    const state = useBookTravelStore.getState();
+    const filtered = filterBookTravelRequestContext(
+      state.selectedCharacterCards,
+      state.enabledCharacterCardIds,
+      state.assembledWorldModel,
+    );
+    const requestMaterials = state.selectedOutline && state.selectedWorldBook ? {
+      outline: { id: state.selectedOutline.id, title: state.selectedOutline.title, content: state.selectedOutline.content },
+      worldBook: { id: state.selectedWorldBook.id, title: state.selectedWorldBook.title, content: state.selectedWorldBook.content },
+      characterCards: filtered.characterCards,
+    } : null;
+    return { state, requestMaterials, requestWorldModel: filtered.assembledWorldModel };
+  };
 
   const { userInfo: partnerChatUserInfo } = usePartnerChatStore();
   const settings = useSettingsStore();
@@ -535,7 +552,12 @@ const useStoryView = () => {
     settings.bookTravelSceneWriterPrompt,
     stylePresets,
     bookTravelStore.selectedStylePresetIds,
+    bookTravelStore.enabledStyleSegmentIds,
   );
+  const applyBookTravelStylePresets = (presetIds: string[], enabledSegmentIds: string[] | null) => {
+    bookTravelStore.setSelectedStylePresetIds(presetIds);
+    bookTravelStore.setEnabledStyleSegmentIds(enabledSegmentIds);
+  };
 
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const currentThinkingIdRef = useRef<string | null>(null);
@@ -960,15 +982,12 @@ const useStoryView = () => {
     setWriterOutput('');
     setStartProgressError('');
     try {
-      const { selectedOutline, selectedWorldBook, selectedCharacterCards, stableMemory, volatileMemory, assembledWorldModel, scenes, turns } = useBookTravelStore.getState();
-      if (!selectedOutline || !selectedWorldBook) throw new Error('素材缺失');
-      const materials = {
-        outline: { id: selectedOutline.id, title: selectedOutline.title, content: selectedOutline.content },
-        worldBook: { id: selectedWorldBook.id, title: selectedWorldBook.title, content: selectedWorldBook.content },
-        characterCards: selectedCharacterCards.map((cc: any) => ({ id: cc.id, title: cc.title, content: cc.content })),
-      };
+      const { state: travelState, requestMaterials, requestWorldModel } = readBookTravelRequestContext();
+      if (!travelState.selectedOutline || !travelState.selectedWorldBook || !requestMaterials) throw new Error('素材缺失');
+      const materials = requestMaterials;
+      const { stableMemory, volatileMemory, scenes, turns } = travelState;
       const writerConfig = settings.agentConfigs?.bookTravelSceneWriter || {};
-      const writerState = { stableMemory, volatileMemory, assembledWorldModel, currentState: bookTravelStore.currentState, summaryMemory: bookTravelStore.summaryMemory || '', recentScenes: scenes.slice(-3), recentTurns: turns.slice(-5), writerInstructions: userInput };
+      const writerState = { stableMemory, volatileMemory, assembledWorldModel: requestWorldModel, currentState: bookTravelStore.currentState, summaryMemory: bookTravelStore.summaryMemory || '', recentScenes: scenes.slice(-3), recentTurns: turns.slice(-5), writerInstructions: userInput };
       const writerRequest = buildBookTravelRequest('scene-writer', effectiveBookTravelSceneWriterPrompt, writerConfig, materials, writerState);
       const currentScene = scenes.find((s) => s.id === bookTravelStore.currentSceneId);
       const allowedSpeakers = currentScene?.activeCharacters || [];
@@ -1034,13 +1053,11 @@ const useStoryView = () => {
     let plannedScene: BookTravelScene | null = null;
     let newCurrentState: unknown = null;
     try {
-      const { selectedOutline, selectedWorldBook, selectedCharacterCards, stableMemory, volatileMemory, assembledWorldModel, scenes, turns, userCharacter } = useBookTravelStore.getState();
-      if (!selectedOutline || !selectedWorldBook) throw new Error('素材缺失');
-      const materials = {
-        outline: { id: selectedOutline.id, title: selectedOutline.title, content: selectedOutline.content },
-        worldBook: { id: selectedWorldBook.id, title: selectedWorldBook.title, content: selectedWorldBook.content },
-        characterCards: selectedCharacterCards.map((cc: any) => ({ id: cc.id, title: cc.title, content: cc.content })),
-      };
+      const { state: travelState, requestMaterials, requestWorldModel } = readBookTravelRequestContext();
+      if (!travelState.selectedOutline || !travelState.selectedWorldBook || !requestMaterials) throw new Error('素材缺失');
+      const materials = requestMaterials;
+      const { stableMemory, volatileMemory, scenes, turns, userCharacter } = travelState;
+      const assembledWorldModel = requestWorldModel;
       const plannerConfig = settings.agentConfigs?.bookTravelScenePlanner || {};
       const plannerState = { stableMemory, volatileMemory, assembledWorldModel, currentState: bookTravelStore.currentState, summaryMemory: bookTravelStore.summaryMemory || '', recentScenes: scenes.slice(-3), recentTurns: turns.slice(-5), userCharacter };
       const plannerRequest = buildBookTravelRequest('scene-planner', settings.bookTravelPlotPlannerPrompt, plannerConfig, materials, plannerState);
@@ -1154,16 +1171,14 @@ const useStoryView = () => {
     setStartProgressError('');
     try {
       const store = useBookTravelStore.getState();
-      const { selectedOutline, selectedWorldBook, selectedCharacterCards, stableMemory, volatileMemory, assembledWorldModel } = store;
-      if (!selectedOutline || !selectedWorldBook) throw new Error('素材缺失');
+      const { requestMaterials, requestWorldModel } = readBookTravelRequestContext();
+      if (!store.selectedOutline || !store.selectedWorldBook || !requestMaterials) throw new Error('素材缺失');
       if (!turn.plannerOutput || !turn.createdSceneId) throw new Error('缺少可重试的场景规划');
       const plannedScene = store.scenes.find((scene) => scene.id === turn.createdSceneId);
       if (!plannedScene) throw new Error('找不到规划出的场景');
-      const materials = {
-        outline: { id: selectedOutline.id, title: selectedOutline.title, content: selectedOutline.content },
-        worldBook: { id: selectedWorldBook.id, title: selectedWorldBook.title, content: selectedWorldBook.content },
-        characterCards: selectedCharacterCards.map((cc: any) => ({ id: cc.id, title: cc.title, content: cc.content })),
-      };
+      const materials = requestMaterials;
+      const { stableMemory, volatileMemory } = store;
+      const assembledWorldModel = requestWorldModel;
       await runChangeSceneWriterForPlan({
         userInput: turn.userInput,
         plan: turn.plannerOutput,
@@ -1206,7 +1221,7 @@ const useStoryView = () => {
   };
 
   const startBookTravelAdventure = async () => {
-    const { selectedEntryPointId, userCharacter, assembledWorldModel, stableMemory, volatileMemory, selectedOutline, selectedWorldBook, selectedCharacterCards } = bookTravelStore;
+    const { selectedEntryPointId, userCharacter, stableMemory, volatileMemory, selectedOutline, selectedWorldBook } = bookTravelStore;
     if (!selectedEntryPointId) {
       message.warning('请选择一个入场点');
       return;
@@ -1236,11 +1251,10 @@ const useStoryView = () => {
       const entryPoint = bookTravelStore.entryPoints.find(ep => ep.id === selectedEntryPointId);
       if (!entryPoint) throw new Error('选中的入场点不存在');
 
-      const materials = {
-        outline: { id: selectedOutline.id, title: selectedOutline.title, content: selectedOutline.content },
-        worldBook: { id: selectedWorldBook.id, title: selectedWorldBook.title, content: selectedWorldBook.content },
-        characterCards: selectedCharacterCards.map(cc => ({ id: cc.id, title: cc.title, content: cc.content })),
-      };
+      const { requestMaterials, requestWorldModel } = readBookTravelRequestContext();
+      if (!requestMaterials) throw new Error('素材缺失');
+      const materials = requestMaterials;
+      const assembledWorldModel = requestWorldModel;
 
       const plannerConfig = settings.agentConfigs?.bookTravelScenePlanner || {};
       const plannerState = { stableMemory, volatileMemory, assembledWorldModel, currentState: null, summaryMemory: '', recentScenes: [], recentTurns: [], userCharacter, selectedEntryPointId };
@@ -1349,8 +1363,8 @@ const useStoryView = () => {
       const pendingTurnId = `turn-${Date.now()}`;
       let pendingTurnCreated = false;
       try {
-        const { selectedOutline, selectedWorldBook, selectedCharacterCards } = useBookTravelStore.getState();
-        if (!selectedOutline || !selectedWorldBook) {
+        const { state: travelState, requestMaterials, requestWorldModel } = readBookTravelRequestContext();
+        if (!travelState.selectedOutline || !travelState.selectedWorldBook || !requestMaterials) {
           message.error('素材缺失，请重新装配素材');
           return;
         }
@@ -1364,17 +1378,13 @@ const useStoryView = () => {
         });
         pendingTurnCreated = true;
         scrollToBottomOnce();
-        const materials = {
-          outline: { id: selectedOutline.id, title: selectedOutline.title, content: selectedOutline.content },
-          worldBook: { id: selectedWorldBook.id, title: selectedWorldBook.title, content: selectedWorldBook.content },
-          characterCards: selectedCharacterCards.map((cc: any) => ({ id: cc.id, title: cc.title, content: cc.content })),
-        };
+        const materials = requestMaterials;
         const classifierConfig = settings.agentConfigs?.bookTravelInputClassifier || {};
         const latestBookTravelState = useBookTravelStore.getState();
         const classifierState = {
           stableMemory: latestBookTravelState.stableMemory,
           volatileMemory: latestBookTravelState.volatileMemory,
-          assembledWorldModel: latestBookTravelState.assembledWorldModel,
+          assembledWorldModel: requestWorldModel,
           currentState: latestBookTravelState.currentState,
           summaryMemory: latestBookTravelState.summaryMemory || '',
           recentScenes: latestBookTravelState.scenes.slice(-3),
@@ -2008,6 +2018,20 @@ const useStoryView = () => {
                 </div>
               )}
 
+              {bookTravelStore.selectedMaterialId && (
+                <BookTravelCharacterSendPicker
+                  className="book-travel-setup-picker"
+                  panelId="book-travel-setup-characters"
+                  title="第一次对话发送的人物"
+                  labelForCard={(card) => `第一次对话发送 ${card.title}`}
+                  characterCards={bookTravelStore.selectedCharacterCards}
+                  enabledCharacterCardIds={bookTravelStore.enabledCharacterCardIds}
+                  onEnabledCharacterCardIdsChange={bookTravelStore.setEnabledCharacterCardIds}
+                  open={bookTravelStore.characterPanelOpen}
+                  onOpenChange={bookTravelStore.setCharacterPanelOpen}
+                />
+              )}
+
               {/* Select User Character */}
               {bookTravelStore.selectedEntryPointId && (
                 <div>
@@ -2058,11 +2082,16 @@ const useStoryView = () => {
                 </div>
               )}
 
-              {/* Start Button */}
-              <StylePresetSelector
-                target="bookTravel"
-                value={bookTravelStore.selectedStylePresetIds[0] || null}
-                onChange={(id) => bookTravelStore.setSelectedStylePresetIds(id ? [id] : [])}
+              <BookTravelStylePresetControl
+                className="book-travel-setup-picker"
+                panelId="book-travel-setup-style"
+                presets={stylePresets}
+                selectedPresetIds={bookTravelStore.selectedStylePresetIds}
+                enabledStyleSegmentIds={bookTravelStore.enabledStyleSegmentIds}
+                onPresetsChange={applyBookTravelStylePresets}
+                onEnabledStyleSegmentIdsChange={bookTravelStore.setEnabledStyleSegmentIds}
+                open={bookTravelStore.stylePresetPanelOpen}
+                onOpenChange={bookTravelStore.setStylePresetPanelOpen}
               />
 
               {/* Start Button */}
@@ -2218,6 +2247,22 @@ const useStoryView = () => {
         <BookTravelStatusHud
           model={bookTravelHudModel}
           restorationKey={bookTravelStore.activeSavedProgressId}
+          controls={(
+            <BookTravelSessionControls
+              characterCards={bookTravelStore.selectedCharacterCards}
+              enabledCharacterCardIds={bookTravelStore.enabledCharacterCardIds}
+              onEnabledCharacterCardIdsChange={bookTravelStore.setEnabledCharacterCardIds}
+              characterPanelOpen={bookTravelStore.characterPanelOpen}
+              onCharacterPanelOpenChange={bookTravelStore.setCharacterPanelOpen}
+              presets={stylePresets}
+              selectedPresetIds={bookTravelStore.selectedStylePresetIds}
+              enabledStyleSegmentIds={bookTravelStore.enabledStyleSegmentIds}
+              onPresetsChange={applyBookTravelStylePresets}
+              onEnabledStyleSegmentIdsChange={bookTravelStore.setEnabledStyleSegmentIds}
+              stylePresetPanelOpen={bookTravelStore.stylePresetPanelOpen}
+              onStylePresetPanelOpenChange={bookTravelStore.setStylePresetPanelOpen}
+            />
+          )}
         />
       ) : null}
     </div>

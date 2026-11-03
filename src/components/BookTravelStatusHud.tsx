@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import type {
   BookTravelHudDynamicGroup,
@@ -9,6 +9,7 @@ import type {
 interface BookTravelStatusHudProps {
   model: BookTravelHudModel;
   restorationKey?: string | null;
+  controls?: ReactNode;
 }
 
 const NARROW_LAYOUT_QUERY = '(max-width: 1100px)';
@@ -118,7 +119,7 @@ function DynamicGroup({ group, changedIds }: { group: BookTravelHudDynamicGroup;
   );
 }
 
-export function BookTravelStatusHud({ model, restorationKey = null }: BookTravelStatusHudProps) {
+export function BookTravelStatusHud({ model, restorationKey = null, controls = null }: BookTravelStatusHudProps) {
   const [isNarrow, setIsNarrow] = useState(getInitialNarrowState);
   const [isOpen, setIsOpen] = useState(() => !getInitialNarrowState());
   const [isSummaryExpanded, setIsSummaryExpanded] = useState(false);
@@ -226,6 +227,7 @@ export function BookTravelStatusHud({ model, restorationKey = null }: BookTravel
           {model.isCompleted ? <div className="book-travel-status-hud__ended">旅程已结束</div> : null}
 
           <div className="book-travel-status-hud__content">
+            {controls}
             <HudSection title="旅程信息" entries={model.journey} changedIds={changedIds} />
             <HudSection title="当前场景" entries={model.scene} changedIds={changedIds} />
             {model.dynamicGroups.map((group) => (

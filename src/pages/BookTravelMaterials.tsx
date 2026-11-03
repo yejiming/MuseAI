@@ -6,7 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useBookTravelStore, BookTravelAssembledMaterial, BookTravelEntryPoint, BookTravelUserCharacter } from '../stores/useBookTravelStore';
 import { usePartnerStore } from '../stores/usePartnerStore';
 import { useSettingsStore } from '../stores/useSettingsStore';
-import { resolveOutlineMaterial, resolvePartnerMaterials } from '../utils/bookTravelMaterials';
+import { refreshAssembledCharacterCards, replaceCharacterProfiles, resolveOutlineMaterial, resolvePartnerMaterials } from '../utils/bookTravelMaterials';
 import { getCharacterCardIdsForWorldBook, groupCharacterCardsByWorldBook } from '../utils/characterCardGroups';
 import { useStateGroup } from '../utils/reducerState';
 
@@ -40,6 +40,7 @@ interface BookTravelMaterialsUiState {
   progressError: string;
   elapsedMs: number;
   detailDraft: MaterialDetailDraft;
+  refreshCharacterCardIds: string[];
 }
 
 const BOOK_TRAVEL_PROGRESS_DOT_BASE_STYLE: React.CSSProperties = {
@@ -417,6 +418,7 @@ const useBookTravelMaterialsView = () => {
     progressError: '',
     elapsedMs: 0,
     detailDraft: createMaterialDetailDraft(null),
+    refreshCharacterCardIds: [],
   });
   const {
     modalOpen,
@@ -431,6 +433,7 @@ const useBookTravelMaterialsView = () => {
     progressError,
     elapsedMs,
     detailDraft,
+    refreshCharacterCardIds,
   } = uiState;
   const setModalOpen = (modalOpen: boolean) => setUiField('modalOpen', modalOpen);
   const setOutlineTree = (outlineTree: FileTreeNode[]) => setUiField('outlineTree', outlineTree);
@@ -516,12 +519,17 @@ const useBookTravelMaterialsView = () => {
   }, [store.assembledMaterials, store.selectedMaterialId]);
 
   // Sync editable states when selected material changes
+  const selectedMaterialIdForDraft = selectedMaterial?.id ?? null;
   useEffect(() => {
-    characterKeysRef.current = selectedMaterial
-      ? selectedMaterial.recommendedUserCharacters.map(() => createEditableRowKey())
+    const material = selectedMaterialIdForDraft
+      ? useBookTravelStore.getState().assembledMaterials.find((item) => item.id === selectedMaterialIdForDraft) ?? null
+      : null;
+    characterKeysRef.current = material
+      ? material.recommendedUserCharacters.map(() => createEditableRowKey())
       : [];
-    setUiField('detailDraft', createMaterialDetailDraft(selectedMaterial));
-  }, [selectedMaterial, setUiField]);
+    setUiField('detailDraft', createMaterialDetailDraft(material));
+    setUiField('refreshCharacterCardIds', []);
+  }, [selectedMaterialIdForDraft, setUiField]);
 
   // Global listener for book-travel-stream events
   useEffect(() => {
@@ -793,6 +801,59 @@ const useBookTravelMaterialsView = () => {
     message.success('已保存素材详情');
   };
 
+  const handleRefreshCharacters = () => {
+    if (!selectedMaterial) return;
+    if (refreshCharacterCardIds.length === 0) {
+      message.warning('请先勾选要刷新的人物');
+      return;
+    }
+    const refreshed = refreshAssembledCharacterCards(
+      selectedMaterial.materials.characterCards,
+      selectedMaterial.materials.worldBook.id,
+      refreshCharacterCardIds,
+      selectedMaterial.assembledWorldModel,
+    );
+    if (refreshed.worldBookMissing) {
+      message.warning('这份素材绑定的世界书已不在世界书库中');
+      return;
+    }
+    if (refreshed.refreshedCards.length === 0) {
+      message.warning('勾选的人物在该世界书中没有同名人物卡');
+      return;
+    }
+    store.updateAssembledMaterial(selectedMaterial.id, {
+      materials: {
+        ...selectedMaterial.materials,
+        characterCards: refreshed.characterCards,
+      },
+      assembledWorldModel: refreshed.assembledWorldModel,
+    });
+    setEditWorldModel(replaceCharacterProfiles(editWorldModel, refreshed.refreshedCards) as Record<string, unknown>);
+    if (store.selectedMaterialId === selectedMaterial.id) {
+      const session = useBookTravelStore.getState();
+      const idMap = new Map(selectedMaterial.materials.characterCards.map((card, index) => [card.id, refreshed.characterCards[index]?.id || card.id]));
+      store.setSelectedCharacterCards(refreshed.characterCards);
+      store.setAssembledWorldModel(replaceCharacterProfiles(session.assembledWorldModel, refreshed.refreshedCards));
+      if (Array.isArray(session.enabledCharacterCardIds)) {
+        store.setEnabledCharacterCardIds(session.enabledCharacterCardIds.map((id) => idMap.get(id) || id));
+      }
+    }
+    const missingTitles = selectedMaterial.materials.characterCards
+      .filter((card) => refreshed.missingIds.includes(card.id))
+      .map((card) => card.title);
+    if (missingTitles.length > 0) {
+      message.warning(`已刷新 ${refreshed.refreshedCards.length} 张人物卡，${missingTitles.join('、')} 不在人物库中`);
+      return;
+    }
+    message.success(`已刷新 ${refreshed.refreshedCards.length} 张人物卡`);
+  };
+
+  const toggleRefreshCharacter = (cardId: string, checked: boolean) => {
+    setUiField('refreshCharacterCardIds', checked
+      ? [...refreshCharacterCardIds, cardId]
+      : refreshCharacterCardIds.filter((id) => id !== cardId));
+  };
+
   /* ---------------------------------------------------------------- */
   /*  Detail editing helpers                                            */
   /* ---------------------------------------------------------------- */
@@ -914,6 +975,33 @@ const useBookTravelMaterialsView = () => {
               素材名称
               <Input id="book-travel-material-title" aria-label="素材名称" value={detailTitle} onChange={(event) => setDetailTitle(event.target.value)} />
             </label>
+
+            <section aria-label="刷新人设" style={{ display: 'grid', gap: 10, padding: 14, border: '1px solid #eae6df', borderRadius: 10, background: '#fffdf9' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <div style={{ fontWeight: 600, color: '#33312e' }}>刷新人设</div>
+                  <div style={{ marginTop: 4, color: '#8c8882', fontSize: 12 }}>在素材绑定的世界书里按姓名写回当前人物卡，不重新装配大纲。</div>
+                </div>
+                <Button onClick={handleRefreshCharacters}>刷新人设</Button>
+              </div>
+              {selectedMaterial.materials.characterCards.length === 0 ? (
+                <div style={{ color: '#8c8882', fontSize: 13 }}>这份素材没有人物卡</div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                  {selectedMaterial.materials.characterCards.map((card) => (
+                    <label key={card.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#33312e', fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        aria-label={`刷新人设 ${card.title}`}
+                        checked={refreshCharacterCardIds.includes(card.id)}
+                        onChange={(event) => toggleRefreshCharacter(card.id, event.target.checked)}
+                      />
+                      <span>{card.title}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </section>
 
             <Tabs
               defaultActiveKey="world-model"

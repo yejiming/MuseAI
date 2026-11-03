@@ -195,6 +195,8 @@ function resetStoryBookTravelStores() {
     selectedMaterialId: null,
     savedProgresses: [],
     activeSavedProgressId: null,
+    characterPanelOpen: true,
+    stylePresetPanelOpen: true,
   });
   invokeMock.mockClear();
   invokeMock.mockImplementation(defaultInvoke);
@@ -301,6 +303,8 @@ function getCurrentBookTravelSnapshot(overrides: Partial<BookTravelSnapshot> = {
     selectedStylePresetIds: state.selectedStylePresetIds,
     initialStylePresetIds: state.initialStylePresetIds,
     initialSystemPromptSnapshot: state.initialSystemPromptSnapshot,
+    enabledCharacterCardIds: state.enabledCharacterCardIds,
+    enabledStyleSegmentIds: state.enabledStyleSegmentIds,
     ...overrides,
   };
 }
@@ -439,6 +443,69 @@ describe('Story book-travel mode', () => {
 
     const startBtn = screen.getByRole('button', { name: /开始穿书/ });
     expect(startBtn).toBeEnabled();
+  });
+
+  it('sends the characters and style segments chosen before the first book-travel turn', async () => {
+    useStylePresetStore.setState({ presets: [
+      { id: 'book-1', name: '古典叙事', segments: [
+        { id: 'narrative', title: '叙事', content: '穿书叙事片段', enabled: true },
+        { id: 'battle', title: '战斗', content: '穿书战斗片段', enabled: true },
+      ], createdAt: 1, updatedAt: 1 },
+    ] });
+    useBookTravelStore.getState().saveAssembledMaterial({
+      title: '第一卷 · 云州入场',
+      materials: {
+        outline: { id: '/outline/第一卷.md', title: '第一卷.md', path: '/outline/第一卷.md', content: '大纲正文' },
+        worldBook: { id: worldBook.id, title: worldBook.name, content: worldBook.content },
+        characterCards: [
+          { id: 'cc-test', title: '沈霜', content: '沈霜完整设定' },
+          { id: 'cc-2', title: '陆衡', content: '陆衡完整设定' },
+        ],
+      },
+      assembledWorldModel: { selectedCharacterProfiles: ['沈霜：冷', '陆衡：稳'] },
+      stableMemory: { worldRules: ['灵契不可违背'] },
+      volatileMemory: { clues: [] },
+      entryPoints: [
+        {
+          id: 'entry-1',
+          title: '醒在婚宴',
+          summary: '红烛未灭，宾客已散',
+          timeAndLocation: '第一夜，沈府',
+          situation: '红烛未灭，宾客已散',
+          initialGoal: '查清替嫁真相',
+          risk: '被沈家识破',
+        },
+      ],
+      recommendedUserCharacters: [
+        { name: '林晚', identity: '替嫁者', background: '从现代穿入原书', personality: '清醒谨慎', goal: '改写死局' },
+      ],
+    });
+
+    renderWithRouter(<Story />);
+
+    fireEvent.mouseDown(screen.getAllByRole('combobox')[0]);
+    fireEvent.click(await screen.findByText('第一卷 · 云州入场'));
+
+    expect(await screen.findByText('第一次对话发送的人物')).toBeInTheDocument();
+    expect(screen.getByLabelText('第一次对话发送 沈霜')).toBeChecked();
+    fireEvent.click(screen.getByLabelText('第一次对话发送 陆衡'));
+
+    fireEvent.mouseDown(screen.getByLabelText('穿书文风预设'));
+    fireEvent.click(await screen.findByText('古典叙事'));
+    expect(screen.getByLabelText('本局提示词 叙事')).toBeChecked();
+    fireEvent.click(screen.getByLabelText('本局提示词 战斗'));
+    fireEvent.click(screen.getByRole('button', { name: /开始穿书/ }));
+
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_change_scene_stream', expect.anything()));
+    const plannerCall = invokeMock.mock.calls.find(([command]) => command === 'start_plan_book_travel_scene_stream');
+    const writerCall = invokeMock.mock.calls.find(([command]) => command === 'start_write_book_travel_change_scene_stream');
+    expect(plannerCall?.[1].request.materials.characterCards.map((card: { title: string }) => card.title)).toEqual(['沈霜']);
+    expect(plannerCall?.[1].request.state.assembledWorldModel.selectedCharacterProfiles).toEqual(['沈霜：冷']);
+    expect(plannerCall?.[1].request.systemPrompt).not.toContain('穿书叙事片段');
+    expect(writerCall?.[1].request.materials.characterCards.map((card: { title: string }) => card.title)).toEqual(['沈霜']);
+    expect(writerCall?.[1].request.state.assembledWorldModel.selectedCharacterProfiles).toEqual(['沈霜：冷']);
+    expect(writerCall?.[1].request.systemPrompt).toContain('穿书叙事片段');
+    expect(writerCall?.[1].request.systemPrompt).not.toContain('穿书战斗片段');
   });
 
   it('switches to the conversation view and shows the planned scene while the first scene writer is running', async () => {
@@ -947,7 +1014,7 @@ describe('Story book-travel mode', () => {
     });
   });
 
-  it('restores only the final selected book-travel preset from legacy multi-select progress', () => {
+  it('restores every selected book-travel preset from saved progress', () => {
     setActiveBookTravelScene();
     useBookTravelStore.setState({
       selectedStylePresetIds: ['preset-b', 'preset-a'],
@@ -957,7 +1024,7 @@ describe('Story book-travel mode', () => {
     const progressId = useBookTravelStore.getState().saveProgress({ mode: 'create', title: '预设进度' });
     useBookTravelStore.setState({ selectedStylePresetIds: [] });
     useBookTravelStore.getState().loadSavedProgress(progressId);
-    expect(useBookTravelStore.getState().selectedStylePresetIds).toEqual(['preset-a']);
+    expect(useBookTravelStore.getState().selectedStylePresetIds).toEqual(['preset-b', 'preset-a']);
     expect(useBookTravelStore.getState().initialStylePresetIds).toEqual(['preset-a']);
     expect(useBookTravelStore.getState().initialSystemPromptSnapshot).toBe('初始化穿书提示词');
   });
@@ -1098,6 +1165,44 @@ describe('Story book-travel mode', () => {
     expect(classifyCall?.[1].request.systemPrompt).not.toContain('meta');
   });
 
+  it('sends only checked characters and style segments from the book-travel status panel', async () => {
+    useStylePresetStore.setState({ presets: [
+      { id: 'book-1', name: '古典叙事', segments: [
+        { id: 'narrative', title: '叙事', content: '穿书叙事片段', enabled: true },
+        { id: 'battle', title: '战斗', content: '穿书战斗片段', enabled: true },
+      ], createdAt: 1, updatedAt: 1 },
+    ] });
+    setActiveBookTravelScene();
+    useBookTravelStore.setState({
+      selectedStylePresetIds: ['book-1'],
+      selectedCharacterCards: [
+        { id: 'cc-test', title: '沈霜', content: '沈霜完整设定' },
+        { id: 'cc-2', title: '陆衡', content: '陆衡完整设定' },
+      ],
+      assembledWorldModel: { selectedCharacterProfiles: ['沈霜：冷', '陆衡：稳'] },
+    });
+
+    renderWithRouter(<Story />);
+
+    expect(screen.queryByLabelText('穿书文风预设')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('穿书状态文风预设')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('本轮发送 陆衡'));
+    fireEvent.click(screen.getByLabelText('本局提示词 战斗'));
+    fireEvent.change(screen.getByPlaceholderText(/说些什么/), { target: { value: '查看状态' } });
+    fireEvent.click(document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement);
+
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_insert_beat_stream', expect.anything()));
+    const writerCall = invokeMock.mock.calls.find(([command]) => command === 'start_write_book_travel_insert_beat_stream');
+    const classifierCall = invokeMock.mock.calls.find(([command]) => command === 'classify_book_travel_input');
+    expect(writerCall?.[1].request.materials.characterCards.map((card: { title: string }) => card.title)).toEqual(['沈霜']);
+    expect(writerCall?.[1].request.state.assembledWorldModel.selectedCharacterProfiles).toEqual(['沈霜：冷']);
+    expect(writerCall?.[1].request.systemPrompt).toContain('穿书叙事片段');
+    expect(writerCall?.[1].request.systemPrompt).not.toContain('穿书战斗片段');
+    expect(classifierCall?.[1].request.materials.characterCards.map((card: { title: string }) => card.title)).toEqual(['沈霜']);
+    expect(classifierCall?.[1].request.systemPrompt).not.toContain('穿书叙事片段');
+    expect(classifierCall?.[1].request.systemPrompt).not.toContain('穿书战斗片段');
+  });
+
   it('only prepends book-travel presets to scene-writer requests', async () => {
     useStylePresetStore.setState({ presets: [
       { id: 'book-1', name: '古典叙事', segments: [{ id: 'book-segment-1', title: '叙事', content: '穿书预设正文', enabled: true }], createdAt: 1, updatedAt: 1 },
@@ -1114,6 +1219,107 @@ describe('Story book-travel mode', () => {
     const classifierCall = invokeMock.mock.calls.find(([command]) => command === 'classify_book_travel_input');
     expect(writerCall?.[1].request.systemPrompt).toMatch(/穿书预设正文[\s\S]*穿书场景写手/);
     expect(classifierCall?.[1].request.systemPrompt).not.toContain('穿书预设正文');
+  });
+
+  it('adds a second book-travel style preset and sends the checked segments from both', async () => {
+    useStylePresetStore.setState({ presets: [
+      { id: 'book-1', name: '古典叙事', segments: [
+        { id: 'narrative', title: '叙事', content: '穿书叙事片段', enabled: true },
+      ], createdAt: 1, updatedAt: 1 },
+      { id: 'book-2', name: '战斗笔法', segments: [
+        { id: 'battle', title: '战斗', content: '穿书战斗片段', enabled: true },
+        { id: 'quiet', title: '静场', content: '穿书静场片段', enabled: false },
+      ], createdAt: 1, updatedAt: 1 },
+    ] });
+    setActiveBookTravelScene();
+    useBookTravelStore.setState({ selectedStylePresetIds: ['book-1'], enabledStyleSegmentIds: null });
+
+    renderWithRouter(<Story />);
+
+    fireEvent.click(screen.getByRole('button', { name: '添加文风预设' }));
+    fireEvent.mouseDown(screen.getByLabelText('选择要添加的文风预设'));
+    const battleOption = await screen.findByText('战斗笔法');
+    expect(screen.queryByRole('option', { name: '古典叙事' })).not.toBeInTheDocument();
+    fireEvent.click(battleOption);
+
+    expect(useBookTravelStore.getState().selectedStylePresetIds).toEqual(['book-1', 'book-2']);
+    expect(screen.getByLabelText('本局提示词 战斗')).toBeChecked();
+    expect(screen.getByLabelText('本局提示词 静场')).not.toBeChecked();
+    fireEvent.click(screen.getByLabelText('本局提示词 静场'));
+    fireEvent.click(screen.getByLabelText('本局提示词 战斗'));
+
+    fireEvent.change(screen.getByPlaceholderText(/说些什么/), { target: { value: '查看状态' } });
+    fireEvent.click(document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement);
+
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_insert_beat_stream', expect.anything()));
+    const writerCall = invokeMock.mock.calls.find(([command]) => command === 'start_write_book_travel_insert_beat_stream');
+    expect(writerCall?.[1].request.systemPrompt).toMatch(/穿书叙事片段[\s\S]*穿书静场片段[\s\S]*穿书场景写手/);
+    expect(writerCall?.[1].request.systemPrompt).not.toContain('穿书战斗片段');
+  });
+
+  it('removes one book-travel style preset without clearing the segments of the others', () => {
+    useStylePresetStore.setState({ presets: [
+      { id: 'book-1', name: '古典叙事', segments: [
+        { id: 'narrative', title: '叙事', content: '穿书叙事片段', enabled: true },
+      ], createdAt: 1, updatedAt: 1 },
+      { id: 'book-2', name: '战斗笔法', segments: [
+        { id: 'battle', title: '战斗', content: '穿书战斗片段', enabled: true },
+      ], createdAt: 1, updatedAt: 1 },
+    ] });
+    setActiveBookTravelScene();
+    useBookTravelStore.setState({
+      selectedStylePresetIds: ['book-1', 'book-2'],
+      enabledStyleSegmentIds: ['narrative', 'battle'],
+    });
+
+    renderWithRouter(<Story />);
+
+    fireEvent.click(screen.getByRole('button', { name: '移除文风预设 古典叙事' }));
+
+    expect(useBookTravelStore.getState().selectedStylePresetIds).toEqual(['book-2']);
+    expect(useBookTravelStore.getState().enabledStyleSegmentIds).toEqual(['battle']);
+    expect(screen.queryByLabelText('本局提示词 叙事')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('本局提示词 战斗')).toBeChecked();
+  });
+
+  it('keeps character and style panels collapsed across visits without saving that in progress', () => {
+    useStylePresetStore.setState({ presets: [
+      { id: 'book-1', name: '古典叙事', segments: [
+        { id: 'narrative', title: '叙事', content: '穿书叙事片段', enabled: true },
+      ], createdAt: 1, updatedAt: 1 },
+    ] });
+    setActiveBookTravelScene();
+    useBookTravelStore.setState({ selectedStylePresetIds: ['book-1'] });
+
+    const view = renderWithRouter(<Story />);
+    expect(screen.getByLabelText('本轮发送 沈霜')).toBeInTheDocument();
+    expect(screen.getByLabelText('穿书状态文风预设')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '本轮发送的人物' }));
+    fireEvent.click(screen.getByRole('button', { name: '文风预设' }));
+    expect(screen.queryByLabelText('本轮发送 沈霜')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('穿书状态文风预设')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '本轮发送的人物' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: '文风预设' })).toHaveAttribute('aria-expanded', 'false');
+
+    const progressId = useBookTravelStore.getState().saveProgress({ mode: 'create', title: '面板进度' });
+    const snapshot = useBookTravelStore.getState().savedProgresses[0].snapshot;
+    expect(snapshot).not.toHaveProperty('characterPanelOpen');
+    expect(snapshot).not.toHaveProperty('stylePresetPanelOpen');
+
+    view.unmount();
+    useBookTravelStore.getState().resetSession();
+    expect(useBookTravelStore.getState().characterPanelOpen).toBe(false);
+    expect(useBookTravelStore.getState().stylePresetPanelOpen).toBe(false);
+    useBookTravelStore.getState().loadSavedProgress(progressId);
+
+    renderWithRouter(<Story />);
+    expect(screen.getByRole('button', { name: '本轮发送的人物' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: '文风预设' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('本轮发送 沈霜')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '本轮发送的人物' }));
+    expect(screen.getByLabelText('本轮发送 沈霜')).toBeInTheDocument();
   });
 
   it('passes the selected book-travel input mode prefix into the runtime calls and turn record', async () => {

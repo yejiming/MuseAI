@@ -166,4 +166,59 @@ describe('BookTravelMaterials page', () => {
       expect(useBookTravelStore.getState().assembledMaterials[0].title).toBe('新素材标题');
     });
   });
+
+  it('refreshes checked character cards into the assembled material', async () => {
+    usePartnerStore.setState({
+      characterCards: [
+        {
+          id: 'cc-new',
+          name: '沈霜',
+          type: 'character_card',
+          content: '旧正文',
+          fields: { skills: '新剑法', userRelationType: '好友' },
+          worldBookId: 'wb-1',
+        },
+      ],
+    });
+    const materialId = useBookTravelStore.getState().saveAssembledMaterial({
+      title: '旧素材标题',
+      materials: {
+        outline: { id: '/outline/旧.md', title: '旧.md', content: '旧大纲' },
+        worldBook: { id: 'wb-1', title: '云州世界书', content: '世界书正文' },
+        characterCards: [
+          { id: 'cc-1', title: '沈霜', content: '旧设定' },
+          { id: 'cc-2', title: '陆衡', content: '陆衡旧设定' },
+        ],
+      },
+      assembledWorldModel: {
+        originalTimeline: ['旧线'],
+        selectedCharacterProfiles: ['沈霜：旧摘要', '陆衡：不动'],
+      },
+      stableMemory: null,
+      volatileMemory: null,
+      entryPoints: [],
+      recommendedUserCharacters: [],
+    });
+    useBookTravelStore.getState().loadAssembledMaterial(materialId);
+
+    render(<BookTravelMaterials />);
+
+    fireEvent.click(screen.getByLabelText('刷新人设 沈霜'));
+    fireEvent.click(screen.getByRole('button', { name: '刷新人设' }));
+
+    await waitFor(() => {
+      const material = useBookTravelStore.getState().assembledMaterials[0];
+      expect(material.materials.characterCards[0].id).toBe('cc-new');
+      expect(material.materials.characterCards[0].content).toContain('新剑法');
+      expect(material.materials.characterCards[0].content).not.toContain('好友');
+      expect(material.materials.characterCards[1].content).toBe('陆衡旧设定');
+      expect(material.materials.outline.content).toBe('旧大纲');
+      expect(material.assembledWorldModel).toMatchObject({
+        originalTimeline: ['旧线'],
+        selectedCharacterProfiles: ['沈霜：姓名：沈霜 新剑法', '陆衡：不动'],
+      });
+    });
+    expect(useBookTravelStore.getState().selectedCharacterCards[0].id).toBe('cc-new');
+    expect(useBookTravelStore.getState().enabledCharacterCardIds).toEqual(['cc-new', 'cc-2']);
+  });
 });

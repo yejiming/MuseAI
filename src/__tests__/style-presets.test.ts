@@ -39,6 +39,20 @@ describe('文风预设', () => {
     expect(resolveStylePresets(presets, ['missing', 'a']).missingIds).toEqual(['missing']);
   });
 
+  it('本局片段名单可以带上预设里关闭的片段，并排除未勾选片段', () => {
+    const presets = normalizeStylePresets([
+      { id: 'a', name: '预设甲', segments: [
+        { id: 'a1', title: '甲一', content: '第一段', enabled: false },
+        { id: 'a2', title: '甲二', content: '第二段', enabled: true },
+      ], createdAt: 1, updatedAt: 1 },
+    ]);
+
+    const result = prependStylePresets('基础提示词', presets, ['a'], ['a1']);
+
+    expect(result).toContain('第一段');
+    expect(result).not.toContain('第二段');
+  });
+
   it('保留重复选择、对象引用、片段顺序和字符统计', () => {
     const presets = normalizeStylePresets([
       { id: 'a', name: '预设甲', segments: [
