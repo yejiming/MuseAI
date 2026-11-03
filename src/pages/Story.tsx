@@ -35,8 +35,9 @@ import { formatHistorySavedAt, resolveBookTravelProgressMaterial } from '../util
 import { ensureSessionId } from '../utils/sessionIds';
 import { getEffectiveMessagesForContextStats } from '../utils/contextCompaction';
 import { createStableContentKey } from '../utils/renderKeys';
-import { StylePresetSelector } from '../components/StylePresetSelector';
+import { BookTravelCharacterSendPicker } from '../components/BookTravelCharacterSendPicker';
 import { BookTravelSessionControls } from '../components/BookTravelSessionControls';
+import { BookTravelStylePresetControl } from '../components/BookTravelStylePresetControl';
 import { useStylePresetStore } from '../stores/useStylePresetStore';
 import { enabledStyleSegmentIdsForPreset, prependStylePresets } from '../utils/stylePresets';
 import { filterBookTravelRequestContext } from '../utils/bookTravelMaterials';
@@ -553,6 +554,11 @@ const useStoryView = () => {
     bookTravelStore.selectedStylePresetIds,
     bookTravelStore.enabledStyleSegmentIds,
   );
+  const applyBookTravelStylePreset = (presetId: string | null) => {
+    const preset = presetId ? stylePresets.find((item) => item.id === presetId) : undefined;
+    bookTravelStore.setSelectedStylePresetIds(preset ? [preset.id] : []);
+    bookTravelStore.setEnabledStyleSegmentIds(preset ? enabledStyleSegmentIdsForPreset(preset) : []);
+  };
 
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const currentThinkingIdRef = useRef<string | null>(null);
@@ -2013,6 +2019,17 @@ const useStoryView = () => {
                 </div>
               )}
 
+              {bookTravelStore.selectedMaterialId && (
+                <BookTravelCharacterSendPicker
+                  className="book-travel-setup-picker"
+                  title="第一次对话发送的人物"
+                  labelForCard={(card) => `第一次对话发送 ${card.title}`}
+                  characterCards={bookTravelStore.selectedCharacterCards}
+                  enabledCharacterCardIds={bookTravelStore.enabledCharacterCardIds}
+                  onEnabledCharacterCardIdsChange={bookTravelStore.setEnabledCharacterCardIds}
+                />
+              )}
+
               {/* Select User Character */}
               {bookTravelStore.selectedEntryPointId && (
                 <div>
@@ -2063,11 +2080,13 @@ const useStoryView = () => {
                 </div>
               )}
 
-              {/* Start Button */}
-              <StylePresetSelector
-                target="bookTravel"
-                value={bookTravelStore.selectedStylePresetIds[0] || null}
-                onChange={(id) => bookTravelStore.setSelectedStylePresetIds(id ? [id] : [])}
+              <BookTravelStylePresetControl
+                className="book-travel-setup-picker"
+                presets={stylePresets}
+                selectedPresetId={bookTravelStore.selectedStylePresetIds[0] || null}
+                enabledStyleSegmentIds={bookTravelStore.enabledStyleSegmentIds}
+                onPresetChange={applyBookTravelStylePreset}
+                onEnabledStyleSegmentIdsChange={bookTravelStore.setEnabledStyleSegmentIds}
               />
 
               {/* Start Button */}
@@ -2231,11 +2250,7 @@ const useStoryView = () => {
               presets={stylePresets}
               selectedPresetId={bookTravelStore.selectedStylePresetIds[0] || null}
               enabledStyleSegmentIds={bookTravelStore.enabledStyleSegmentIds}
-              onPresetChange={(presetId) => {
-                const preset = stylePresets.find((item) => item.id === presetId);
-                bookTravelStore.setSelectedStylePresetIds(presetId ? [presetId] : []);
-                bookTravelStore.setEnabledStyleSegmentIds(preset ? enabledStyleSegmentIdsForPreset(preset) : []);
-              }}
+              onPresetChange={applyBookTravelStylePreset}
               onEnabledStyleSegmentIdsChange={bookTravelStore.setEnabledStyleSegmentIds}
             />
           )}

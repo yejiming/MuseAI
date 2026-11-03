@@ -1649,6 +1649,13 @@ a:hover {
   overflow-y: auto;
 }
 
+.book-travel-setup-picker h3 {
+  margin: 0 0 8px;
+  color: #33312e;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .book-travel-setup-card,
 .adventure-setup-card {
   display: flex;

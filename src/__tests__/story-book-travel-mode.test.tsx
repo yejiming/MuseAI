@@ -443,6 +443,69 @@ describe('Story book-travel mode', () => {
     expect(startBtn).toBeEnabled();
   });
 
+  it('sends the characters and style segments chosen before the first book-travel turn', async () => {
+    useStylePresetStore.setState({ presets: [
+      { id: 'book-1', name: '古典叙事', segments: [
+        { id: 'narrative', title: '叙事', content: '穿书叙事片段', enabled: true },
+        { id: 'battle', title: '战斗', content: '穿书战斗片段', enabled: true },
+      ], createdAt: 1, updatedAt: 1 },
+    ] });
+    useBookTravelStore.getState().saveAssembledMaterial({
+      title: '第一卷 · 云州入场',
+      materials: {
+        outline: { id: '/outline/第一卷.md', title: '第一卷.md', path: '/outline/第一卷.md', content: '大纲正文' },
+        worldBook: { id: worldBook.id, title: worldBook.name, content: worldBook.content },
+        characterCards: [
+          { id: 'cc-test', title: '沈霜', content: '沈霜完整设定' },
+          { id: 'cc-2', title: '陆衡', content: '陆衡完整设定' },
+        ],
+      },
+      assembledWorldModel: { selectedCharacterProfiles: ['沈霜：冷', '陆衡：稳'] },
+      stableMemory: { worldRules: ['灵契不可违背'] },
+      volatileMemory: { clues: [] },
+      entryPoints: [
+        {
+          id: 'entry-1',
+          title: '醒在婚宴',
+          summary: '红烛未灭，宾客已散',
+          timeAndLocation: '第一夜，沈府',
+          situation: '红烛未灭，宾客已散',
+          initialGoal: '查清替嫁真相',
+          risk: '被沈家识破',
+        },
+      ],
+      recommendedUserCharacters: [
+        { name: '林晚', identity: '替嫁者', background: '从现代穿入原书', personality: '清醒谨慎', goal: '改写死局' },
+      ],
+    });
+
+    renderWithRouter(<Story />);
+
+    fireEvent.mouseDown(screen.getAllByRole('combobox')[0]);
+    fireEvent.click(await screen.findByText('第一卷 · 云州入场'));
+
+    expect(await screen.findByText('第一次对话发送的人物')).toBeInTheDocument();
+    expect(screen.getByLabelText('第一次对话发送 沈霜')).toBeChecked();
+    fireEvent.click(screen.getByLabelText('第一次对话发送 陆衡'));
+
+    fireEvent.mouseDown(screen.getByLabelText('穿书文风预设'));
+    fireEvent.click(await screen.findByText('古典叙事'));
+    expect(screen.getByLabelText('本局提示词 叙事')).toBeChecked();
+    fireEvent.click(screen.getByLabelText('本局提示词 战斗'));
+    fireEvent.click(screen.getByRole('button', { name: /开始穿书/ }));
+
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_change_scene_stream', expect.anything()));
+    const plannerCall = invokeMock.mock.calls.find(([command]) => command === 'start_plan_book_travel_scene_stream');
+    const writerCall = invokeMock.mock.calls.find(([command]) => command === 'start_write_book_travel_change_scene_stream');
+    expect(plannerCall?.[1].request.materials.characterCards.map((card: { title: string }) => card.title)).toEqual(['沈霜']);
+    expect(plannerCall?.[1].request.state.assembledWorldModel.selectedCharacterProfiles).toEqual(['沈霜：冷']);
+    expect(plannerCall?.[1].request.systemPrompt).not.toContain('穿书叙事片段');
+    expect(writerCall?.[1].request.materials.characterCards.map((card: { title: string }) => card.title)).toEqual(['沈霜']);
+    expect(writerCall?.[1].request.state.assembledWorldModel.selectedCharacterProfiles).toEqual(['沈霜：冷']);
+    expect(writerCall?.[1].request.systemPrompt).toContain('穿书叙事片段');
+    expect(writerCall?.[1].request.systemPrompt).not.toContain('穿书战斗片段');
+  });
+
   it('switches to the conversation view and shows the planned scene while the first scene writer is running', async () => {
     invokeMock.mockImplementation((command: string, args?: any) => {
       if (command === 'start_plan_book_travel_scene_stream') {
