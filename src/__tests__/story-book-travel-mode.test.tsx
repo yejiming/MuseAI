@@ -301,6 +301,8 @@ function getCurrentBookTravelSnapshot(overrides: Partial<BookTravelSnapshot> = {
     selectedStylePresetIds: state.selectedStylePresetIds,
     initialStylePresetIds: state.initialStylePresetIds,
     initialSystemPromptSnapshot: state.initialSystemPromptSnapshot,
+    enabledCharacterCardIds: state.enabledCharacterCardIds,
+    enabledStyleSegmentIds: state.enabledStyleSegmentIds,
     ...overrides,
   };
 }
@@ -1096,6 +1098,44 @@ describe('Story book-travel mode', () => {
     expect(classifyCall?.[1].request.systemPrompt).toContain('{"classification":"insert-beat"}');
     expect(classifyCall?.[1].request.systemPrompt).not.toContain('reason');
     expect(classifyCall?.[1].request.systemPrompt).not.toContain('meta');
+  });
+
+  it('sends only checked characters and style segments from the book-travel status panel', async () => {
+    useStylePresetStore.setState({ presets: [
+      { id: 'book-1', name: '古典叙事', segments: [
+        { id: 'narrative', title: '叙事', content: '穿书叙事片段', enabled: true },
+        { id: 'battle', title: '战斗', content: '穿书战斗片段', enabled: true },
+      ], createdAt: 1, updatedAt: 1 },
+    ] });
+    setActiveBookTravelScene();
+    useBookTravelStore.setState({
+      selectedStylePresetIds: ['book-1'],
+      selectedCharacterCards: [
+        { id: 'cc-test', title: '沈霜', content: '沈霜完整设定' },
+        { id: 'cc-2', title: '陆衡', content: '陆衡完整设定' },
+      ],
+      assembledWorldModel: { selectedCharacterProfiles: ['沈霜：冷', '陆衡：稳'] },
+    });
+
+    renderWithRouter(<Story />);
+
+    expect(screen.queryByLabelText('穿书文风预设')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('穿书状态文风预设')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('本轮发送 陆衡'));
+    fireEvent.click(screen.getByLabelText('本局提示词 战斗'));
+    fireEvent.change(screen.getByPlaceholderText(/说些什么/), { target: { value: '查看状态' } });
+    fireEvent.click(document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement);
+
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_insert_beat_stream', expect.anything()));
+    const writerCall = invokeMock.mock.calls.find(([command]) => command === 'start_write_book_travel_insert_beat_stream');
+    const classifierCall = invokeMock.mock.calls.find(([command]) => command === 'classify_book_travel_input');
+    expect(writerCall?.[1].request.materials.characterCards.map((card: { title: string }) => card.title)).toEqual(['沈霜']);
+    expect(writerCall?.[1].request.state.assembledWorldModel.selectedCharacterProfiles).toEqual(['沈霜：冷']);
+    expect(writerCall?.[1].request.systemPrompt).toContain('穿书叙事片段');
+    expect(writerCall?.[1].request.systemPrompt).not.toContain('穿书战斗片段');
+    expect(classifierCall?.[1].request.materials.characterCards.map((card: { title: string }) => card.title)).toEqual(['沈霜']);
+    expect(classifierCall?.[1].request.systemPrompt).not.toContain('穿书叙事片段');
+    expect(classifierCall?.[1].request.systemPrompt).not.toContain('穿书战斗片段');
   });
 
   it('only prepends book-travel presets to scene-writer requests', async () => {

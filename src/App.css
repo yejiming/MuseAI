@@ -1183,6 +1183,30 @@ a:hover {
   padding: 2px 18px 24px;
 }
 
+.book-travel-session-controls .book-travel-hud-section:first-child {
+  padding-top: 8px;
+}
+
+.book-travel-hud-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.book-travel-hud-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #33312e;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.book-travel-hud-check input {
+  margin-top: 2px;
+}
+
 .book-travel-hud-section {
   padding: 17px 0;
   border-bottom: 1px solid #e8e2da;

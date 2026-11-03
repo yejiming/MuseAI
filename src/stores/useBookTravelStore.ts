@@ -143,6 +143,8 @@ export interface BookTravelSnapshot {
   selectedStylePresetIds: string[];
   initialStylePresetIds: string[];
   initialSystemPromptSnapshot: string | null;
+  enabledCharacterCardIds: string[] | null;
+  enabledStyleSegmentIds: string[] | null;
 }
 
 interface BookTravelState extends BookTravelSnapshot {
@@ -154,6 +156,8 @@ interface BookTravelState extends BookTravelSnapshot {
   setInput: (input: string) => void;
   setInputMode: (mode: 'speech' | 'behavior' | 'plot') => void;
   setSelectedStylePresetIds: (ids: string[]) => void;
+  setEnabledCharacterCardIds: (enabledCharacterCardIds: string[]) => void;
+  setEnabledStyleSegmentIds: (enabledStyleSegmentIds: string[] | null) => void;
   setInitialStylePresetSnapshot: (ids: string[], prompt: string) => void;
   selectOutline: (outline: BookTravelMaterial | null) => void;
   selectWorldBook: (worldBook: BookTravelMaterial | null) => void;
@@ -232,6 +236,8 @@ const initialState = {
   selectedStylePresetIds: [],
   initialStylePresetIds: [],
   initialSystemPromptSnapshot: null,
+  enabledCharacterCardIds: null as string[] | null,
+  enabledStyleSegmentIds: null as string[] | null,
   streamRuntime: initialStreamRuntime,
 };
 
@@ -245,6 +251,8 @@ const loadMaterialIntoSession = (material: BookTravelAssembledMaterial): Partial
   selectedOutline: material.materials.outline,
   selectedWorldBook: material.materials.worldBook,
   selectedCharacterCards: material.materials.characterCards,
+  enabledCharacterCardIds: material.materials.characterCards.map((card) => card.id),
+  enabledStyleSegmentIds: null,
   assembledWorldModel: material.assembledWorldModel,
   stableMemory: material.stableMemory,
   volatileMemory: material.volatileMemory,
@@ -266,6 +274,8 @@ export const useBookTravelStore = create<BookTravelState>()(
       setInput: (input) => set({ input }),
       setInputMode: (inputMode) => set({ inputMode }),
       setSelectedStylePresetIds: (selectedStylePresetIds) => set({ selectedStylePresetIds: selectedStylePresetIds.slice(-1) }),
+      setEnabledCharacterCardIds: (enabledCharacterCardIds) => set({ enabledCharacterCardIds }),
+      setEnabledStyleSegmentIds: (enabledStyleSegmentIds) => set({ enabledStyleSegmentIds }),
       setInitialStylePresetSnapshot: (initialStylePresetIds, initialSystemPromptSnapshot) => set({ initialStylePresetIds, initialSystemPromptSnapshot }),
       selectOutline: (selectedOutline) => set({ selectedOutline }),
       selectWorldBook: (selectedWorldBook) => set({ selectedWorldBook }),
@@ -413,6 +423,7 @@ export const useBookTravelStore = create<BookTravelState>()(
         set({
           ...initialState,
           ...progress.snapshot,
+          ...normalizeBookTravelSelection(progress.snapshot),
           selectedStylePresetIds: Array.isArray(progress.snapshot.selectedStylePresetIds) ? progress.snapshot.selectedStylePresetIds.slice(-1) : [],
           selectedMaterialId: progress.materialId ?? null,
           activeSavedProgressId: id,
@@ -422,6 +433,7 @@ export const useBookTravelStore = create<BookTravelState>()(
       restoreSession: (snapshot) => set({
         ...initialState,
         ...snapshot,
+        ...normalizeBookTravelSelection(snapshot),
         selectedStylePresetIds: Array.isArray(snapshot.selectedStylePresetIds) ? snapshot.selectedStylePresetIds.slice(-1) : [],
         activeSavedProgressId: null,
         streamRuntime: initialStreamRuntime,
@@ -502,5 +514,19 @@ const getBookTravelSnapshot = (): BookTravelSnapshot => {
     selectedStylePresetIds: state.selectedStylePresetIds,
     initialStylePresetIds: state.initialStylePresetIds,
     initialSystemPromptSnapshot: state.initialSystemPromptSnapshot,
+    enabledCharacterCardIds: state.enabledCharacterCardIds,
+    enabledStyleSegmentIds: state.enabledStyleSegmentIds,
+  };
+};
+
+const normalizeBookTravelSelection = (snapshot: Partial<BookTravelSnapshot>) => {
+  const cards = Array.isArray(snapshot.selectedCharacterCards) ? snapshot.selectedCharacterCards : [];
+  return {
+    enabledCharacterCardIds: Array.isArray(snapshot.enabledCharacterCardIds)
+      ? snapshot.enabledCharacterCardIds.filter((id): id is string => typeof id === 'string')
+      : cards.map((card) => card.id),
+    enabledStyleSegmentIds: Array.isArray(snapshot.enabledStyleSegmentIds)
+      ? snapshot.enabledStyleSegmentIds.filter((id): id is string => typeof id === 'string')
+      : null,
   };
 };
