@@ -4,7 +4,6 @@ import {
   HistoryOutlined,
   ReloadOutlined,
   CompassOutlined,
-  StopOutlined,
   PlayCircleOutlined,
   DeleteOutlined,
   UserOutlined,
@@ -1338,7 +1337,7 @@ const useStoryView = () => {
     }
   };
 
-  const handleSend = async () => {
+  const handleSend = async (bookTravelMode: 'continue' | 'scene-check' = 'continue') => {
     const trimmed = input.trim();
     if (!trimmed || isStreaming || isBookTravelBusy) return;
 
@@ -1352,6 +1351,21 @@ const useStoryView = () => {
         const { selectedOutline, selectedWorldBook, selectedCharacterCards } = useBookTravelStore.getState();
         if (!selectedOutline || !selectedWorldBook) {
           message.error('素材缺失，请重新装配素材');
+          return;
+        }
+        if (bookTravelMode === 'continue') {
+          useBookTravelStore.getState().appendTurn({
+            id: pendingTurnId,
+            userInput: formattedBookTravelInput,
+            classification: 'insert-beat',
+            status: 'writing',
+            narrativeOutput: '',
+            stateSnapshot: useBookTravelStore.getState().currentState,
+            createdBeatIds: [],
+          });
+          pendingTurnCreated = true;
+          scrollToBottomOnce();
+          await handleInsertBeatStream(formattedBookTravelInput, pendingTurnId);
           return;
         }
         useBookTravelStore.getState().appendTurn({
@@ -1407,7 +1421,7 @@ const useStoryView = () => {
         if (pendingTurnCreated) {
           useBookTravelStore.getState().updateTurn(pendingTurnId, {
             status: 'error',
-            failedStage: 'classifying',
+            failedStage: bookTravelMode === 'continue' ? 'writing' : 'classifying',
             narrativeOutput: `处理失败：${String(err)}`,
           });
         }
@@ -2155,7 +2169,7 @@ const useStoryView = () => {
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                   event.preventDefault();
-                  void handleSend();
+                  void handleSend('continue');
                 }
               }}
               placeholder={
@@ -2180,7 +2194,7 @@ const useStoryView = () => {
 
               <div />
 
-              <div className="agent-send-cluster" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div className="agent-send-cluster book-travel-submit-cluster">
                 <Tooltip color="#fff" placement="topRight" title={contextTooltip} overlayInnerStyle={{ width: 'max-content', maxWidth: 320, padding: '8px 12px', border: '1px solid #eae6df' }}>
                   <button
                     aria-label="查看上下文"
@@ -2192,22 +2206,37 @@ const useStoryView = () => {
                   </button>
                 </Tooltip>
 
-                <Tooltip title={isStreaming ? '停止' : isBookTravelBusy ? '正在处理行动' : bookTravelStore.isCompleted ? '当前故事已结局' : '提交行动'}>
-                  <Button
-                    className="de-ai-agent-run-button"
-                    disabled={bookTravelStore.isCompleted || isBookTravelBusy || (!isStreaming && !input.trim())}
-                    icon={isStreaming ? <StopOutlined /> : <PlayCircleOutlined />}
-                    onClick={isStreaming ? handleStop : handleSend}
-                    shape="circle"
-                    type={isStreaming ? "default" : "primary"}
-                    danger={isStreaming}
-                    style={isStreaming ? undefined : {
-                      backgroundColor: '#d97757',
-                      borderColor: '#d97757',
-                      color: '#ffffff'
-                    }}
-                  />
-                </Tooltip>
+                {isStreaming ? (
+                  <Button danger onClick={() => { void handleStop(); }}>
+                    停止
+                  </Button>
+                ) : (
+                  <>
+                    <Tooltip title="留在当前场景，直接交给场景写手。">
+                      <span>
+                        <Button
+                          className="book-travel-submit-button"
+                          disabled={bookTravelStore.isCompleted || isBookTravelBusy || !input.trim()}
+                          onClick={() => { void handleSend('continue'); }}
+                          type="primary"
+                        >
+                          提交行动
+                        </Button>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title="如果时间、地点发生变化，或做出重大决定、触发新事件，提交给 AI 判断是否发生场景变更。">
+                      <span>
+                        <Button
+                          className="book-travel-scene-change-button"
+                          disabled={bookTravelStore.isCompleted || isBookTravelBusy || !input.trim()}
+                          onClick={() => { void handleSend('scene-check'); }}
+                        >
+                          换场提交
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  </>
+                )}
               </div>
             </div>
           </div>
