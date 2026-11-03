@@ -153,9 +153,13 @@ interface BookTravelState extends BookTravelSnapshot {
   selectedMaterialId: string | null;
   savedProgresses: BookTravelSavedProgress[];
   activeSavedProgressId: string | null;
+  characterPanelOpen: boolean;
+  stylePresetPanelOpen: boolean;
   setInput: (input: string) => void;
   setInputMode: (mode: 'speech' | 'behavior' | 'plot') => void;
   setSelectedStylePresetIds: (ids: string[]) => void;
+  setCharacterPanelOpen: (characterPanelOpen: boolean) => void;
+  setStylePresetPanelOpen: (stylePresetPanelOpen: boolean) => void;
   setEnabledCharacterCardIds: (enabledCharacterCardIds: string[]) => void;
   setEnabledStyleSegmentIds: (enabledStyleSegmentIds: string[] | null) => void;
   setInitialStylePresetSnapshot: (ids: string[], prompt: string) => void;
@@ -241,6 +245,18 @@ const initialState = {
   streamRuntime: initialStreamRuntime,
 };
 
+const uniqueStylePresetIds = (ids: unknown) => {
+  if (!Array.isArray(ids)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  ids.forEach((id) => {
+    if (typeof id !== 'string' || !id || seen.has(id)) return;
+    seen.add(id);
+    result.push(id);
+  });
+  return result;
+};
+
 const materialId = () => `book-travel-material-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const savedProgressId = () => `book-travel-progress-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -270,10 +286,14 @@ export const useBookTravelStore = create<BookTravelState>()(
       selectedMaterialId: null,
       savedProgresses: [],
       activeSavedProgressId: null,
+      characterPanelOpen: true,
+      stylePresetPanelOpen: true,
 
       setInput: (input) => set({ input }),
       setInputMode: (inputMode) => set({ inputMode }),
-      setSelectedStylePresetIds: (selectedStylePresetIds) => set({ selectedStylePresetIds: selectedStylePresetIds.slice(-1) }),
+      setSelectedStylePresetIds: (selectedStylePresetIds) => set({ selectedStylePresetIds: uniqueStylePresetIds(selectedStylePresetIds) }),
+      setCharacterPanelOpen: (characterPanelOpen) => set({ characterPanelOpen }),
+      setStylePresetPanelOpen: (stylePresetPanelOpen) => set({ stylePresetPanelOpen }),
       setEnabledCharacterCardIds: (enabledCharacterCardIds) => set({ enabledCharacterCardIds }),
       setEnabledStyleSegmentIds: (enabledStyleSegmentIds) => set({ enabledStyleSegmentIds }),
       setInitialStylePresetSnapshot: (initialStylePresetIds, initialSystemPromptSnapshot) => set({ initialStylePresetIds, initialSystemPromptSnapshot }),
@@ -424,7 +444,7 @@ export const useBookTravelStore = create<BookTravelState>()(
           ...initialState,
           ...progress.snapshot,
           ...normalizeBookTravelSelection(progress.snapshot),
-          selectedStylePresetIds: Array.isArray(progress.snapshot.selectedStylePresetIds) ? progress.snapshot.selectedStylePresetIds.slice(-1) : [],
+          selectedStylePresetIds: uniqueStylePresetIds(progress.snapshot.selectedStylePresetIds),
           selectedMaterialId: progress.materialId ?? null,
           activeSavedProgressId: id,
           streamRuntime: initialStreamRuntime,
@@ -434,7 +454,7 @@ export const useBookTravelStore = create<BookTravelState>()(
         ...initialState,
         ...snapshot,
         ...normalizeBookTravelSelection(snapshot),
-        selectedStylePresetIds: Array.isArray(snapshot.selectedStylePresetIds) ? snapshot.selectedStylePresetIds.slice(-1) : [],
+        selectedStylePresetIds: uniqueStylePresetIds(snapshot.selectedStylePresetIds),
         activeSavedProgressId: null,
         streamRuntime: initialStreamRuntime,
       }),
@@ -483,6 +503,8 @@ export const useBookTravelStore = create<BookTravelState>()(
       partialize: (state) => ({
         assembledMaterials: state.assembledMaterials,
         savedProgresses: state.savedProgresses,
+        characterPanelOpen: state.characterPanelOpen,
+        stylePresetPanelOpen: state.stylePresetPanelOpen,
       }),
     },
   ),
@@ -511,7 +533,7 @@ const getBookTravelSnapshot = (): BookTravelSnapshot => {
     ending: state.ending,
     input: state.input,
     inputMode: state.inputMode,
-    selectedStylePresetIds: state.selectedStylePresetIds,
+    selectedStylePresetIds: uniqueStylePresetIds(state.selectedStylePresetIds),
     initialStylePresetIds: state.initialStylePresetIds,
     initialSystemPromptSnapshot: state.initialSystemPromptSnapshot,
     enabledCharacterCardIds: state.enabledCharacterCardIds,

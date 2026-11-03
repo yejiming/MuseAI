@@ -7,39 +7,53 @@ interface BookTravelSessionControlsProps {
   characterCards: BookTravelMaterial[];
   enabledCharacterCardIds: string[] | null;
   onEnabledCharacterCardIdsChange: (ids: string[]) => void;
+  characterPanelOpen: boolean;
+  onCharacterPanelOpenChange: (open: boolean) => void;
   presets: StylePreset[];
-  selectedPresetId: string | null;
+  selectedPresetIds: string[];
   enabledStyleSegmentIds: string[] | null;
-  onPresetChange: (presetId: string | null) => void;
+  onPresetsChange: (presetIds: string[], enabledStyleSegmentIds: string[] | null) => void;
   onEnabledStyleSegmentIdsChange: (ids: string[]) => void;
+  stylePresetPanelOpen: boolean;
+  onStylePresetPanelOpenChange: (open: boolean) => void;
 }
 
 export function BookTravelSessionControls({
   characterCards,
   enabledCharacterCardIds,
   onEnabledCharacterCardIdsChange,
+  characterPanelOpen,
+  onCharacterPanelOpenChange,
   presets,
-  selectedPresetId,
+  selectedPresetIds,
   enabledStyleSegmentIds,
-  onPresetChange,
+  onPresetsChange,
   onEnabledStyleSegmentIdsChange,
+  stylePresetPanelOpen,
+  onStylePresetPanelOpenChange,
 }: BookTravelSessionControlsProps) {
   return (
     <div className="book-travel-session-controls">
       <BookTravelCharacterSendPicker
         className="book-travel-hud-section"
+        panelId="book-travel-session-characters"
         characterCards={characterCards}
         enabledCharacterCardIds={enabledCharacterCardIds}
         onEnabledCharacterCardIdsChange={onEnabledCharacterCardIdsChange}
+        open={characterPanelOpen}
+        onOpenChange={onCharacterPanelOpenChange}
       />
       <BookTravelStylePresetControl
         className="book-travel-hud-section"
+        panelId="book-travel-session-style"
         selectAriaLabel="穿书状态文风预设"
         presets={presets}
-        selectedPresetId={selectedPresetId}
+        selectedPresetIds={selectedPresetIds}
         enabledStyleSegmentIds={enabledStyleSegmentIds}
-        onPresetChange={onPresetChange}
+        onPresetsChange={onPresetsChange}
         onEnabledStyleSegmentIdsChange={onEnabledStyleSegmentIdsChange}
+        open={stylePresetPanelOpen}
+        onOpenChange={onStylePresetPanelOpenChange}
       />
     </div>
   );

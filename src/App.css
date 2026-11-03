@@ -1158,7 +1158,10 @@ a:hover {
 .book-travel-status-hud__collapse:focus-visible,
 .book-travel-status-hud__compact-button:focus-visible,
 .book-travel-hud-text-button:focus-visible,
-.book-travel-hud-details > summary:focus-visible {
+.book-travel-hud-details > summary:focus-visible,
+.book-travel-panel-toggle:focus-visible,
+.book-travel-style-preset-add:focus-visible,
+.book-travel-style-preset-remove:focus-visible {
   outline: 2px solid #d97757;
   outline-offset: 2px;
 }
@@ -1222,6 +1225,75 @@ a:hover {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.03em;
+}
+
+.book-travel-panel-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+}
+
+.book-travel-panel-toggle:hover,
+.book-travel-style-preset-add:hover,
+.book-travel-style-preset-remove:hover {
+  color: #b85f43;
+}
+
+.book-travel-style-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.book-travel-style-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.book-travel-style-preset-row > .ant-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.book-travel-style-preset-add-row {
+  margin-top: 8px;
+}
+
+.book-travel-style-preset-add,
+.book-travel-style-preset-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e3dcd4;
+  border-radius: 8px;
+  background: #fcfaf7;
+  color: #756e67;
+  cursor: pointer;
+  font: inherit;
+}
+
+.book-travel-style-preset-remove {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+}
+
+.book-travel-style-preset-add {
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 .book-travel-hud-section__body {
@@ -1654,6 +1726,11 @@ a:hover {
   color: #33312e;
   font-size: 14px;
   font-weight: 600;
+}
+
+.book-travel-setup-picker .book-travel-style-preset-add,
+.book-travel-setup-picker .book-travel-style-preset-remove {
+  background: #ffffff;
 }
 
 .book-travel-setup-card,

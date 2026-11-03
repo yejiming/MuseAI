@@ -39,7 +39,7 @@ import { BookTravelCharacterSendPicker } from '../components/BookTravelCharacter
 import { BookTravelSessionControls } from '../components/BookTravelSessionControls';
 import { BookTravelStylePresetControl } from '../components/BookTravelStylePresetControl';
 import { useStylePresetStore } from '../stores/useStylePresetStore';
-import { enabledStyleSegmentIdsForPreset, prependStylePresets } from '../utils/stylePresets';
+import { prependStylePresets } from '../utils/stylePresets';
 import { filterBookTravelRequestContext } from '../utils/bookTravelMaterials';
 import { buildBookTravelCharacterDetails } from '../utils/bookTravelSaveDetails';
 import { buildBookTravelHudModel } from '../utils/bookTravelHud';
@@ -554,10 +554,9 @@ const useStoryView = () => {
     bookTravelStore.selectedStylePresetIds,
     bookTravelStore.enabledStyleSegmentIds,
   );
-  const applyBookTravelStylePreset = (presetId: string | null) => {
-    const preset = presetId ? stylePresets.find((item) => item.id === presetId) : undefined;
-    bookTravelStore.setSelectedStylePresetIds(preset ? [preset.id] : []);
-    bookTravelStore.setEnabledStyleSegmentIds(preset ? enabledStyleSegmentIdsForPreset(preset) : []);
+  const applyBookTravelStylePresets = (presetIds: string[], enabledSegmentIds: string[] | null) => {
+    bookTravelStore.setSelectedStylePresetIds(presetIds);
+    bookTravelStore.setEnabledStyleSegmentIds(enabledSegmentIds);
   };
 
   const chatHistoryRef = useRef<HTMLDivElement>(null);
@@ -2022,11 +2021,14 @@ const useStoryView = () => {
               {bookTravelStore.selectedMaterialId && (
                 <BookTravelCharacterSendPicker
                   className="book-travel-setup-picker"
+                  panelId="book-travel-setup-characters"
                   title="第一次对话发送的人物"
                   labelForCard={(card) => `第一次对话发送 ${card.title}`}
                   characterCards={bookTravelStore.selectedCharacterCards}
                   enabledCharacterCardIds={bookTravelStore.enabledCharacterCardIds}
                   onEnabledCharacterCardIdsChange={bookTravelStore.setEnabledCharacterCardIds}
+                  open={bookTravelStore.characterPanelOpen}
+                  onOpenChange={bookTravelStore.setCharacterPanelOpen}
                 />
               )}
 
@@ -2082,11 +2084,14 @@ const useStoryView = () => {
 
               <BookTravelStylePresetControl
                 className="book-travel-setup-picker"
+                panelId="book-travel-setup-style"
                 presets={stylePresets}
-                selectedPresetId={bookTravelStore.selectedStylePresetIds[0] || null}
+                selectedPresetIds={bookTravelStore.selectedStylePresetIds}
                 enabledStyleSegmentIds={bookTravelStore.enabledStyleSegmentIds}
-                onPresetChange={applyBookTravelStylePreset}
+                onPresetsChange={applyBookTravelStylePresets}
                 onEnabledStyleSegmentIdsChange={bookTravelStore.setEnabledStyleSegmentIds}
+                open={bookTravelStore.stylePresetPanelOpen}
+                onOpenChange={bookTravelStore.setStylePresetPanelOpen}
               />
 
               {/* Start Button */}
@@ -2247,11 +2252,15 @@ const useStoryView = () => {
               characterCards={bookTravelStore.selectedCharacterCards}
               enabledCharacterCardIds={bookTravelStore.enabledCharacterCardIds}
               onEnabledCharacterCardIdsChange={bookTravelStore.setEnabledCharacterCardIds}
+              characterPanelOpen={bookTravelStore.characterPanelOpen}
+              onCharacterPanelOpenChange={bookTravelStore.setCharacterPanelOpen}
               presets={stylePresets}
-              selectedPresetId={bookTravelStore.selectedStylePresetIds[0] || null}
+              selectedPresetIds={bookTravelStore.selectedStylePresetIds}
               enabledStyleSegmentIds={bookTravelStore.enabledStyleSegmentIds}
-              onPresetChange={applyBookTravelStylePreset}
+              onPresetsChange={applyBookTravelStylePresets}
               onEnabledStyleSegmentIdsChange={bookTravelStore.setEnabledStyleSegmentIds}
+              stylePresetPanelOpen={bookTravelStore.stylePresetPanelOpen}
+              onStylePresetPanelOpenChange={bookTravelStore.setStylePresetPanelOpen}
             />
           )}
         />

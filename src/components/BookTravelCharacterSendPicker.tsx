@@ -1,9 +1,13 @@
 import type { BookTravelMaterial } from '../stores/useBookTravelStore';
+import { BookTravelCollapsibleSection } from './BookTravelCollapsibleSection';
 
 interface BookTravelCharacterSendPickerProps {
   characterCards: BookTravelMaterial[];
   enabledCharacterCardIds: string[] | null;
   onEnabledCharacterCardIdsChange: (ids: string[]) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  panelId: string;
   title?: string;
   className?: string;
   labelForCard?: (card: BookTravelMaterial) => string;
@@ -17,6 +21,9 @@ export function BookTravelCharacterSendPicker({
   characterCards,
   enabledCharacterCardIds,
   onEnabledCharacterCardIdsChange,
+  open,
+  onOpenChange,
+  panelId,
   title = '本轮发送的人物',
   className,
   labelForCard = (card) => `本轮发送 ${card.title}`,
@@ -31,8 +38,13 @@ export function BookTravelCharacterSendPicker({
   };
 
   return (
-    <section className={className}>
-      <h3>{title}</h3>
+    <BookTravelCollapsibleSection
+      title={title}
+      className={className}
+      open={open}
+      onOpenChange={onOpenChange}
+      panelId={panelId}
+    >
       {characterCards.length === 0 ? (
         <div className="book-travel-hud-empty">这份素材没有人物卡</div>
       ) : (
@@ -50,6 +62,6 @@ export function BookTravelCharacterSendPicker({
           ))}
         </div>
       )}
-    </section>
+    </BookTravelCollapsibleSection>
   );
 }

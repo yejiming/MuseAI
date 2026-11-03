@@ -9,6 +9,8 @@ describe('useBookTravelStore', () => {
       selectedMaterialId: null,
       savedProgresses: [],
       activeSavedProgressId: null,
+      characterPanelOpen: true,
+      stylePresetPanelOpen: true,
     });
   });
 
@@ -214,5 +216,32 @@ describe('useBookTravelStore', () => {
     expect(useBookTravelStore.getState().activeSavedProgressId).toBe(nextId);
     useBookTravelStore.getState().resetSession();
     expect(useBookTravelStore.getState().activeSavedProgressId).toBeNull();
+  });
+
+  it('keeps multiple style presets and panel visibility outside the saved progress', () => {
+    useBookTravelStore.setState({
+      selectedMaterialId: 'material-1',
+      selectedEntryPointId: 'entry-1',
+      userCharacter: { name: '林晚', identity: '替嫁者', goal: '改写死局' },
+      selectedStylePresetIds: ['preset-b', 'preset-a', 'preset-b'],
+    });
+    useBookTravelStore.getState().setCharacterPanelOpen(false);
+    useBookTravelStore.getState().setStylePresetPanelOpen(false);
+
+    const progressId = useBookTravelStore.getState().saveProgress({ mode: 'create', title: '多预设进度' });
+    const snapshot = useBookTravelStore.getState().savedProgresses[0].snapshot;
+    expect(snapshot.selectedStylePresetIds).toEqual(['preset-b', 'preset-a']);
+    expect(snapshot).not.toHaveProperty('characterPanelOpen');
+    expect(snapshot).not.toHaveProperty('stylePresetPanelOpen');
+
+    useBookTravelStore.getState().resetSession();
+    expect(useBookTravelStore.getState().characterPanelOpen).toBe(false);
+    expect(useBookTravelStore.getState().stylePresetPanelOpen).toBe(false);
+    expect(useBookTravelStore.getState().selectedStylePresetIds).toEqual([]);
+
+    useBookTravelStore.getState().loadSavedProgress(progressId);
+    expect(useBookTravelStore.getState().selectedStylePresetIds).toEqual(['preset-b', 'preset-a']);
+    expect(useBookTravelStore.getState().characterPanelOpen).toBe(false);
+    expect(useBookTravelStore.getState().stylePresetPanelOpen).toBe(false);
   });
 });
