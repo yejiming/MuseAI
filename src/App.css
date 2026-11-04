@@ -1745,6 +1745,42 @@ a:hover {
   gap: 6px;
 }
 
+.book-travel-submit-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.book-travel-submit-button.ant-btn,
+.book-travel-scene-change-button.ant-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.book-travel-submit-button.ant-btn {
+  background: #d97757;
+  border-color: #d97757;
+}
+
+.book-travel-submit-button.ant-btn:not(:disabled):hover {
+  background: #c4664a;
+  border-color: #c4664a;
+}
+
+.book-travel-scene-change-button.ant-btn {
+  color: #d97757;
+  border-color: #e7c3b6;
+  background: #fff;
+}
+
+.book-travel-scene-change-button.ant-btn:not(:disabled):hover {
+  color: #c4664a;
+  border-color: #d97757;
+  background: #fff7f3;
+}
+
 .book-travel-composer-actions,
 .adventure-composer-actions {
   position: absolute;

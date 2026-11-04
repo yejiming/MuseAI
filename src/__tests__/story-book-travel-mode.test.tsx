@@ -637,9 +637,7 @@ describe('Story book-travel mode', () => {
   });
 
   it('shows a submitted book-travel action immediately and locks sending while it is processed', async () => {
-    const classification = createDeferred<{ classification: 'insert-beat' }>();
     invokeMock.mockImplementation((command: string, args?: any) => {
-      if (command === 'classify_book_travel_input') return classification.promise;
       if (command === 'start_write_book_travel_insert_beat_stream') {
         return Promise.resolve({ runId: 'pending-insert-run' });
       }
@@ -651,18 +649,19 @@ describe('Story book-travel mode', () => {
 
     const inputBox = screen.getByPlaceholderText(/说些什么/);
     fireEvent.change(inputBox, { target: { value: '查看窗外动静' } });
-    const sendButton = document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement;
+    const sendButton = screen.getByRole('button', { name: '提交行动' });
     fireEvent.click(sendButton);
 
     expect(await screen.findByText(/查看窗外动静/)).toBeInTheDocument();
 
     fireEvent.change(inputBox, { target: { value: '继续追问' } });
     expect(sendButton).toBeDisabled();
+    expect(screen.getByRole('button', { name: '换场提交' })).toBeDisabled();
 
-    classification.resolve({ classification: 'insert-beat' });
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_insert_beat_stream', expect.anything());
     });
+    expect(invokeMock.mock.calls.filter(([command]) => command === 'classify_book_travel_input')).toHaveLength(0);
 
     fireEvent.change(inputBox, { target: { value: '继续追问' } });
     expect(sendButton).toBeDisabled();
@@ -682,9 +681,7 @@ describe('Story book-travel mode', () => {
   });
 
   it('recovers when the scene writer returns JSON with raw newlines inside a string value', async () => {
-    const classification = createDeferred<{ classification: 'insert-beat' }>();
     invokeMock.mockImplementation((command: string, args?: any) => {
-      if (command === 'classify_book_travel_input') return classification.promise;
       if (command === 'start_write_book_travel_insert_beat_stream') {
         return Promise.resolve({ runId: 'raw-newline-insert-run' });
       }
@@ -696,11 +693,10 @@ describe('Story book-travel mode', () => {
 
     const inputBox = screen.getByPlaceholderText(/说些什么/);
     fireEvent.change(inputBox, { target: { value: '查看窗外动静' } });
-    const sendButton = document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement;
+    const sendButton = screen.getByRole('button', { name: '提交行动' });
     fireEvent.click(sendButton);
 
     expect(await screen.findByText(/查看窗外动静/)).toBeInTheDocument();
-    classification.resolve({ classification: 'insert-beat' });
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_insert_beat_stream', expect.anything());
     });
@@ -737,8 +733,8 @@ describe('Story book-travel mode', () => {
 
     const inputBox = screen.getByPlaceholderText(/说些什么/);
     fireEvent.change(inputBox, { target: { value: '去正厅见沈家人' } });
-    const sendButton = document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement;
-    fireEvent.click(sendButton);
+    const sendButton = screen.getByRole('button', { name: '提交行动' });
+    fireEvent.click(screen.getByRole('button', { name: '换场提交' }));
 
     expect(await screen.findByText(/去正厅见沈家人/)).toBeInTheDocument();
     expect(screen.getByText('正在识别行动...')).toBeInTheDocument();
@@ -814,8 +810,8 @@ describe('Story book-travel mode', () => {
     renderWithRouter(<Story />);
 
     fireEvent.change(screen.getByPlaceholderText(/说些什么/), { target: { value: '转去偏院搜证' } });
-    const sendButton = document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement;
-    fireEvent.click(sendButton);
+    const sendButton = screen.getByRole('button', { name: '提交行动' });
+    fireEvent.click(screen.getByRole('button', { name: '换场提交' }));
 
     expect(await screen.findByText(/转去偏院搜证/)).toBeInTheDocument();
     await waitFor(() => {
@@ -1083,8 +1079,13 @@ describe('Story book-travel mode', () => {
     renderWithRouter(<Story />);
 
     fireEvent.change(screen.getByPlaceholderText(/说些什么/), { target: { value: '查看状态' } });
-    const sendButton = document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement;
-    fireEvent.click(sendButton);
+    fireEvent.click(screen.getByRole('button', { name: '提交行动' }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_insert_beat_stream', expect.anything()));
+    expect(invokeMock.mock.calls.filter(([command]) => command === 'classify_book_travel_input')).toHaveLength(0);
+    expect(await screen.findByText(/她回应了/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/说些什么/), { target: { value: '离开喜房' } });
+    fireEvent.click(screen.getByRole('button', { name: '换场提交' }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('classify_book_travel_input', expect.anything());
@@ -1107,13 +1108,12 @@ describe('Story book-travel mode', () => {
     renderWithRouter(<Story />);
 
     fireEvent.change(screen.getByPlaceholderText(/说些什么/), { target: { value: '查看状态' } });
-    fireEvent.click(document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement);
+    fireEvent.click(screen.getByRole('button', { name: '提交行动' }));
 
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_insert_beat_stream', expect.anything()));
     const writerCall = invokeMock.mock.calls.find(([command]) => command === 'start_write_book_travel_insert_beat_stream');
-    const classifierCall = invokeMock.mock.calls.find(([command]) => command === 'classify_book_travel_input');
+    expect(invokeMock.mock.calls.filter(([command]) => command === 'classify_book_travel_input')).toHaveLength(0);
     expect(writerCall?.[1].request.systemPrompt).toMatch(/穿书预设正文[\s\S]*穿书场景写手/);
-    expect(classifierCall?.[1].request.systemPrompt).not.toContain('穿书预设正文');
   });
 
   it('passes the selected book-travel input mode prefix into the runtime calls and turn record', async () => {
@@ -1123,23 +1123,17 @@ describe('Story book-travel mode', () => {
 
     fireEvent.click(screen.getByText('角色行为'));
     fireEvent.change(screen.getByPlaceholderText(/做点什么/), { target: { value: '抬手试探门锁' } });
-    const sendButton = document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement;
-    fireEvent.click(sendButton);
+    fireEvent.click(screen.getByRole('button', { name: '提交行动' }));
 
     expect(await screen.findByText('【行为】抬手试探门锁')).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith(
-        'classify_book_travel_input',
-        expect.objectContaining({ userInput: '【行为】抬手试探门锁' }),
-      );
-    });
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith(
         'start_write_book_travel_insert_beat_stream',
         expect.objectContaining({ userInput: '【行为】抬手试探门锁' }),
       );
     });
+    expect(invokeMock.mock.calls.filter(([command]) => command === 'classify_book_travel_input')).toHaveLength(0);
   });
 
   it('keeps scene-writer streaming visible after leaving and returning to the story page', async () => {
@@ -1155,8 +1149,7 @@ describe('Story book-travel mode', () => {
     const firstRender = renderWithRouter(<Story />);
 
     fireEvent.change(screen.getByPlaceholderText(/说些什么/), { target: { value: '查看门外' } });
-    const sendButton = document.querySelector('.de-ai-agent-run-button') as HTMLButtonElement;
-    fireEvent.click(sendButton);
+    fireEvent.click(screen.getByRole('button', { name: '提交行动' }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('start_write_book_travel_insert_beat_stream', expect.anything());
